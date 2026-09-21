@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>نظام تدقيق السجلات والوكالات</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@700&family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- ================= LOGIN ================= -->
+
+    <section id="loginPage" class="login-page">
+
+        <div class="login-box">
+
+            <div class="logo-circle">
+                ⚖
+            </div>
+
+            <h1>تدقيق السجلات والوكالات</h1>
+
+            <p class="login-subtitle">
+                نظام إدارة وتدقيق السجلات
+            </p>
+
+            <div class="input-group">
+
+                <label for="loginUsername">
+                    اسم المستخدم
+                </label>
+
+                <input
+                    type="text"
+                    id="loginUsername"
+                    placeholder="أدخل اسم المستخدم"
+                    autocomplete="username"
+                >
+
+            </div>
+
+            <div class="input-group">
+
+                <label for="loginPassword">
+                    كلمة المرور
+                </label>
+
+                <input
+                    type="password"
+                    id="loginPassword"
+                    placeholder="أدخل كلمة المرور"
+                    autocomplete="current-password"
+                >
+
+            </div>
+
+            <button
+                type="button"
+                id="loginBtn"
+                class="primary-btn full-width"
+            >
+                تسجيل الدخول
+            </button>
+
+            <p
+                id="loginError"
+                class="error-message"
+            ></p>
+
+
+        </div>
+
+    </section>
+
+    <!-- ================= APPLICATION ================= -->
+
+    <section id="appPage" class="app-page hidden">
+
+        <!-- HEADER -->
+
+        <header class="top-header">
+
+            <div class="brand">
+
+                <svg class="seal" viewBox="0 0 120 120" aria-hidden="true">
+                    <defs><path id="sealArcHeader" d="M60,60 m-45,0 a45,45 0 1,1 90,0 a45,45 0 1,1 -90,0"/></defs>
+                    <circle cx="60" cy="60" r="57" fill="none" stroke="currentColor" stroke-width="2.2"/>
+                    <circle cx="60" cy="60" r="53" fill="none" stroke="currentColor" stroke-width="0.8"/>
+                    <circle cx="60" cy="60" r="35" fill="none" stroke="currentColor" stroke-width="0.8"/>
+                    <text font-size="10" font-weight="700" fill="currentColor"><textPath href="#sealArcHeader">نقابة المحامين ✦ فرع إدلب ✦ تدقيق السجلات ✦</textPath></text>
+                    <g transform="translate(60 62) scale(0.52) translate(-50 -50)" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M50 22 V76"/><path d="M26 32 H74"/><path d="M36 78 H64"/>
+                        <path d="M26 32 L17 54 M26 32 L35 54"/><path d="M14 54 Q26 66 38 54 Z"/>
+                        <path d="M74 32 L65 54 M74 32 L83 54"/><path d="M62 54 Q74 66 86 54 Z"/>
+                    </g>
+                </svg>
+
+                <div>
+                    <p class="brand-org">نقابة المحامين — فرع إدلب</p>
+                    <h1>تدقيق السجلات والوكالات</h1>
+                </div>
+
+            </div>
+
+            <div class="user-area">
+
+                <span id="currentUser">
+                    -
+                </span>
+
+                <button
+                    type="button"
+                    id="logoutBtn"
+                    class="logout-btn"
+                >
+                    تسجيل الخروج
+                </button>
+
+            </div>
+
+        </header>
+
+        <!-- NAVIGATION -->
+
+        <nav class="navigation">
+
+            <button
+                type="button"
+                class="tab-btn active"
+                data-section="dashboardSection"
+            >
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z"/></svg>
+                الرئيسية
+            </button>
+
+            <button
+                type="button"
+                class="tab-btn auditor-manager"
+                data-section="recordsSection"
+            >
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/><path d="M9 8h6"/></svg>
+                السجلات
+            </button>
+
+            <button
+                type="button"
+                class="tab-btn auditor-manager"
+                data-section="newRecordSection"
+            >
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/><path d="M12 11v6M9 14h6"/></svg>
+                إنشاء سجل
+            </button>
+
+            <button
+                type="button"
+                class="tab-btn"
+                data-section="reportsSection"
+            >
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+                التقارير
+            </button>
+
+            <button
+                type="button"
+                class="tab-btn manager-only"
+                data-section="pricesSection"
+            >
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
+                الأسعار
+            </button>
+
+            <button
+                type="button"
+                class="tab-btn manager-only"
+                data-section="usersSection"
+            >
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg>
+                المستخدمون
+            </button>
+
+        </nav>
+
+        <!-- MAIN -->
+
+        <main class="main-content">
+
+            <!-- ================= DASHBOARD ================= -->
+
+            <section
+                id="dashboardSection"
+                class="section active-section"
+            >
+
+                <div class="dash-hero">
+
+                    <div class="dash-hero-text">
+                        <p class="dash-date" id="dashDate"></p>
+                        <h2>لوحة التحكم</h2>
+                        <p>المبالغ المستحقة على المندوبين وحالة الوكالات في كل السجلات.</p>
+                    </div>
+
+                    <div class="dash-due">
+                        <span>المطلوب من المندوبين</span>
+                        <strong id="totalRepresentativeAmount">0 ل.س</strong>
+                        <small id="dashDueNote"></small>
+                    </div>
+
+                </div>
+
+                <div class="stats-grid dash-kpis">
+
+                    <div class="stat-card">
+                        <span>السجلات</span>
+                        <strong id="totalRecords">0</strong>
+                    </div>
+
+                    <div class="stat-card">
+                        <span>كل الوكالات</span>
+                        <strong id="totalAgencies">0</strong>
+                    </div>
+
+                    <div class="stat-card stat-active">
+                        <span>فعالة</span>
+                        <strong id="activeAgencies">0</strong>
+                    </div>
+
+                    <div class="stat-card stat-cancelled">
+                        <span>ملغاة</span>
+                        <strong id="cancelledAgencies">0</strong>
+                    </div>
+
+                    <div class="stat-card stat-missing">
+                        <span>مفقودة</span>
+                        <strong id="missingAgencies">0</strong>
+                    </div>
+
+                </div>
+
+                <div class="dash-panels">
+
+                    <div class="content-card">
+                        <h3>حالة الوكالات</h3>
+                        <div id="dashStatus"></div>
+                    </div>
+
+                    <div class="content-card">
+                        <h3>الوكالات حسب النوع</h3>
+                        <div id="dashTypes"></div>
+                    </div>
+
+                </div>
+
+                <div class="dash-panels dash-panels-wide">
+
+                    <div class="content-card">
+                        <div class="section-header">
+                            <h3>آخر السجلات</h3>
+                            <button type="button" class="secondary-btn small-btn" onclick="switchSection('recordsSection')">كل السجلات</button>
+                        </div>
+                        <div id="latestRecords">لا توجد سجلات.</div>
+                    </div>
+
+                    <div class="content-card">
+                        <h3>أعلى المندوبين استحقاقاً</h3>
+                        <div id="dashReps"></div>
+                    </div>
+
+                </div>
+
+            </section>
+
+            <!-- ================= RECORDS ================= -->
+
+            <section
+                id="recordsSection"
+                class="section"
+            >
+
+                <div class="page-title">
+                    <span class="page-icon"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/><path d="M9 8h6"/></svg></span>
+                    <div class="page-title-text">
+
+                    <h2>
+                        السجلات
+                    </h2>
+
+                    <p>
+                        جميع السجلات المسجلة في النظام
+                    </p>
+                    </div>
+
+                </div>
+
+                <div class="toolbar">
+
+                    <input
+                        type="text"
+                        id="recordSearch"
+                        placeholder="ابحث برقم السجل أو المكتب أو المندوب..."
+                    >
+
+                    <button
+                        type="button"
+                        class="primary-btn"
+                        onclick="switchSection('newRecordSection')"
+                    >
+                        + إنشاء سجل جديد
+                    </button>
+
+                </div>
+
+                <div class="content-card">
+
+                    <div class="table-wrapper">
+
+                        <table>
+
+                            <thead>
+
+                                <tr>
+
+                                    <th>
+                                        رقم السجل
+                                    </th>
+
+                                    <th>
+                                        المكتب
+                                    </th>
+
+                                    <th>
+                                        المندوب
+                                    </th>
+
+                                    <th class="num">
+                                        عدد الوكالات
+                                    </th>
+
+                                    <th class="num">
+                                        السعر الأساسي
+                                    </th>
+
+                                    <th class="num">
+                                        المطلوب من المندوب
+                                    </th>
+
+                                    <th>
+                                        التاريخ
+                                    </th>
+
+                                    <th>
+                                        الإجراءات
+                                    </th>
+
+                                </tr>
+
+                            </thead>
+
+                            <tbody id="recordsTableBody">
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+            <!-- ================= NEW / EDIT RECORD ================= -->
+
+            <section
+                id="newRecordSection"
+                class="section"
+            >
+
+                <div class="page-title">
+                    <span class="page-icon"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/><path d="M12 11v6M9 14h6"/></svg></span>
+                    <div class="page-title-text">
+
+                    <h2 id="recordFormTitle">
+                        إنشاء سجل جديد
+                    </h2>
+
+                    <p>
+                        أدخل بيانات السجل ثم أضف الوكالات
+                    </p>
+                    </div>
+
+                </div>
+
+                <form id="recordForm">
+
+                    <input
+                        type="hidden"
+                        id="editingRecordId"
+                        value=""
+                    >
+
+                    <!-- RECORD DATA -->
+
+                    <div class="content-card">
+
+                        <h3>
+                            بيانات السجل
+                        </h3>
+
+                        <div class="form-grid">
+
+                            <div class="input-group">
+
+                                <label for="recordNumber">
+                                    رقم السجل
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="recordNumber"
+                                    required
+                                >
+
+                            </div>
+
+                            <div class="input-group">
+
+                                <label for="officeName">
+                                    اسم المكتب
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="officeName"
+                                    required
+                                >
+
+                            </div>
+
+                            <div class="input-group">
+
+                                <label for="representativeName">
+                                    اسم المندوب
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="representativeName"
+                                    required
+                                >
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <!-- AGENCY FORM -->
+
+                    <div class="content-card">
+
+                        <h3>
+                            إضافة وكالة
+                        </h3>
+
+                        <div class="agency-layout">
+
+                        <div class="agency-col">
+
+                        <div class="form-grid">
+
+                            <div class="input-group">
+
+                                <label for="agencyNumber">
+                                    رقم الوكالة
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="agencyNumber"
+                                >
+
+                                <label class="checkbox-row" for="agencyDuplicate">
+                                    <input
+                                        type="checkbox"
+                                        id="agencyDuplicate"
+                                    >
+                                    وكالة مكررة (نفس الرقم بقصد)
+                                </label>
+
+                            </div>
+
+                            <div class="input-group">
+
+                                <label for="agencyType">
+                                    نوع الوكالة
+                                </label>
+
+                                <select id="agencyType">
+
+                                    <option value="general">
+                                        وكالة عامة
+                                    </option>
+
+                                    <option value="special">
+                                        وكالة خاصة
+                                    </option>
+
+                                    <option value="legal">
+                                        وكالة شرعية
+                                    </option>
+
+                                    <option value="executive">
+                                        وكالة تنفيذية
+                                    </option>
+
+                                    <option value="certified_general_special">
+                                        صورة مصدقة عامة/خاصة
+                                    </option>
+
+                                    <option value="certified_legal">
+                                        صورة مصدقة شرعية
+                                    </option>
+
+                                </select>
+
+                            </div>
+
+                            <div class="input-group">
+
+                                <label for="agencyStatus">
+                                    حالة الوكالة
+                                </label>
+
+                                <select id="agencyStatus">
+
+                                    <option value="active">
+                                        فعالة
+                                    </option>
+
+                                    <option value="cancelled">
+                                        ملغاة
+                                    </option>
+
+                                    <option value="missing">
+                                        مفقودة
+                                    </option>
+
+                                </select>
+
+                            </div>
+
+                        </div>
+
+                        <!-- ================= ADDITIONS ================= -->
+
+                        <h4 class="sub-title">
+                            الإضافات
+                        </h4>
+
+                        <div class="form-grid six-columns">
+
+                            <!-- SAVE -->
+                            <div class="input-group">
+                                <label>حفظ</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="saveCount">−</button>
+                                    <input type="number" id="saveCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="saveCount">+</button>
+                                </div>
+                            </div>
+
+                            <!-- ORIGINALITY -->
+                            <div class="input-group originality-addition">
+                                <label>أصالة وبأي صفة كانت</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="originalityCount">−</button>
+                                    <input type="number" id="originalityCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="originalityCount">+</button>
+                                </div>
+                            </div>
+
+                            <!-- SIGNATURE -->
+                            <div class="input-group">
+                                <label>توقيع إضافي</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="signatureCount">−</button>
+                                    <input type="number" id="signatureCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="signatureCount">+</button>
+                                </div>
+                            </div>
+
+                            <!-- INHERITANCE -->
+                            <div class="input-group">
+                                <label>إضافة إلى التركة</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="inheritanceCount">−</button>
+                                    <input type="number" id="inheritanceCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="inheritanceCount">+</button>
+                                </div>
+                            </div>
+
+                            <!-- CHILDREN -->
+                            <div class="input-group">
+                                <label>ولاية عن الأولاد</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="childrenCount">−</button>
+                                    <input type="number" id="childrenCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="childrenCount">+</button>
+                                </div>
+                            </div>
+
+                            <!-- AGENTS -->
+                            <div class="input-group">
+                                <label>وكيل عن</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="agentsCount">−</button>
+                                    <input type="number" id="agentsCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="agentsCount">+</button>
+                                </div>
+                            </div>
+
+                            <!-- TRANSPORT -->
+                            <div class="input-group">
+                                <label>بدل انتقال</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="transportCount">−</button>
+                                    <input type="number" id="transportCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="transportCount">+</button>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        </div>
+
+                        <div class="agency-col">
+
+                        <!-- ================= MISSING STAMPS ================= -->
+
+                        <h4 class="sub-title">
+                            الطوابع الناقصة
+                        </h4>
+
+                        <div class="form-grid three-columns">
+
+                            <!-- PLEADING -->
+
+                            <div class="input-group">
+
+                                <label>
+                                    نقص مرافعة
+                                </label>
+
+                                <div class="price-number-row">
+
+                                    <div class="number-control">
+
+                                        <button
+                                            type="button"
+                                            class="number-btn minus-btn"
+                                            data-target="missingPleading"
+                                        >
+                                            −
+                                        </button>
+
+                                        <input
+                                            type="number"
+                                            id="missingPleading"
+                                            min="0"
+                                            value="0"
+                                        >
+
+                                        <button
+                                            type="button"
+                                            class="number-btn plus-btn"
+                                            data-target="missingPleading"
+                                        >
+                                            +
+                                        </button>
+
+                                    </div>
+
+                                    <div class="price-control">
+
+                                        <label for="pleadingPrice">
+                                            سعر الطابع
+                                        </label>
+
+                                        <input
+                                            type="number"
+                                            id="pleadingPrice"
+                                            min="0"
+                                            value="100"
+                                        >
+
+                                        <span>
+                                            ل.س
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+                            </div>
+
+                            <!-- AMBULANCE -->
+
+                            <div class="input-group">
+
+                                <label>
+                                    نقص إسعاف
+                                </label>
+
+                                <div class="number-control">
+
+                                    <button
+                                        type="button"
+                                        class="number-btn minus-btn"
+                                        data-target="missingAmbulance"
+                                    >
+                                        −
+                                    </button>
+
+                                    <input
+                                        type="number"
+                                        id="missingAmbulance"
+                                        min="0"
+                                        value="0"
+                                    >
+
+                                    <button
+                                        type="button"
+                                        class="number-btn plus-btn"
+                                        data-target="missingAmbulance"
+                                    >
+                                        +
+                                    </button>
+
+                                </div>
+
+                                <small>
+                                    السعر حسب قسم الأسعار
+                                </small>
+
+                            </div>
+
+                            <!-- AID -->
+
+                            <div class="input-group">
+
+                                <label>
+                                    نقص معونة
+                                </label>
+
+                                <div class="number-control">
+
+                                    <button
+                                        type="button"
+                                        class="number-btn minus-btn"
+                                        data-target="missingAid"
+                                    >
+                                        −
+                                    </button>
+
+                                    <input
+                                        type="number"
+                                        id="missingAid"
+                                        min="0"
+                                        value="0"
+                                    >
+
+                                    <button
+                                        type="button"
+                                        class="number-btn plus-btn"
+                                        data-target="missingAid"
+                                    >
+                                        +
+                                    </button>
+
+                                </div>
+
+                                <small>
+                                    السعر حسب قسم الأسعار
+                                </small>
+
+                            </div>
+
+                        </div>
+
+                        <!-- NOTES -->
+
+                        <div class="input-group">
+
+                            <label for="agencyNotes">
+                                ملاحظات الوكالة
+                            </label>
+
+                            <div class="quick-notes-row">
+
+                                <label class="checkbox-row" for="noteNoReceipt">
+                                    <input
+                                        type="checkbox"
+                                        id="noteNoReceipt"
+                                    >
+                                    لا يوجد رقم إيصال حد أدنى أتعاب
+                                </label>
+
+                                <label class="checkbox-row" for="noteNoBond">
+                                    <input
+                                        type="checkbox"
+                                        id="noteNoBond"
+                                    >
+                                    لا يوجد رقم سند أمني موحد (رقم ليزرية)
+                                </label>
+
+                            </div>
+
+                            <textarea
+                                id="agencyNotes"
+                                rows="3"
+                                placeholder="مثال: لا يوجد رقم إيصال..."
+                            ></textarea>
+
+                        </div>
+
+                        <!-- PREVIEW -->
+
+                        <div class="preview-box">
+
+                            <div>
+                                السعر الأساسي
+                                <strong id="previewBasePrice">
+                                    0 ل.س
+                                </strong>
+                            </div>
+
+                            <div>
+                                الإضافات
+                                <strong id="previewAdditions">
+                                    0 ل.س
+                                </strong>
+                            </div>
+
+                            <div>
+                                الطوابع الناقصة
+                                <strong id="previewStamps">
+                                    0 ل.س
+                                </strong>
+                            </div>
+
+                            <div>
+                                طوابع المرافعة المطلوبة
+                                <strong id="previewPleadingRequired">
+                                    2
+                                </strong>
+                            </div>
+
+                            <div>
+                                حصة المندوب من بدل الانتقال
+                                <strong id="previewTransportRepresentative">
+                                    0 ل.س
+                                </strong>
+                            </div>
+
+                            <div class="preview-total">
+                                المطلوب من المندوب
+                                <strong id="previewRepresentativeAmount">
+                                    0 ل.س
+                                </strong>
+                            </div>
+
+                        </div>
+
+                        <!-- AGENCY BUTTONS -->
+
+                        <div class="button-row">
+
+                            <button
+                                type="button"
+                                id="addAgencyBtn"
+                                class="primary-btn"
+                            >
+                                إضافة الوكالة
+                            </button>
+
+                            <button
+                                type="button"
+                                id="clearAgencyBtn"
+                                class="secondary-btn"
+                            >
+                                مسح بيانات الوكالة
+                            </button>
+
+                        </div>
+
+                        </div>
+
+                        </div>
+
+                    </div>
+
+                    <!-- ================= PENDING AGENCIES ================= -->
+
+                    <div class="content-card">
+
+                        <div class="section-header">
+
+                            <h3>
+                                الوكالات المضافة
+                            </h3>
+
+                            <span
+                                id="agencyCounter"
+                                class="counter"
+                            >
+                                عدد الوكالات: 0
+                            </span>
+
+                        </div>
+
+                        <div id="pendingAgencies">
+                            لا توجد وكالات.
+                        </div>
+
+                    </div>
+
+                    <!-- ================= SAVE ================= -->
+
+                    <div class="button-row">
+
+                        <button
+                            type="submit"
+                            class="success-btn"
+                        >
+                            حفظ السجل
+                        </button>
+
+                        <span id="autosaveStatus" class="autosave-status"></span>
+
+                        <button
+                            type="button"
+                            id="cancelEditBtn"
+                            class="secondary-btn"
+                        >
+                            إلغاء
+                        </button>
+
+                    </div>
+
+                </form>
+
+            </section>
+
+            <!-- ================= REPORTS ================= -->
+
+            <section
+                id="reportsSection"
+                class="section"
+            >
+
+                <div class="page-title">
+                    <span class="page-icon"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
+                    <div class="page-title-text">
+
+                    <h2>
+                        التقارير
+                    </h2>
+
+                    <p>
+                        التقارير والإجماليات المالية
+                    </p>
+                    </div>
+
+                </div>
+
+                <div id="reportsContent"></div>
+
+            </section>
+
+            <!-- ================= PRICES ================= -->
+
+            <section
+                id="pricesSection"
+                class="section manager-section"
+            >
+
+                <div class="page-title">
+                    <span class="page-icon"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg></span>
+                    <div class="page-title-text">
+
+                    <h2>
+                        إدارة الأسعار
+                    </h2>
+
+                    <p>
+                        تعديل أسعار الوكالات والإضافات
+                    </p>
+                    </div>
+
+                </div>
+
+                <div class="content-card">
+
+                    <h3>
+                        أسعار الوكالات
+                    </h3>
+
+                    <div id="pricesContainer"></div>
+
+                </div>
+
+                <div class="content-card">
+
+                    <h3>
+                        أسعار الإضافات
+                    </h3>
+
+                    <div id="additionPricesContainer"></div>
+
+                </div>
+
+                <div class="content-card">
+
+                    <h3>
+                        أسعار بدل الانتقال والطوابع
+                    </h3>
+
+                    <div id="specialPricesContainer"></div>
+
+                </div>
+
+                <button
+                    type="button"
+                    id="savePricesBtn"
+                    class="success-btn"
+                >
+                    حفظ جميع الأسعار
+                </button>
+
+            </section>
+
+            <!-- ================= USERS ================= -->
+
+            <section
+                id="usersSection"
+                class="section manager-section"
+            >
+
+                <div class="page-title">
+                    <span class="page-icon"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg></span>
+                    <div class="page-title-text">
+
+                    <h2>
+                        إدارة المستخدمين
+                    </h2>
+
+                    <p>
+                        الحسابات والصلاحيات والنسخ الاحتياطي
+                    </p>
+                    </div>
+
+                </div>
+
+                <div class="content-card">
+
+                    <h3>
+                        إضافة مستخدم
+                    </h3>
+
+                    <div class="form-grid three-columns">
+
+                        <div class="input-group">
+
+                            <label for="newUsername">
+                                اسم المستخدم
+                            </label>
+
+                            <input
+                                type="text"
+                                id="newUsername"
+                            >
+
+                        </div>
+
+                        <div class="input-group">
+
+                            <label for="newPassword">
+                                كلمة المرور
+                            </label>
+
+                            <input
+                                type="password"
+                                id="newPassword"
+                            >
+
+                        </div>
+
+                        <div class="input-group">
+
+                            <label for="newRole">
+                                الصلاحية
+                            </label>
+
+                            <select id="newRole">
+
+                                <option value="manager">
+                                    مدير
+                                </option>
+
+                                <option value="auditor">
+                                    مدقق
+                                </option>
+
+                                <option value="viewer">
+                                    مشاهد
+                                </option>
+
+                            </select>
+
+                        </div>
+
+                    </div>
+
+                    <button
+                        type="button"
+                        id="addUserBtn"
+                        class="primary-btn"
+                    >
+                        إضافة مستخدم
+                    </button>
+
+                </div>
+
+                <div class="content-card">
+
+                    <h3>
+                        المستخدمون
+                    </h3>
+
+                    <div class="table-wrapper">
+
+                        <table>
+
+                            <thead>
+
+                                <tr>
+
+                                    <th>
+                                        اسم المستخدم
+                                    </th>
+
+                                    <th>
+                                        الصلاحية
+                                    </th>
+
+                                    <th>
+                                        الإجراء
+                                    </th>
+
+                                </tr>
+
+                            </thead>
+
+                            <tbody id="usersTableBody"></tbody>
+
+                        </table>
+
+                    </div>
+
+                </div>
+
+                <div class="content-card">
+
+                    <h3>
+                        النسخ الاحتياطي والاستعادة
+                    </h3>
+
+                    <p>
+                        يُفضّل تحميل نسخة احتياطية قبل أي تحديث على النظام، ويمكن استعادتها لاحقاً على أي جهاز أو متصفح بدون فقدان أي سجل.
+                    </p>
+
+                    <div class="button-row">
+
+                        <button
+                            type="button"
+                            id="downloadBackupBtn"
+                            class="primary-btn"
+                        >
+                            تحميل نسخة احتياطية
+                        </button>
+
+                        <button
+                            type="button"
+                            id="restoreBackupBtn"
+                            class="secondary-btn"
+                        >
+                            استيراد نسخة احتياطية
+                        </button>
+
+                        <input
+                            type="file"
+                            id="restoreBackupInput"
+                            accept="application/json"
+                            class="hidden"
+                        >
+
+                    </div>
+
+                </div>
+
+            </section>
+
+        </main>
+
+    </section>
+
+    <!-- ================= MODAL ================= -->
+
+    <div
+        id="recordModal"
+        class="modal hidden"
+    >
+
+        <div class="modal-content">
+
+            <button
+                type="button"
+                class="modal-close"
+                onclick="closeRecordModal()"
+            >
+                ×
+            </button>
+
+            <div id="modalContent"></div>
+
+        </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <script src="script.js"></script>
