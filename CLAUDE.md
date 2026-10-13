@@ -39,6 +39,8 @@ Arabic (RTL) single-page web app for auditing records and agencies. Plain HTML/C
 - New-record page: sticky summary dock (`updateRecordDock`), Ctrl+Enter adds an agency, the add button ignores a second click within 700 ms. Plain Enter must NOT add (accidental duplicates are the user's main concern).
 - Records table: «التقرير» + «تعديل» visible, the rest in the ⋮ menu (`openRecordMenu`).
 - The only decorative motion is the seal "stamp" on the login page; everything respects `prefers-reduced-motion`.
+- The union seal is built only by `sealSVG()` (top arc «نقابة المحامين», bottom arc «فرع إدلب», two stars). In `index.html` seals are `<svg class="seal …" data-seal>` placeholders filled by `anchorSeals()`. `svg.seal text { direction: ltr }` is required or the arc text disappears in RTL.
+- Quick audit (التدقيق السريع): in the record summary report every item — transport, missing stamps, each addition — opens `showAgencyAudit(recordId, filter)` listing only the agencies that contain it (any type), with their numbers in a strip for matching against the paper register and an edit button per agency. Filters: `transport`, `missing:<pleading|ambulance|aid>`, `add:<key>`.
 - Roles: `manager`, `auditor`, `viewer`.
 - Persistence: `localStorage` only; backup/restore via the users section. Excel export via `xlsx-js-style` (CDN).
 

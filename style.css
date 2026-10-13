@@ -3252,6 +3252,215 @@ tr.cls-cancelled > td:first-child {
     }
 }
 
+/* ================= التدقيق السريع =================
+   الغاية: مطابقة بند واحد (بدل الانتقال، نقص مرافعة، حفظ…) مع
+   السجل الورقي بنظرة واحدة، لذلك أرقام الوكالات كبيرة ومصفوفة. */
+
+.quick-audit {
+    margin: 0 0 22px;
+    padding: 14px 16px;
+    border-radius: var(--r-lg);
+    background: var(--seal-50);
+    border: 1px solid var(--seal-100);
+}
+
+.quick-audit h4 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-sm);
+    color: var(--seal-800);
+    margin-bottom: 10px;
+}
+
+.audit-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.audit-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 6px 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--seal-100);
+    background: var(--surface);
+    color: var(--ink-800);
+    font-size: var(--fs-md);
+    font-weight: 600;
+    transition: background 0.16s, border-color 0.16s, color 0.16s;
+}
+
+.audit-chip .ti {
+    color: var(--seal-600);
+    font-size: var(--fs-lg);
+}
+
+.audit-chip b {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 999px;
+    display: inline-grid;
+    place-items: center;
+    background: var(--seal-600);
+    color: #ffffff;
+    font-size: var(--fs-sm);
+}
+
+.audit-chip small {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    font-weight: 500;
+    margin-left: 4px;
+}
+
+.audit-chip:hover {
+    border-color: var(--seal-500);
+    background: var(--seal-600);
+    color: #ffffff;
+}
+
+.audit-chip:hover .ti,
+.audit-chip:hover small {
+    color: #ffffff;
+}
+
+.audit-chip:hover b {
+    background: #ffffff;
+    color: var(--seal-700);
+}
+
+.audit-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--seal-100);
+    background: var(--seal-50);
+    color: var(--seal-700);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+}
+
+.audit-link:hover {
+    background: var(--seal-600);
+    border-color: var(--seal-600);
+    color: #ffffff;
+}
+
+.audit-summary {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 14px;
+    margin-bottom: 22px;
+}
+
+.audit-total {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 16px 18px;
+    border-radius: var(--r-md);
+    background: var(--ink-900);
+    color: #ffffff;
+}
+
+.audit-total span {
+    font-size: var(--fs-sm);
+    color: #c7cdf0;
+    font-weight: 600;
+}
+
+.audit-total strong {
+    font-size: var(--fs-3xl);
+    line-height: 1.2;
+}
+
+.audit-total small {
+    font-size: var(--fs-xs);
+    color: #aab3ca;
+}
+
+.audit-numbers {
+    padding: 12px 14px;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+}
+
+.audit-numbers > span {
+    display: block;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-2);
+    margin-bottom: 8px;
+}
+
+.audit-numbers-wide {
+    margin: -10px 0 22px;
+}
+
+.numbers-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.num-tag {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+    min-width: 44px;
+    justify-content: center;
+    padding: 4px 10px;
+    border-radius: var(--r-sm);
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    color: var(--ink-900);
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.num-tag small {
+    font-size: var(--fs-xs);
+    color: var(--seal-700);
+}
+
+.num-tag.is-missing {
+    border-color: #d9b56f;
+    background: var(--warning-bg);
+}
+
+.num-tag.is-cancelled {
+    color: var(--text-3);
+    text-decoration: line-through;
+    background: var(--surface-3);
+}
+
+.audit-no {
+    font-size: var(--fs-lg);
+}
+
+.doc-table td.audit-count {
+    font-weight: 700;
+    color: var(--seal-700);
+    background: var(--seal-50) !important;
+}
+
+@media screen and (max-width: 640px) {
+    .audit-summary {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* ================= قائمة ⋮ لإجراءات السجل ================= */
 
 .act-btn.act-primary {

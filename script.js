@@ -4679,26 +4679,53 @@ function committeesByTypeTableHTML(c) {
 }
 
 /* =========================================================
-الختم الرسمي (يستخدم في رأس التقارير)
+الختم الرسمي (رأس التقارير، الدخول، القائمة، لوحة التحكم)
+مثل الأختام الرسمية: «نقابة المحامين» على القوس العلوي،
+و«فرع إدلب» على القوس السفلي مقروءاً بالاتجاه الصحيح،
+ونجمتان بينهما، والميزان في الوسط.
+كل الأختام في الصفحة تُبنى من هذه الدالة (anchorSeals).
 ========================================================= */
 
 let sealCounter = 0;
 
-function sealSVG() {
+function sealSVG(extraClass) {
     sealCounter += 1;
-    const id = "sealArc" + sealCounter;
-    return '<svg class="seal" viewBox="0 0 120 120" aria-hidden="true">' +
-        '<defs><path id="' + id + '" d="M60,60 m-45,0 a45,45 0 1,1 90,0 a45,45 0 1,1 -90,0"/></defs>' +
-        '<circle cx="60" cy="60" r="57" fill="none" stroke="currentColor" stroke-width="2.2"/>' +
-        '<circle cx="60" cy="60" r="53" fill="none" stroke="currentColor" stroke-width="0.8"/>' +
-        '<circle cx="60" cy="60" r="35" fill="none" stroke="currentColor" stroke-width="0.8"/>' +
-        '<text font-size="10" font-weight="700" fill="currentColor"><textPath href="#' + id + '">نقابة المحامين ✦ فرع إدلب ✦ تدقيق السجلات ✦</textPath></text>' +
-        '<g transform="translate(60 62) scale(0.52) translate(-50 -50)" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">' +
+    const top = "sealTop" + sealCounter;
+    const bottom = "sealBottom" + sealCounter;
+    const star = function (x) {
+        return '<path transform="translate(' + x + ' 60)" d="M0 -3.4 L1 -1 L3.4 0 L1 1 L0 3.4 L-1 1 L-3.4 0 L-1 -1 Z" fill="currentColor"/>';
+    };
+    return '<svg class="seal' + (extraClass ? " " + extraClass : "") + '" viewBox="0 0 120 120" aria-hidden="true">' +
+        '<defs>' +
+            /* القوس العلوي من اليسار إلى اليمين مروراً بالأعلى: الحروف للخارج */
+            '<path id="' + top + '" d="M 19 60 A 41 41 0 0 1 101 60"/>' +
+            /* القوس السفلي من اليسار إلى اليمين مروراً بالأسفل: الحروف قائمة للداخل */
+            '<path id="' + bottom + '" d="M 13.5 60 A 46.5 46.5 0 0 0 106.5 60"/>' +
+        "</defs>" +
+        '<circle cx="60" cy="60" r="57" fill="none" stroke="currentColor" stroke-width="2.4"/>' +
+        '<circle cx="60" cy="60" r="53.5" fill="none" stroke="currentColor" stroke-width="0.8"/>' +
+        '<circle cx="60" cy="60" r="34" fill="none" stroke="currentColor" stroke-width="0.9"/>' +
+        '<text font-size="10.5" font-weight="700" fill="currentColor" text-anchor="middle"><textPath href="#' + top + '" startOffset="50%">نقابة المحامين</textPath></text>' +
+        '<text font-size="9.5" font-weight="700" fill="currentColor" text-anchor="middle"><textPath href="#' + bottom + '" startOffset="50%">فرع إدلب</textPath></text>' +
+        star(15.5) + star(104.5) +
+        '<g transform="translate(60 61) scale(0.5) translate(-50 -50)" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">' +
         '<path d="M50 22 V76"/><path d="M26 32 H74"/><path d="M36 78 H64"/>' +
         '<path d="M26 32 L17 54 M26 32 L35 54"/><path d="M14 54 Q26 66 38 54 Z"/>' +
         '<path d="M74 32 L65 54 M74 32 L83 54"/><path d="M62 54 Q74 66 86 54 Z"/>' +
         "</g></svg>";
 }
+
+/* الأختام المكتوبة في الصفحة تُستبدل بالختم الموحّد (نفس الحجم والصنف) */
+function anchorSeals() {
+    document.querySelectorAll("svg.seal[data-seal]").forEach(function (old) {
+        const extra = Array.from(old.classList).filter(function (c) { return c !== "seal"; }).join(" ");
+        const holder = document.createElement("div");
+        holder.innerHTML = sealSVG(extra);
+        old.replaceWith(holder.firstChild);
+    });
+}
+
+anchorSeals();
 
 /* أرقام ترقيم الأقسام: غربية مثل بقية النظام */
 function arabicDigit(n) {
@@ -4789,6 +4816,9 @@ function buildFinalRecordReport(record, mode) {
                 : "") +
         "</dl></div>";
 
+    /* أزرار التدقيق السريع: كل بند موجود في السجل بضغطة واحدة */
+    html += quickAuditHTML(record, mode);
+
     /* الوكالات حسب النوع */
     html += '<section class="doc-section">' + secTitle("الوكالات حسب النوع") +
         '<div class="table-wrapper"><table class="doc-table"><thead><tr><th>نوع الوكالة</th><th class="num">العدد</th><th class="num">إجمالي السعر</th></tr></thead><tbody>';
@@ -4813,6 +4843,8 @@ function buildFinalRecordReport(record, mode) {
 
     if (stats.transport.count > 0) {
         html += '<section class="doc-section">' + secTitle("بدل الانتقال") +
+            '<button type="button" class="audit-link no-print" onclick="showAgencyAudit(\'' + record.id + "', 'transport', '" + mode + '\')">' +
+            '<i class="ti ti-list-search" aria-hidden="true"></i> عرض الوكالات التي عليها بدل انتقال (' + stats.transport.count + ')</button>' +
             '<div class="table-wrapper">' + transportTableHTML(stats.transport) + "</div></section>";
     }
 
@@ -4879,9 +4911,12 @@ function buildFinalRecordReport(record, mode) {
 
         html += '<section class="doc-section">' + secTitle("الطوابع الناقصة") +
             '<table class="doc-table"><thead><tr><th>الطابع</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
-            "<tr><td>مرافعة</td><td class=\"num\">" + stats.missing.pleading + '</td><td class="num">' + money(stats.missing.pleading * number(stampPrices.pleading)) + "</td></tr>" +
-            "<tr><td>إسعاف</td><td class=\"num\">" + stats.missing.ambulance + '</td><td class="num">' + money(stats.missing.ambulance * number(stampPrices.ambulance)) + "</td></tr>" +
-            "<tr><td>معونة</td><td class=\"num\">" + stats.missing.aid + '</td><td class="num">' + money(stats.missing.aid * number(stampPrices.aid)) + "</td></tr>" +
+            ["pleading", "ambulance", "aid"].map(function (k) {
+                const names = { pleading: "مرافعة", ambulance: "إسعاف", aid: "معونة" };
+                return "<tr" + auditRowAttrs(record, "missing:" + k, mode, stats.missing[k]) + "><td>" + names[k] +
+                    (stats.missing[k] ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
+                    '</td><td class="num">' + stats.missing[k] + '</td><td class="num">' + money(stats.missing[k] * number(stampPrices[k])) + "</td></tr>";
+            }).join("") +
             '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(stats.missingValue) + "</td></tr></tfoot></table></section>";
 
         html += '<section class="doc-section">' + secTitle("الإضافات") +
@@ -4893,7 +4928,9 @@ function buildFinalRecordReport(record, mode) {
             const count = stats.active.reduce(function (sum, a) { return sum + number(a.additions && a.additions[key]); }, 0);
             const cash = stats.active.reduce(function (sum, a) { return sum + number(a.additionValues && a.additionValues[key]); }, 0);
             addCountTotal += count; addCashTotal += cash;
-            html += "<tr" + (count === 0 ? ' class="row-zero"' : "") + "><td>" + ADDITION_NAMES[key] + '</td><td class="num">' + count + '</td><td class="num">' + money(cash) + "</td></tr>";
+            html += "<tr" + auditRowAttrs(record, "add:" + key, mode, count) + "><td>" + ADDITION_NAMES[key] +
+                (count ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
+                '</td><td class="num">' + count + '</td><td class="num">' + money(cash) + "</td></tr>";
         });
 
         html += '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + addCountTotal + '</td><td class="num">' + money(addCashTotal) + "</td></tr></tfoot></table></section>";
@@ -5006,6 +5043,12 @@ function buildTypeAgenciesDoc(record, type, backMode, forPrint) {
             "<div><dt>الإجمالي</dt><dd>" + money(sumGrand) + "</dd></div>" +
         "</dl></div>";
 
+    /* أرقام وكالات هذا النوع للمطابقة السريعة مع السجل الورقي */
+    if (list.length) {
+        html += '<div class="audit-numbers audit-numbers-wide"><span>أرقام الوكالات للمطابقة مع السجل</span>' +
+            agencyNumbersStripHTML(list, false) + "</div>";
+    }
+
     html += '<section class="doc-section doc-section-flow"><h3><span class="sec-no">1</span>' + escapeHTML(typeName) + " — التفاصيل كما أُدخلت</h3>" +
         '<div class="table-wrapper"><table class="doc-table detail-table cls-table"><thead><tr>' +
         "<th>رقم الوكالة</th><th>الحالة</th>" +
@@ -5038,6 +5081,8 @@ function showTypeAgencies(recordId, type, backMode) {
     modalContent.innerHTML = buildTypeAgenciesDoc(record, type, backMode || "summary", false);
     modal.classList.remove("hidden");
     modalContent.scrollTop = 0;
+    /* الحاوية التي تتمرر فعلاً هي .modal-content */
+    modalContent.closest(".modal-content")?.scrollTo(0, 0);
 }
 
 function printTypeAgencies(recordId, type, pdf) {
@@ -5053,6 +5098,233 @@ function printTypeAgencies(recordId, type, pdf) {
 window.showTypeAgencies = showTypeAgencies;
 window.printTypeAgencies = printTypeAgencies;
 
+/* =========================================================
+التدقيق السريع لبند واحد من السجل
+الضغط على «بدل الانتقال» أو «نقص مرافعة» أو أي إضافة (حفظ، وكيل عن…)
+يعرض الوكالات التي فيها هذا البند فقط، من كل الأنواع، مع أرقامها
+مصفوفة في الأعلى للمطابقة السريعة مع السجل الورقي، وزر تعديل لكل وكالة.
+filter: "transport" | "missing:pleading|ambulance|aid" | "add:<مفتاح الإضافة>"
+========================================================= */
+
+const AUDIT_STAMP_NAMES = {
+    pleading: "نقص مرافعة",
+    ambulance: "نقص إسعاف",
+    aid: "نقص معونة"
+};
+
+function auditFilterInfo(filter) {
+
+    filter = String(filter || "");
+
+    if (filter === "transport") {
+        return {
+            label: "بدل الانتقال",
+            icon: "ti-route",
+            count: function (agency) { return getAgencyTransport(agency).count; }
+        };
+    }
+
+    const parts = filter.split(":");
+    const key = parts[1];
+
+    if (parts[0] === "missing" && AUDIT_STAMP_NAMES[key]) {
+        return {
+            label: AUDIT_STAMP_NAMES[key],
+            icon: "ti-receipt",
+            count: function (agency) {
+                return number((agency.stamps || agency.missingStamps || {})[key]);
+            }
+        };
+    }
+
+    if (parts[0] === "add" && ADDITION_NAMES[key]) {
+        return {
+            label: ADDITION_NAMES[key],
+            icon: "ti-circle-plus",
+            count: function (agency) {
+                return number(agency.additions && agency.additions[key]);
+            }
+        };
+    }
+
+    return null;
+}
+
+/* الوكالات غير الملغاة التي فيها البند، مرتبة حسب رقم الوكالة */
+function auditAgencies(record, filter) {
+
+    const info = auditFilterInfo(filter);
+
+    if (!info) {
+        return [];
+    }
+
+    return (record.agencies || [])
+        .map(function (agency, index) {
+            return { agency: agency, index: index, count: agency.status === "cancelled" ? 0 : info.count(agency) };
+        })
+        .filter(function (item) { return item.count > 0; })
+        .sort(function (a, b) {
+            return String(a.agency.number).localeCompare(String(b.agency.number), "ar", { numeric: true });
+        });
+}
+
+/* صف قابل للضغط في جداول التقرير المختصر */
+function auditRowAttrs(record, filter, mode, count) {
+    if (!count) {
+        return ' class="row-zero"';
+    }
+    const info = auditFilterInfo(filter);
+    return ' class="clickable-row" tabindex="0" role="button" title="اضغط لعرض الوكالات التي فيها ' + info.label + '"' +
+        ' onclick="showAgencyAudit(\'' + record.id + "', '" + filter + "', '" + mode + '\')"';
+}
+
+/* أزرار التدقيق السريع أعلى التقرير: كل بند موجود في السجل مع عدده */
+function quickAuditHTML(record, mode) {
+
+    const filters = ["transport"]
+        .concat(Object.keys(AUDIT_STAMP_NAMES).map(function (k) { return "missing:" + k; }))
+        .concat(Object.keys(ADDITION_NAMES).filter(function (k) { return k !== "transport"; }).map(function (k) { return "add:" + k; }));
+
+    const chips = filters.map(function (filter) {
+        const info = auditFilterInfo(filter);
+        const list = auditAgencies(record, filter);
+        if (!list.length) return "";
+        const total = list.reduce(function (s, item) { return s + item.count; }, 0);
+        return '<button type="button" class="audit-chip" onclick="showAgencyAudit(\'' + record.id + "', '" + filter + "', '" + mode + '\')">' +
+            '<i class="ti ' + info.icon + '" aria-hidden="true"></i>' + info.label +
+            "<b>" + total + "</b><small>" + list.length + " وكالة</small></button>";
+    }).join("");
+
+    if (!chips) {
+        return "";
+    }
+
+    return '<section class="quick-audit no-print" aria-label="تدقيق سريع">' +
+        '<h4><i class="ti ti-list-search" aria-hidden="true"></i> تدقيق سريع: اضغط على بند لعرض وكالاته فقط</h4>' +
+        '<div class="audit-chips">' + chips + "</div></section>";
+}
+
+/* أرقام الوكالات مصفوفة للمطابقة السريعة مع السجل الورقي */
+function agencyNumbersStripHTML(list, showCount) {
+    return '<div class="numbers-strip" aria-label="أرقام الوكالات">' +
+        list.map(function (item) {
+            const state = item.agency.status === "missing" ? " is-missing" : item.agency.status === "cancelled" ? " is-cancelled" : "";
+            return '<span class="num-tag' + state + '" title="' + getAgencyStatusName(item.agency.status) + '">' + escapeHTML(item.agency.number) +
+                (showCount && item.count > 1 ? "<small>×" + item.count + "</small>" : "") + "</span>";
+        }).join("") +
+        "</div>";
+}
+
+function buildAgencyAuditDoc(record, filter, backMode, forPrint) {
+
+    const info = auditFilterInfo(filter);
+    const list = auditAgencies(record, filter);
+    const canEdit = !forPrint && currentUser && currentUser.role !== "viewer";
+    const total = list.reduce(function (s, item) { return s + item.count; }, 0);
+
+    let html = '<div class="final-report doc doc-detailed doc-type-view doc-audit">';
+
+    if (!forPrint) {
+        html += '<div class="report-actions no-print">' +
+            '<button type="button" class="secondary-btn" onclick="showFinalRecordReport(\'' + record.id + "', '" + backMode + '\')"><i class="ti ti-arrow-right"></i> رجوع للتقرير</button>' +
+            '<button type="button" class="primary-btn" onclick="printAgencyAudit(\'' + record.id + "', '" + filter + '\', true)"><i class="ti ti-file-type-pdf"></i> حفظ PDF</button>' +
+            '<button type="button" class="secondary-btn" onclick="printAgencyAudit(\'' + record.id + "', '" + filter + '\', false)"><i class="ti ti-printer"></i> طباعة</button>' +
+            '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button>' +
+            "</div>";
+    }
+
+    html += docLetterhead(
+        "الوكالات التي فيها " + info.label,
+        "سجل " + escapeHTML(record.recordNumber) + " — " + escapeHTML(record.officeName) + " — المندوب: " +
+        escapeHTML(record.representativeName) + " — " + formatDay(getRecordDay(record))
+    );
+
+    html += '<div class="audit-summary">' +
+        '<div class="audit-total"><span>' + info.label + "</span><strong>" + total + "</strong><small>في " + list.length + " وكالة</small></div>" +
+        '<div class="audit-numbers"><span>أرقام الوكالات للمطابقة مع السجل</span>' +
+        (list.length ? agencyNumbersStripHTML(list, true) : '<p class="doc-empty">لا توجد وكالات فيها هذا البند.</p>') +
+        "</div></div>";
+
+    if (list.length) {
+
+        let rows = "";
+
+        list.forEach(function (item) {
+
+            const a = item.agency;
+            const ms = a.stamps || a.missingStamps || {};
+            const statusClass = a.status === "missing" ? "st-missing" : "st-active";
+
+            const stampParts = [];
+            if (number(ms.pleading)) stampParts.push("مرافعة " + number(ms.pleading));
+            if (number(ms.ambulance)) stampParts.push("إسعاف " + number(ms.ambulance));
+            if (number(ms.aid)) stampParts.push("معونة " + number(ms.aid));
+
+            const additionsText = agencyAdditionsToText(a, false);
+
+            rows += "<tr" + agencyRowAttrs(a, "") + ">" +
+                '<td><strong class="audit-no">' + escapeHTML(a.number) + "</strong>" + (a.duplicate ? ' <span class="badge badge-warning">مكررة</span>' : "") + "</td>" +
+                "<td>" + agencyTypeDot(a.type) + escapeHTML(AGENCY_NAMES[a.type] || a.type || "-") + "</td>" +
+                '<td><span class="status-pill ' + statusClass + '">' + getAgencyStatusName(a.status) + "</span></td>" +
+                '<td class="num audit-count">' + item.count + "</td>" +
+                '<td class="small-text">' + (additionsText === "-" ? "—" : escapeHTML(additionsText)) + "</td>" +
+                '<td class="small-text">' + (stampParts.length ? stampParts.join("<br>") : "—") + "</td>" +
+                '<td class="num">' + money(a.representativeAmount) + "</td>" +
+                '<td class="small-text">' + (a.notes ? formatNotesHTML(a.notes) : "—") + "</td>" +
+                (canEdit ? '<td class="no-print"><button type="button" class="act-btn" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
+                "</tr>";
+        });
+
+        html += '<section class="doc-section doc-section-flow"><h3><span class="sec-no">1</span>التفاصيل كما أُدخلت</h3>' +
+            '<div class="table-wrapper"><table class="doc-table detail-table cls-table"><thead><tr>' +
+            "<th>رقم الوكالة</th><th>النوع</th><th>الحالة</th>" +
+            '<th class="num">' + escapeHTML(info.label) + "</th><th>كل الإضافات</th><th>الطوابع الناقصة</th>" +
+            '<th class="num">المطلوب من المندوب</th><th>ملاحظات</th>' +
+            (canEdit ? '<th class="no-print"></th>' : "") +
+            "</tr></thead><tbody>" + rows + "</tbody>" +
+            '<tfoot><tr><td colspan="3">الإجمالي (' + list.length + " وكالة)</td>" +
+            '<td class="num">' + total + "</td><td></td><td></td><td></td><td></td>" +
+            (canEdit ? '<td class="no-print"></td>' : "") +
+            "</tr></tfoot></table></div></section>";
+    }
+
+    if (forPrint) {
+        html += docSignatures();
+    }
+
+    html += "</div>";
+
+    return html;
+}
+
+function showAgencyAudit(recordId, filter, backMode) {
+    const record = records.find(function (item) { return item.id === recordId; });
+    if (!record || !auditFilterInfo(filter)) return;
+    const modalContent = document.getElementById("modalContent");
+    const modal = document.getElementById("recordModal");
+    if (!modalContent || !modal) return;
+    modalContent.innerHTML = buildAgencyAuditDoc(record, filter, backMode || "summary", false);
+    modal.classList.remove("hidden");
+    modalContent.scrollTop = 0;
+    /* الحاوية التي تتمرر فعلاً هي .modal-content */
+    modalContent.closest(".modal-content")?.scrollTo(0, 0);
+}
+
+function printAgencyAudit(recordId, filter, pdf) {
+    const record = records.find(function (item) { return item.id === recordId; });
+    const info = auditFilterInfo(filter);
+    if (!record || !info) return;
+    openReportDocument(
+        buildAgencyAuditDoc(record, filter, "summary", true),
+        info.label + " - سجل " + sanitizeFileNamePart(record.recordNumber),
+        { pdf: !!pdf, landscape: true }
+    );
+}
+
+window.showAgencyAudit = showAgencyAudit;
+window.printAgencyAudit = printAgencyAudit;
+
 function showFinalRecordReport(id, mode) {
     const record = records.find(function (item) { return item.id === id; });
     if (!record) return;
@@ -5062,6 +5334,8 @@ function showFinalRecordReport(id, mode) {
     modalContent.innerHTML = buildFinalRecordReport(record, mode || "summary");
     modal.classList.remove("hidden");
     modalContent.scrollTop = 0;
+    /* الحاوية التي تتمرر فعلاً هي .modal-content */
+    modalContent.closest(".modal-content")?.scrollTo(0, 0);
 }
 
 /* =========================================================
