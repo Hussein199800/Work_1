@@ -26,8 +26,9 @@
 
         <div class="login-shell">
 
-            <div class="login-art" aria-hidden="true">
+            <div class="login-art">
 
+                <div class="login-seal" aria-hidden="true">
                 <svg class="seal seal-xl" viewBox="0 0 120 120">
                     <defs><path id="sealArcLoginArt" d="M60,60 m-45,0 a45,45 0 1,1 90,0 a45,45 0 1,1 -90,0"/></defs>
                     <circle cx="60" cy="60" r="57" fill="none" stroke="currentColor" stroke-width="2.2"/>
@@ -40,29 +41,18 @@
                         <path d="M74 32 L65 54 M74 32 L83 54"/><path d="M62 54 Q74 66 86 54 Z"/>
                     </g>
                 </svg>
+                </div>
 
                 <p class="login-art-org">نقابة المحامين — فرع إدلب</p>
-                <h2>نظام تدقيق السجلات والوكالات</h2>
+                <h1>نظام تدقيق السجلات والوكالات</h1>
 
-                <ul class="login-art-points">
-                    <li><i class="ti ti-shield-check"></i>تدقيق دقيق للوكالات والإضافات والطوابع</li>
-                    <li><i class="ti ti-calculator"></i>حساب تلقائي لبدل الانتقال وحصص اللجان</li>
-                    <li><i class="ti ti-file-type-pdf"></i>تقارير رسمية جاهزة للطباعة والحفظ</li>
-                </ul>
+                <p class="login-subtitle">
+                    سجّل الدخول بحسابك للمتابعة
+                </p>
 
             </div>
 
             <div class="login-box">
-
-                <div class="logo-circle">
-                    <i class="ti ti-scale"></i>
-                </div>
-
-                <h1>تسجيل الدخول</h1>
-
-                <p class="login-subtitle">
-                    أدخل بيانات حسابك للمتابعة
-                </p>
 
                 <div class="input-group">
 
@@ -625,13 +615,16 @@
 
                             </div>
 
-                            <div class="input-group">
+                            <div class="input-group type-group">
 
-                                <label for="agencyType">
+                                <label for="agencyType" id="agencyTypeLabel">
                                     <i class="ti ti-file-certificate"></i> نوع الوكالة
                                 </label>
 
-                                <select id="agencyType">
+                                <!-- أزرار ملونة لاختيار النوع بضغطة واحدة؛ القائمة الأصلية تبقى مخفية ويقرأ منها النظام -->
+                                <div class="choice-chips type-chips" id="agencyTypeChips" role="radiogroup" aria-labelledby="agencyTypeLabel"></div>
+
+                                <select id="agencyType" class="chip-source" tabindex="-1" aria-hidden="true">
 
                                     <option value="general">
                                         وكالة عامة
@@ -661,13 +654,15 @@
 
                             </div>
 
-                            <div class="input-group">
+                            <div class="input-group status-group">
 
-                                <label for="agencyStatus">
+                                <label for="agencyStatus" id="agencyStatusLabel">
                                     <i class="ti ti-circle-check"></i> حالة الوكالة
                                 </label>
 
-                                <select id="agencyStatus">
+                                <div class="choice-chips status-chips" id="agencyStatusChips" role="radiogroup" aria-labelledby="agencyStatusLabel"></div>
+
+                                <select id="agencyStatus" class="chip-source" tabindex="-1" aria-hidden="true">
 
                                     <option value="active">
                                         فعالة
@@ -1007,8 +1002,10 @@
                                 type="button"
                                 id="addAgencyBtn"
                                 class="primary-btn"
+                                aria-keyshortcuts="Control+Enter"
                             >
                                 <i class="ti ti-plus"></i> إضافة الوكالة
+                                <kbd class="kbd-hint">Ctrl + Enter</kbd>
                             </button>
 
                             <button
@@ -1052,26 +1049,37 @@
 
                     </div>
 
-                    <!-- ================= SAVE ================= -->
+                    <!-- ================= SAVE =================
+                         شريط ثابت أسفل الشاشة: ملخص السجل وزر الحفظ ظاهران دائماً -->
 
-                    <div class="button-row">
+                    <div class="record-dock" id="recordDock">
 
-                        <button
-                            type="submit"
-                            class="success-btn"
-                        >
-                            <i class="ti ti-device-floppy"></i> حفظ السجل
-                        </button>
+                        <dl class="dock-stats" aria-live="polite">
+                            <div><dt>الوكالات</dt><dd id="dockCount">0</dd></div>
+                            <div><dt>إجمالي السجل</dt><dd id="dockGrand">0 ل.س</dd></div>
+                            <div class="dock-due"><dt>المطلوب من المندوب</dt><dd id="dockRep">0 ل.س</dd></div>
+                        </dl>
 
-                        <span id="autosaveStatus" class="autosave-status"></span>
+                        <div class="dock-actions">
 
-                        <button
-                            type="button"
-                            id="cancelEditBtn"
-                            class="secondary-btn"
-                        >
-                            إلغاء
-                        </button>
+                            <span id="autosaveStatus" class="autosave-status"></span>
+
+                            <button
+                                type="button"
+                                id="cancelEditBtn"
+                                class="secondary-btn"
+                            >
+                                إلغاء
+                            </button>
+
+                            <button
+                                type="submit"
+                                class="success-btn"
+                            >
+                                <i class="ti ti-device-floppy"></i> حفظ السجل
+                            </button>
+
+                        </div>
 
                     </div>
 

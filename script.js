@@ -2455,6 +2455,8 @@ function syncTransportField() {
         return;
     }
 
+    syncChoiceChips();
+
     const group = input.closest(".input-group");
     const eligible = isTransportEligible(type);
 
@@ -2484,6 +2486,132 @@ function syncTransportField() {
 document.getElementById("agencyType")?.addEventListener("change", function () {
     syncTransportField();
     updatePreview();
+});
+
+/* =========================================================
+أزرار الاختيار الملونة (نوع الوكالة وحالتها)
+تعرض خيارات القائمة المخفية كأزرار بضغطة واحدة، كل نوع بلونه
+المعروف في التقارير. القائمة الأصلية تبقى مصدر القيمة لبقية الكود.
+========================================================= */
+
+const AGENCY_STATUS_COLORS = {
+    active: "#23704f",
+    missing: "#8f5f12",
+    cancelled: "#a8352c"
+};
+
+function buildChoiceChips(selectId, containerId, colors) {
+
+    const select = document.getElementById(selectId);
+    const box = document.getElementById(containerId);
+
+    if (!select || !box) {
+        return;
+    }
+
+    box.innerHTML = Array.from(select.options).map(function (option) {
+        const color = colors[option.value] || "#45577c";
+        return '<button type="button" role="radio" class="choice-chip" data-value="' + option.value + '" style="--chip-color:' + color + '">' +
+            '<span class="chip-dot" aria-hidden="true"></span>' + escapeHTML(option.textContent.trim()) + "</button>";
+    }).join("");
+
+    box.addEventListener("click", function (event) {
+        const chip = event.target.closest(".choice-chip");
+        if (!chip || select.value === chip.dataset.value) {
+            return;
+        }
+        select.value = chip.dataset.value;
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        syncChoiceChips();
+        chip.focus();
+    });
+
+    /* الأسهم تنقل بين الخيارات (اليسار = التالي في الواجهة العربية) */
+    box.addEventListener("keydown", function (event) {
+        const keys = { ArrowLeft: 1, ArrowDown: 1, ArrowRight: -1, ArrowUp: -1 };
+        if (!(event.key in keys)) {
+            return;
+        }
+        event.preventDefault();
+        const chips = Array.from(box.querySelectorAll(".choice-chip"));
+        const current = chips.findIndex(function (c) { return c.dataset.value === select.value; });
+        const next = chips[(current + keys[event.key] + chips.length) % chips.length];
+        next.click();
+    });
+
+    syncChoiceChips();
+}
+
+function syncChoiceChips() {
+
+    [["agencyType", "agencyTypeChips"], ["agencyStatus", "agencyStatusChips"]].forEach(function (pair) {
+
+        const select = document.getElementById(pair[0]);
+        const box = document.getElementById(pair[1]);
+
+        if (!select || !box) {
+            return;
+        }
+
+        box.querySelectorAll(".choice-chip").forEach(function (chip) {
+            const on = chip.dataset.value === select.value;
+            chip.classList.toggle("is-on", on);
+            chip.setAttribute("aria-checked", on ? "true" : "false");
+            chip.tabIndex = on ? 0 : -1;
+        });
+    });
+}
+
+document.getElementById("agencyStatus")?.addEventListener("change", syncChoiceChips);
+
+window.addEventListener("DOMContentLoaded", function () {
+    buildChoiceChips("agencyType", "agencyTypeChips", AGENCY_TYPE_COLORS);
+    buildChoiceChips("agencyStatus", "agencyStatusChips", AGENCY_STATUS_COLORS);
+});
+
+/* =========================================================
+شريط ملخص السجل الثابت أسفل صفحة الإنشاء
+========================================================= */
+
+function updateRecordDock() {
+
+    const count = document.getElementById("dockCount");
+
+    if (!count) {
+        return;
+    }
+
+    let grand = 0;
+    let rep = 0;
+
+    pendingAgencies.forEach(function (agency) {
+        grand += getAgencyGrandTotal(agency);
+        rep += agency.status === "cancelled" ? 0 : number(agency.representativeAmount);
+    });
+
+    count.textContent = pendingAgencies.length;
+    document.getElementById("dockGrand").textContent = money(grand);
+    document.getElementById("dockRep").textContent = money(rep);
+}
+
+/*
+    Ctrl + Enter يضيف الوكالة من أي حقل في صفحة الإنشاء.
+    لا نستخدم Enter وحده حتى لا تُضاف وكالة إضافية بضغطة غير مقصودة.
+*/
+document.addEventListener("keydown", function (event) {
+
+    if (
+        event.key !== "Enter" ||
+        !(event.ctrlKey || event.metaKey) ||
+        document.querySelector("dialog[open]") ||
+        !document.getElementById("newRecordSection")?.classList.contains("active-section")
+    ) {
+        return;
+    }
+
+    event.preventDefault();
+    document.getElementById("addAgencyBtn")?.click();
 });
 
 /* إذا صفّر المستخدم البدل يدوياً لا نعيده تلقائياً حتى الوكالة التالية */
@@ -2616,6 +2744,16 @@ addAgencyBtn.addEventListener(
 
         }
 
+        /* ضغطتان سريعتان (نقر مزدوج) لا تضيفان وكالتين */
+        if (addAgencyBtn.dataset.busy) {
+            return;
+        }
+
+        addAgencyBtn.dataset.busy = "1";
+        setTimeout(function () {
+            delete addAgencyBtn.dataset.busy;
+        }, 700);
+
 
         const agency =
             getAgencyFromForm();
@@ -2746,6 +2884,8 @@ if (counter) {
         pendingAgencies.length;
 
 }
+
+updateRecordDock();
 
 
 if (
@@ -3938,22 +4078,118 @@ function renderRecords() {
             '<td class="num">' + money(getRecordGrandTotal(record)) + "</td>" +
             '<td class="num money-cell">' + money(getRecordRepresentativeTotal(record)) + "</td>" +
             '<td class="date-cell">' + date + "</td>" +
-            '<td><div class="row-actions">' +
-                '<div class="action-group">' +
-                    '<button type="button" class="act-btn" onclick="viewRecord(\'' + record.id + '\')">عرض</button>' +
-                    (canEdit ? '<button type="button" class="act-btn" onclick="editRecord(\'' + record.id + '\')">تعديل</button>' : "") +
-                    (canDelete ? '<button type="button" class="act-btn act-danger" onclick="deleteRecord(\'' + record.id + '\')">حذف</button>' : "") +
-                "</div>" +
-                '<div class="action-group report-group">' +
-                    '<button type="button" class="act-btn" onclick="showFinalRecordReport(\'' + record.id + '\', \'summary\')">تقرير مختصر</button>' +
-                    '<button type="button" class="act-btn" onclick="showFinalRecordReport(\'' + record.id + '\', \'detailed\')">تقرير مفصل</button>' +
-                "</div>" +
+            /* الإجراءات الأكثر استخداماً ظاهرة، والباقي في قائمة ⋮ */
+            '<td><div class="action-group">' +
+                '<button type="button" class="act-btn act-primary" onclick="showFinalRecordReport(\'' + record.id + '\', \'summary\')"><i class="ti ti-file-text" aria-hidden="true"></i> التقرير</button>' +
+                (canEdit ? '<button type="button" class="act-btn" onclick="editRecord(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                '<button type="button" class="act-btn act-more" aria-haspopup="menu" aria-label="إجراءات أخرى للسجل ' + escapeHTML(record.recordNumber) + '" onclick="openRecordMenu(this, \'' + record.id + '\')"><i class="ti ti-dots-vertical" aria-hidden="true"></i></button>' +
             "</div></td>" +
             "</tr>";
 
     }).join("");
 
 }
+
+/* =========================================================
+قائمة ⋮ لإجراءات السجل
+قائمة عائمة واحدة تُفتح بجانب الزر (خارج الجدول حتى لا تُقص).
+========================================================= */
+
+function closeRecordMenu() {
+    const menu = document.getElementById("recordMenu");
+    if (menu) {
+        if (menu._opener) menu._opener.setAttribute("aria-expanded", "false");
+        menu.remove();
+    }
+}
+
+function openRecordMenu(button, id) {
+
+    const wasOpenForThis = document.getElementById("recordMenu")?._opener === button;
+    closeRecordMenu();
+    if (wasOpenForThis) return;
+
+    const canEdit = currentUser && currentUser.role !== "viewer";
+    const canDelete = currentUser && currentUser.role === "manager";
+
+    const items = [
+        { icon: "ti-eye", text: "عرض التفاصيل", run: function () { viewRecord(id); } },
+        { icon: "ti-file-description", text: "التقرير المفصل", run: function () { showFinalRecordReport(id, "detailed"); } },
+        { icon: "ti-file-spreadsheet", text: "تصدير Excel", run: function () { exportRecordToExcel(id); } }
+    ];
+
+    if (canEdit) {
+        items.push({ icon: "ti-edit", text: "تعديل السجل", run: function () { editRecord(id); } });
+    }
+
+    if (canDelete) {
+        items.push({ icon: "ti-trash", text: "حذف السجل", danger: true, run: function () { deleteRecord(id); } });
+    }
+
+    const menu = document.createElement("div");
+    menu.id = "recordMenu";
+    menu.className = "row-menu no-print";
+    menu.setAttribute("role", "menu");
+    menu._opener = button;
+
+    items.forEach(function (item) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.setAttribute("role", "menuitem");
+        b.className = "row-menu-item" + (item.danger ? " is-danger" : "");
+        b.innerHTML = '<i class="ti ' + item.icon + '" aria-hidden="true"></i>';
+        b.appendChild(document.createTextNode(item.text));
+        b.addEventListener("click", function () {
+            closeRecordMenu();
+            item.run();
+        });
+        menu.appendChild(b);
+    });
+
+    document.body.appendChild(menu);
+    button.setAttribute("aria-expanded", "true");
+
+    /* موضع القائمة: تحت الزر، وتبقى داخل الشاشة */
+    const r = button.getBoundingClientRect();
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    let left = Math.min(Math.max(8, r.right - mw), window.innerWidth - mw - 8);
+    let top = r.bottom + 6;
+    if (top + mh > window.innerHeight - 8) {
+        top = Math.max(8, r.top - mh - 6);
+    }
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+
+    menu.querySelector(".row-menu-item")?.focus();
+}
+
+document.addEventListener("click", function (event) {
+    const menu = document.getElementById("recordMenu");
+    if (menu && !menu.contains(event.target) && !event.target.closest(".act-more")) {
+        closeRecordMenu();
+    }
+});
+
+document.addEventListener("keydown", function (event) {
+    const menu = document.getElementById("recordMenu");
+    if (!menu) return;
+    if (event.key === "Escape") {
+        const opener = menu._opener;
+        closeRecordMenu();
+        opener?.focus();
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const items = Array.from(menu.querySelectorAll(".row-menu-item"));
+        const i = items.indexOf(document.activeElement);
+        items[(i + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
+    }
+});
+
+window.addEventListener("scroll", closeRecordMenu, true);
+window.addEventListener("resize", closeRecordMenu);
+
+window.openRecordMenu = openRecordMenu;
 
 /* =========================================================
 إجمالي السعر الأساسي

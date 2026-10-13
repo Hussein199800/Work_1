@@ -35,6 +35,10 @@ Arabic (RTL) single-page web app for auditing records and agencies. Plain HTML/C
 - Fonts: IBM Plex Sans Arabic for everything; Noto Kufi Arabic only for page titles and the brand.
 - Three breakpoints only: 1280 / 1024 / 640 px.
 - Agency type colors (`AGENCY_TYPE_COLORS`) and the colored row stripes are an established convention the user relies on — keep them.
+- Agency type/status are picked with colored chips (`buildChoiceChips`); the original `<select>` stays (visually hidden) as the value source — set `.value` then call `syncChoiceChips()` (already done inside `syncTransportField()`).
+- New-record page: sticky summary dock (`updateRecordDock`), Ctrl+Enter adds an agency, the add button ignores a second click within 700 ms. Plain Enter must NOT add (accidental duplicates are the user's main concern).
+- Records table: «التقرير» + «تعديل» visible, the rest in the ⋮ menu (`openRecordMenu`).
+- The only decorative motion is the seal "stamp" on the login page; everything respects `prefers-reduced-motion`.
 - Roles: `manager`, `auditor`, `viewer`.
 - Persistence: `localStorage` only; backup/restore via the users section. Excel export via `xlsx-js-style` (CDN).
 
