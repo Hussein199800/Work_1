@@ -4679,43 +4679,38 @@ function committeesByTypeTableHTML(c) {
 }
 
 /* =========================================================
-الختم الرسمي (رأس التقارير، الدخول، القائمة، لوحة التحكم)
-مثل الأختام الرسمية: «نقابة المحامين» على القوس العلوي،
-و«فرع إدلب» على القوس السفلي مقروءاً بالاتجاه الصحيح،
-ونجمتان بينهما، والميزان في الوسط.
-كل الأختام في الصفحة تُبنى من هذه الدالة (anchorSeals).
+شعار النظام: دفتر قيد مفتوح وعليه علامة «تمّ التدقيق» ✓
+يُستخدم في الدخول، والقائمة، ولوحة التحكم، وترويسة التقارير.
+- الشكل الافتراضي: مربع بحواف دائرية (حبر كحلي) وفيه الدفتر بالأبيض.
+- mark-outline: بلا مربع، بلون النص (علامة مائية).
+الألوان من متغيرات CSS (‎--bm-tile، ‎--bm-ink، ‎--bm-badge‎).
+الأماكن في الصفحة: ‎<svg class="seal …" data-seal>‎ تُملأ بـ anchorSeals.
 ========================================================= */
 
-let sealCounter = 0;
-
 function sealSVG(extraClass) {
-    sealCounter += 1;
-    const top = "sealTop" + sealCounter;
-    const bottom = "sealBottom" + sealCounter;
-    const star = function (x) {
-        return '<path transform="translate(' + x + ' 60)" d="M0 -3.4 L1 -1 L3.4 0 L1 1 L0 3.4 L-1 1 L-3.4 0 L-1 -1 Z" fill="currentColor"/>';
-    };
-    return '<svg class="seal' + (extraClass ? " " + extraClass : "") + '" viewBox="0 0 120 120" aria-hidden="true">' +
-        '<defs>' +
-            /* القوس العلوي من اليسار إلى اليمين مروراً بالأعلى: الحروف للخارج */
-            '<path id="' + top + '" d="M 19 60 A 41 41 0 0 1 101 60"/>' +
-            /* القوس السفلي من اليسار إلى اليمين مروراً بالأسفل: الحروف قائمة للداخل */
-            '<path id="' + bottom + '" d="M 13.5 60 A 46.5 46.5 0 0 0 106.5 60"/>' +
-        "</defs>" +
-        '<circle cx="60" cy="60" r="57" fill="none" stroke="currentColor" stroke-width="2.4"/>' +
-        '<circle cx="60" cy="60" r="53.5" fill="none" stroke="currentColor" stroke-width="0.8"/>' +
-        '<circle cx="60" cy="60" r="34" fill="none" stroke="currentColor" stroke-width="0.9"/>' +
-        '<text font-size="10.5" font-weight="700" fill="currentColor" text-anchor="middle"><textPath href="#' + top + '" startOffset="50%">نقابة المحامين</textPath></text>' +
-        '<text font-size="9.5" font-weight="700" fill="currentColor" text-anchor="middle"><textPath href="#' + bottom + '" startOffset="50%">فرع إدلب</textPath></text>' +
-        star(15.5) + star(104.5) +
-        '<g transform="translate(60 61) scale(0.5) translate(-50 -50)" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">' +
-        '<path d="M50 22 V76"/><path d="M26 32 H74"/><path d="M36 78 H64"/>' +
-        '<path d="M26 32 L17 54 M26 32 L35 54"/><path d="M14 54 Q26 66 38 54 Z"/>' +
-        '<path d="M74 32 L65 54 M74 32 L83 54"/><path d="M62 54 Q74 66 86 54 Z"/>' +
-        "</g></svg>";
+    const outline = /\bmark-outline\b|\bseal-stamp\b/.test(extraClass || "");
+    return '<svg class="seal brand-mark' + (outline ? " mark-outline" : "") + (extraClass ? " " + extraClass : "") +
+        '" viewBox="0 0 64 64" aria-hidden="true">' +
+        (outline ? "" : '<rect class="bm-tile" x="2" y="2" width="60" height="60" rx="17"/>') +
+        '<g class="bm-book" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">' +
+            /* صفحتا الدفتر */
+            '<path d="M32 21 C26.5 17 19 16.5 13 18.5 V43.5 C19 41.5 26.5 42 32 46 Z"/>' +
+            '<path d="M32 21 C37.5 17 45 16.5 51 18.5 V35"/>' +
+            '<path d="M32 46 C34.5 44.2 37.2 43.1 40 42.6"/>' +
+            /* سطور القيد */
+            '<path d="M18 25.5 C21.5 24.7 24.8 24.9 27.5 26" stroke-width="2"/>' +
+            '<path d="M18 31.5 C21.5 30.7 24.8 30.9 27.5 32" stroke-width="2"/>' +
+            '<path d="M18 37.5 C21.5 36.7 24.8 36.9 27.5 38" stroke-width="2"/>' +
+            '<path d="M36.5 26 C39.2 24.9 42.5 24.7 46 25.5" stroke-width="2"/>' +
+            '<path d="M36.5 32 C39.2 30.9 42.5 30.7 46 31.5" stroke-width="2"/>' +
+        "</g>" +
+        /* علامة التدقيق */
+        '<circle class="bm-badge" cx="47" cy="45.5" r="10.5"/>' +
+        '<path class="bm-check" d="M42.3 45.6 L45.6 48.9 L51.8 42.4" fill="none" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+        "</svg>";
 }
 
-/* الأختام المكتوبة في الصفحة تُستبدل بالختم الموحّد (نفس الحجم والصنف) */
+/* أماكن الشعار في الصفحة تُملأ بالشعار الموحّد (نفس الحجم والصنف) */
 function anchorSeals() {
     document.querySelectorAll("svg.seal[data-seal]").forEach(function (old) {
         const extra = Array.from(old.classList).filter(function (c) { return c !== "seal"; }).join(" ");
