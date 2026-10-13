@@ -1,63 +1,85 @@
 /* =========================================================
-   نظام تدقيق السجلات والوكالات — نظام التصميم
-   الهوية: كحلي عميق + زمرّدي، حواف منتظمة، ظلال هادئة
+   نظام تدقيق السجلات والوكالات — نظام التصميم «السجلّ الرسمي»
+   مستوحى من دفاتر القيد الرسمية: حبر كحلي للنص والقائمة،
+   ورق أبيض للبطاقات، وحبر الختم (أزرق نيلي) للأفعال والإجماليات.
    كل الألوان والمقاسات معرّفة هنا مرة واحدة فقط.
 ========================================================= */
 
 :root {
-    /* الألوان الأساسية */
-    /* ألوان هادئة منخفضة التشبع لراحة العين في العمل الطويل */
-    --ink-900: #1a2c3f;
-    --ink-800: #22394f;
-    --ink-700: #2f4a63;
-    --ink-100: #e8edf2;
+    /* الحبر: النص والقائمة الجانبية */
+    --ink-900: #121e33;
+    --ink-800: #1a2a45;
+    --ink-700: #2c3e62;
+    --ink-600: #45577c;
+    --ink-100: #e5e8ee;
 
-    --brand-700: #2a605c;
-    --brand-600: #347570;
-    --brand-500: #438a83;
-    --brand-400: #6aa69e;
-    --brand-100: #dcece9;
-    --brand-50: #f1f7f6;
+    /* حبر الختم: الأزرار الرئيسية، التحديد، الإجماليات */
+    --seal-800: #232f7a;
+    --seal-700: #2b3890;
+    --seal-600: #3446a8;
+    --seal-500: #4f60bf;
+    --seal-300: #a4ade0;
+    --seal-100: #e1e5f7;
+    --seal-50: #f1f3fc;
 
-    --grad: linear-gradient(135deg, #34566e 0%, #3a7671 60%, #4d8f86 100%);
-    --grad-deep: linear-gradient(170deg, #22384d 0%, #1b2e41 100%);
+    /* أسماء قديمة تُستخدم في بقية الملف: تشير الآن إلى حبر الختم */
+    --brand-700: var(--seal-700);
+    --brand-600: var(--seal-600);
+    --brand-500: var(--seal-500);
+    --brand-400: var(--seal-300);
+    --brand-100: var(--seal-100);
+    --brand-50: var(--seal-50);
 
-    /* الأسطح والنص */
-    --bg: #f1f3f5;
+    /* لا تدرّجات زخرفية: أسطح صلبة */
+    --grad: var(--seal-600);
+    --grad-deep: var(--ink-900);
+
+    /* الورق والأسطح */
+    --bg: #eef0ec;
     --surface: #ffffff;
-    --surface-2: #f7f8fa;
-    --line: #e2e7ec;
-    --line-strong: #cfd8e0;
+    --surface-2: #f6f7f4;
+    --surface-3: #eceee9;
+    --line: #dfe2dc;
+    --line-strong: #c6cbc3;
 
-    --text: #243345;
-    --text-2: #56677a;
-    --text-3: #8a98a8;
+    --text: #1a2a45;
+    --text-2: #4c5a72;
+    --text-3: #687387;
 
     /* الحالات */
-    --success: #3a8763;
-    --success-bg: #e8f3ed;
-    --warning: #a9772f;
-    --warning-bg: #f8f0e1;
-    --danger: #b0493f;
-    --danger-bg: #f9ecea;
+    --success: #23704f;
+    --success-bg: #e3f1e9;
+    --warning: #8f5f12;
+    --warning-bg: #f6ecd8;
+    --danger: #a8352c;
+    --danger-bg: #f8e7e5;
 
-    /* الحواف والظلال */
-    --r-sm: 8px;
-    --r-md: 12px;
-    --r-lg: 18px;
-    --r-xl: 24px;
+    /* الحواف والظلال: طبقة واحدة لكل عنصر */
+    --r-sm: 6px;
+    --r-md: 10px;
+    --r-lg: 14px;
+    --r-xl: 16px;
 
-    --sh-1: 0 1px 2px rgba(34, 57, 79, 0.05), 0 1px 1px rgba(34, 57, 79, 0.03);
-    --sh-2: 0 16px 36px -20px rgba(34, 57, 79, 0.22);
-    --glow: 0 12px 26px -16px rgba(52, 117, 112, 0.38);
-    --ring: 0 0 0 4px rgba(67, 138, 131, 0.14);
+    --sh-1: 0 1px 2px rgba(18, 30, 51, 0.06);
+    --sh-2: 0 12px 28px -14px rgba(18, 30, 51, 0.3);
+    --glow: 0 8px 20px -12px rgba(43, 56, 144, 0.55);
+    --ring: 0 0 0 3px rgba(52, 70, 168, 0.3);
 
-    /* الخطوط:
-       Calibri لا يحتوي حروفاً عربية، فيكتب به المتصفح الحروف الإنجليزية والأرقام فقط،
-       والحروف العربية تأخذ Segoe UI (رفيقه في ويندوز وأوفيس).
-       على الأجهزة التي لا تملكهما يُستخدم IBM Plex Sans Arabic. */
-    --font-body: Calibri, "Segoe UI", "IBM Plex Sans Arabic", Tahoma, Arial, sans-serif;
-    --font-display: Calibri, "Segoe UI", "IBM Plex Sans Arabic", Tahoma, sans-serif;
+    /* الخطوط: خط واحد للنص والأرقام على كل الأجهزة،
+       والكوفي الرسمي لعناوين الصفحات فقط (مثل ترويسة الورق الرسمي). */
+    --font-body: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
+    --font-display: "Noto Kufi Arabic", "IBM Plex Sans Arabic", "Segoe UI", sans-serif;
+
+    /* سلّم أحجام الخط (نسبة ~1.15) */
+    --fs-xs: 12px;
+    --fs-sm: 13px;
+    --fs-md: 14px;
+    --fs-base: 15px;
+    --fs-lg: 17px;
+    --fs-xl: 20px;
+    --fs-2xl: 24px;
+    --fs-3xl: 30px;
+    --fs-4xl: 38px;
 
     --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -78,20 +100,28 @@ html {
 
 body {
     font-family: var(--font-body);
-    font-size: 15px;
+    font-size: var(--fs-base);
     line-height: 1.6;
     color: var(--text);
     background: var(--bg);
     min-height: 100vh;
     font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
+    caret-color: var(--seal-600);
 }
 
 h1, h2, h3, h4 {
-    font-family: var(--font-display);
+    font-family: var(--font-body);
     font-weight: 700;
-    line-height: 1.35;
+    line-height: 1.4;
+    letter-spacing: 0;
     color: var(--text);
+    text-wrap: balance;
+}
+
+a {
+    color: var(--seal-600);
+    text-underline-offset: 4px;
 }
 
 button,
@@ -111,17 +141,67 @@ button {
 }
 
 ::selection {
-    background: var(--brand-100);
-    color: var(--brand-700);
+    background: var(--seal-100);
+    color: var(--seal-800);
 }
 
 * {
     scrollbar-width: thin;
-    scrollbar-color: #b9c6d3 transparent;
+    scrollbar-color: #b9bfb6 transparent;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #c3cfdb; border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb { background: #c2c7bf; border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
+
+:focus-visible {
+    outline: 2px solid var(--seal-500);
+    outline-offset: 2px;
+}
+
+/* لمس أسرع على الهاتف دون تكبير مزدوج، وبلا وميض رمادي */
+button,
+a,
+.chip,
+.clickable-row,
+input,
+select {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.clickable-row:focus-visible td {
+    background: var(--seal-50) !important;
+}
+
+/* رابط التخطي إلى المحتوى: يظهر عند التنقل بلوحة المفاتيح فقط */
+.skip-link {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 4000;
+    padding: 10px 16px;
+    border-radius: var(--r-md);
+    background: var(--seal-600);
+    color: #ffffff;
+    font-weight: 700;
+    text-decoration: none;
+    transform: translateY(-160%);
+    transition: transform 0.2s var(--ease);
+}
+
+.skip-link:focus {
+    transform: none;
+}
+
+.main-content:focus {
+    outline: none;
+}
+
+/* التمرير داخل النوافذ والقائمة لا يحرّك الصفحة خلفها */
+.modal-content,
+.sidebar {
+    overscroll-behavior: contain;
+}
 ::-webkit-scrollbar-track { background: transparent; }
 
 @keyframes fadeUp {
@@ -145,27 +225,25 @@ button {
     display: grid;
     place-items: center;
     padding: 24px;
-    background:
-        radial-gradient(900px 500px at 85% -10%, rgba(67, 138, 131, 0.14), transparent 60%),
-        radial-gradient(700px 500px at 0% 110%, rgba(52, 86, 110, 0.14), transparent 60%),
-        var(--bg);
+    background: var(--bg);
 }
 
 .login-shell {
     width: 100%;
-    max-width: 980px;
+    max-width: 960px;
     display: grid;
-    grid-template-columns: 1.05fr 1fr;
+    grid-template-columns: 1fr 1fr;
     background: var(--surface);
     border-radius: var(--r-xl);
     overflow: hidden;
-    box-shadow: var(--sh-2), 0 0 0 1px rgba(15, 42, 68, 0.04);
-    animation: pop 0.5s var(--ease);
+    box-shadow: var(--sh-2);
+    animation: pop 0.45s var(--ease);
 }
 
+/* لوح الختم: حبر كحلي وختم النقابة */
 .login-art {
     position: relative;
-    background: var(--grad);
+    background: var(--ink-900);
     color: #ffffff;
     padding: 48px 44px;
     display: flex;
@@ -176,61 +254,54 @@ button {
     isolation: isolate;
 }
 
-.login-art::before,
-.login-art::after {
-    content: "";
-    position: absolute;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    z-index: -1;
-}
-
-.login-art::before { width: 420px; height: 420px; top: -160px; left: -140px; }
-.login-art::after { width: 300px; height: 300px; bottom: -150px; right: -90px; background: rgba(255, 255, 255, 0.05); }
-
 .login-art .seal-xl {
-    width: 92px;
-    height: 92px;
-    color: #ffffff;
-    opacity: 0.95;
-    margin-bottom: 6px;
+    width: 104px;
+    height: 104px;
+    color: var(--seal-300);
+    margin-bottom: 10px;
+    transform: rotate(-8deg);
 }
 
 .login-art-org {
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 500;
-    opacity: 0.85;
+    color: #c3cbe0;
 }
 
 .login-art h2 {
+    font-family: var(--font-display);
     color: #ffffff;
-    font-size: 26px;
-    line-height: 1.5;
+    font-size: var(--fs-2xl);
+    font-weight: 700;
+    line-height: 1.6;
+    padding-bottom: 18px;
+    border-bottom: 3px double rgba(164, 173, 224, 0.45);
 }
 
 .login-art-points {
     list-style: none;
     display: grid;
     gap: 12px;
-    margin-top: 12px;
+    margin-top: 10px;
 }
 
 .login-art-points li {
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 14px;
-    opacity: 0.95;
+    font-size: var(--fs-md);
+    color: #dfe4f2;
 }
 
 .login-art-points i {
     width: 34px;
     height: 34px;
-    border-radius: 10px;
+    border-radius: var(--r-md);
     display: grid;
     place-items: center;
-    background: rgba(255, 255, 255, 0.15);
-    font-size: 18px;
+    background: rgba(164, 173, 224, 0.14);
+    color: var(--seal-300);
+    font-size: var(--fs-lg);
     flex-shrink: 0;
 }
 
@@ -242,25 +313,25 @@ button {
 }
 
 .logo-circle {
-    width: 62px;
-    height: 62px;
+    width: 56px;
+    height: 56px;
     border-radius: var(--r-lg);
     display: grid;
     place-items: center;
-    background: var(--grad);
-    color: #ffffff;
-    font-size: 30px;
-    box-shadow: var(--glow);
+    background: var(--seal-50);
+    color: var(--seal-600);
+    font-size: var(--fs-3xl);
 }
 
 .login-box h1 {
-    font-size: 26px;
+    font-family: var(--font-display);
+    font-size: var(--fs-2xl);
     margin: 20px 0 4px;
 }
 
 .login-subtitle {
     color: var(--text-2);
-    font-size: 14px;
+    font-size: var(--fs-md);
     margin-bottom: 26px;
 }
 
@@ -271,12 +342,12 @@ button {
 .login-box .primary-btn {
     height: 48px;
     margin-top: 8px;
-    font-size: 15px;
+    font-size: var(--fs-base);
 }
 
 .error-message {
     color: var(--danger);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 500;
     min-height: 20px;
     margin-top: 12px;
@@ -297,19 +368,20 @@ button {
     min-width: 0;
 }
 
+/* القائمة الجانبية: كعب دفتر القيد بالحبر الكحلي */
 .sidebar {
     position: sticky;
     top: 0;
     height: 100vh;
     overflow-y: auto;
-    background: var(--surface);
-    border-left: 1px solid var(--line);
-    color: var(--text);
-    padding: 20px 16px;
+    background: var(--ink-900);
+    color: #ffffff;
+    padding: 20px 14px;
     display: flex;
     flex-direction: column;
     gap: 16px;
     z-index: 60;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 .sidebar-head {
@@ -317,8 +389,8 @@ button {
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 0 4px 16px;
-    border-bottom: 1px solid var(--line);
+    padding: 0 6px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .brand {
@@ -331,19 +403,21 @@ button {
     width: 46px;
     height: 46px;
     flex-shrink: 0;
-    color: var(--brand-600);
+    color: var(--seal-300);
 }
 
 .brand-org {
-    font-size: 12px;
-    color: var(--text-3);
+    font-size: var(--fs-xs);
+    color: #aab3ca;
     font-weight: 500;
 }
 
 .brand h1 {
-    font-size: 16px;
-    color: var(--ink-800);
-    line-height: 1.4;
+    font-family: var(--font-display);
+    font-size: var(--fs-md);
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.6;
 }
 
 .menu-close,
@@ -355,19 +429,24 @@ button {
     border: 1px solid var(--line);
     background: var(--surface-2);
     color: var(--ink-700);
-    font-size: 22px;
+    font-size: var(--fs-xl);
     place-items: center;
     flex-shrink: 0;
+}
+
+.sidebar .menu-close {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
 }
 
 /* بطاقة المستخدم */
 .profile-card {
     display: grid;
-    gap: 12px;
-    padding: 14px;
+    gap: 10px;
+    padding: 12px;
     border-radius: var(--r-lg);
-    background: var(--surface-2);
-    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .profile-row {
@@ -377,59 +456,59 @@ button {
 }
 
 .profile-icon {
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
     border-radius: var(--r-md);
     display: grid;
     place-items: center;
-    background: var(--brand-50);
-    border: 1px solid var(--brand-100);
-    color: var(--brand-700);
-    font-size: 19px;
+    background: rgba(164, 173, 224, 0.14);
+    color: var(--seal-300);
+    font-size: var(--fs-lg);
     flex-shrink: 0;
 }
 
 .profile-row small {
     display: block;
-    font-size: 12px;
-    color: var(--text-3);
+    font-size: var(--fs-xs);
+    color: #aab3ca;
     line-height: 1.3;
 }
 
 .profile-row strong {
-    font-size: 14.5px;
-    color: var(--text);
+    font-size: var(--fs-md);
+    color: #ffffff;
 }
 
 /* عناصر القائمة */
 .navigation {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
 }
 
 .tab-btn,
 .logout-btn {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
     width: 100%;
-    padding: 10px 14px;
-    border-radius: 14px;
+    padding: 9px 12px;
+    border-radius: var(--r-md);
     border: 0;
     background: transparent;
-    color: var(--text);
+    color: #e6e9f2;
     text-align: right;
-    transition: background 0.2s, color 0.2s, box-shadow 0.25s;
+    transition: background 0.18s, color 0.18s;
 }
 
 .tab-btn .nav-icon,
 .logout-btn .nav-icon {
-    font-size: 22px;
+    font-size: var(--fs-xl);
     width: 24px;
     text-align: center;
     flex-shrink: 0;
-    color: var(--ink-700);
+    color: #9ea8c2;
+    transition: color 0.18s;
 }
 
 .nav-text {
@@ -440,48 +519,61 @@ button {
 }
 
 .nav-text b {
-    font-size: 15px;
-    font-weight: 700;
+    font-size: var(--fs-md);
+    font-weight: 600;
 }
 
 .nav-text small {
-    font-size: 12px;
-    color: var(--text-3);
+    font-size: var(--fs-xs);
+    color: #98a2bc;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .tab-btn:hover {
-    background: var(--surface-2);
-}
-
-.tab-btn.active {
-    background: var(--brand-700);
+    background: rgba(255, 255, 255, 0.06);
     color: #ffffff;
-    box-shadow: var(--glow);
 }
 
-.tab-btn.active .nav-icon,
+.tab-btn:hover .nav-icon {
+    color: #ffffff;
+}
+
+/* الصفحة الحالية: ورقة بيضاء مختومة بحبر الختم */
+.tab-btn.active {
+    background: var(--surface);
+    color: var(--ink-900);
+}
+
+.tab-btn.active .nav-icon {
+    color: var(--seal-600);
+}
+
+.tab-btn.active .nav-text b {
+    font-weight: 700;
+}
+
 .tab-btn.active .nav-text small {
-    color: rgba(255, 255, 255, 0.82);
+    color: var(--text-2);
 }
 
 .logout-btn {
     margin-top: auto;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 0;
-    padding-top: 16px;
-    color: var(--danger);
+    padding-top: 14px;
+    color: #f3b9b3;
 }
 
 .logout-btn .nav-icon {
-    color: var(--danger);
+    color: #f3b9b3;
 }
 
 .logout-btn:hover {
-    background: var(--danger-bg);
-    border-radius: 14px;
+    background: rgba(168, 53, 44, 0.22);
+    border-radius: var(--r-md);
+    color: #ffffff;
 }
 
 /* شريط الهاتف والطبقة الخلفية */
@@ -509,64 +601,52 @@ button {
 
 .active-section {
     display: block;
-    animation: fadeUp 0.4s var(--ease);
+    animation: fadeUp 0.25s var(--ease);
 }
 
-/* ================= عنوان الصفحة ================= */
+/* ================= عنوان الصفحة =================
+   ترويسة هادئة مثل رأس صفحة في دفتر رسمي:
+   أيقونة مختومة، عنوان بالخط الكوفي، وخط مزدوج تحته. */
 
 .page-title {
     position: relative;
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 22px 26px;
-    margin-bottom: 22px;
-    border-radius: var(--r-lg);
-    background: var(--grad);
-    color: #ffffff;
-    box-shadow: var(--glow);
-    overflow: hidden;
-    isolation: isolate;
-}
-
-.page-title::after {
-    content: "";
-    position: absolute;
-    width: 260px;
-    height: 260px;
-    left: -70px;
-    top: -120px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(255, 255, 255, 0.05);
-    z-index: -1;
+    padding: 4px 2px 18px;
+    margin-bottom: 24px;
+    color: var(--text);
+    border-bottom: 3px double var(--line-strong);
 }
 
 .page-icon {
-    width: 52px;
-    height: 52px;
+    width: 48px;
+    height: 48px;
     border-radius: var(--r-md);
     display: grid;
     place-items: center;
-    background: rgba(255, 255, 255, 0.16);
-    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: var(--seal-50);
+    color: var(--seal-600);
     flex-shrink: 0;
 }
 
 .page-icon svg {
-    width: 26px;
-    height: 26px;
-    color: #ffffff;
+    width: 24px;
+    height: 24px;
+    color: var(--seal-600);
 }
 
 .page-title h2 {
-    color: #ffffff;
-    font-size: 23px;
+    font-family: var(--font-display);
+    color: var(--ink-900);
+    font-size: var(--fs-2xl);
+    font-weight: 700;
+    line-height: 1.5;
 }
 
 .page-title p {
-    color: rgba(255, 255, 255, 0.82);
-    font-size: 14px;
+    color: var(--text-2);
+    font-size: var(--fs-md);
 }
 
 /* ================= البطاقات ================= */
@@ -578,7 +658,6 @@ button {
     border-radius: var(--r-lg);
     padding: 22px 24px;
     margin-bottom: 20px;
-    box-shadow: var(--sh-1);
 }
 
 .content-card > h3,
@@ -586,7 +665,7 @@ button {
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 17px;
+    font-size: var(--fs-lg);
     padding-bottom: 14px;
     margin-bottom: 18px;
     border-bottom: 1px solid var(--line);
@@ -601,12 +680,12 @@ button {
     place-items: center;
     background: var(--brand-50);
     color: var(--brand-600);
-    font-size: 19px;
+    font-size: var(--fs-xl);
 }
 
 .content-card > p {
     color: var(--text-2);
-    font-size: 14px;
+    font-size: var(--fs-md);
     margin-bottom: 8px;
 }
 
@@ -614,7 +693,7 @@ button {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 14.5px;
+    font-size: var(--fs-base);
     font-weight: 700;
     margin: 22px 0 12px;
     color: var(--ink-700);
@@ -622,7 +701,7 @@ button {
 
 .sub-title .ti {
     color: var(--brand-600);
-    font-size: 18px;
+    font-size: var(--fs-lg);
 }
 
 .section-header {
@@ -643,7 +722,7 @@ button {
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 17px;
+    font-size: var(--fs-lg);
 }
 
 .counter {
@@ -651,11 +730,21 @@ button {
     align-items: center;
     padding: 5px 12px;
     border-radius: 999px;
-    background: var(--brand-50);
-    color: var(--brand-600);
-    border: 1px solid var(--brand-100);
-    font-size: 13px;
-    font-weight: 600;
+    background: var(--seal-50);
+    color: var(--seal-700);
+    border: 1px solid var(--seal-100);
+    font-size: var(--fs-sm);
+    font-weight: 700;
+}
+
+/* وميض العدّاد بعد إضافة وكالة */
+.counter.bump {
+    animation: counterBump 0.6s var(--ease);
+}
+
+@keyframes counterBump {
+    0% { background: var(--seal-600); color: #ffffff; transform: scale(1.12); }
+    100% { background: var(--seal-50); color: var(--seal-700); transform: none; }
 }
 
 /* ================= النماذج ================= */
@@ -694,18 +783,18 @@ button {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-2);
 }
 
 .input-group > label .ti {
     color: var(--brand-600);
-    font-size: 16px;
+    font-size: var(--fs-lg);
 }
 
 .input-group small {
-    font-size: 12px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
 }
 
@@ -717,8 +806,8 @@ textarea {
     padding: 0 14px;
     border: 1px solid var(--line-strong);
     border-radius: var(--r-md);
-    background: #fbfcfd;
-    font-size: 14.5px;
+    background: #ffffff;
+    font-size: var(--fs-base);
     color: var(--text);
     outline: none;
     transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
@@ -740,7 +829,7 @@ textarea::placeholder {
 input:where(:not([type="checkbox"]):not([type="radio"])):hover,
 select:hover,
 textarea:hover {
-    border-color: #b3c2d1;
+    border-color: #a3aaa0;
 }
 
 input:where(:not([type="checkbox"]):not([type="radio"])):focus,
@@ -755,7 +844,7 @@ select {
     appearance: none;
     -webkit-appearance: none;
     padding-left: 38px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23438a83' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%233446a8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: left 14px center;
     cursor: pointer;
@@ -784,7 +873,7 @@ input[type="number"] {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 500;
     color: var(--text-2);
     cursor: pointer;
@@ -835,7 +924,7 @@ input[type="number"] {
     border: 0;
     background: var(--surface-2);
     color: var(--brand-600);
-    font-size: 20px;
+    font-size: var(--fs-xl);
     font-weight: 600;
     line-height: 1;
     transition: background 0.15s, color 0.15s;
@@ -867,7 +956,7 @@ input[type="number"] {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
 }
 
@@ -884,20 +973,20 @@ input[type="number"] {
 
 .field-hint {
     display: block;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--brand-700);
     line-height: 1.7;
 }
 
 .computed-value {
-    font-size: 15px;
+    font-size: var(--fs-base);
     font-weight: 700;
     color: var(--brand-600);
 }
 
 .computed-value small {
     display: block;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     font-weight: 500;
     color: var(--text-3);
 }
@@ -917,7 +1006,7 @@ input[type="number"] {
     padding: 0 18px;
     border-radius: var(--r-md);
     border: 1px solid transparent;
-    font-size: 14px;
+    font-size: var(--fs-md);
     font-weight: 600;
     white-space: nowrap;
     transition: transform 0.2s var(--ease), box-shadow 0.25s, background 0.2s, border-color 0.2s, color 0.2s;
@@ -927,29 +1016,36 @@ input[type="number"] {
 .secondary-btn .ti,
 .success-btn .ti,
 .danger-btn .ti {
-    font-size: 18px;
+    font-size: var(--fs-lg);
 }
 
 .primary-btn {
-    background: var(--grad);
+    background: var(--seal-600);
     color: #ffffff;
-    box-shadow: 0 8px 18px -10px rgba(52, 117, 112, 0.45);
 }
 
 .primary-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--glow);
+    background: var(--seal-700);
 }
 
 .success-btn {
-    background: linear-gradient(135deg, #2f7658 0%, #3f8f69 100%);
+    background: var(--success);
     color: #ffffff;
-    box-shadow: 0 8px 18px -10px rgba(58, 135, 99, 0.45);
 }
 
 .success-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 14px 28px -12px rgba(58, 135, 99, 0.4);
+    background: #1b5c40;
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled,
+.success-btn:disabled,
+.danger-btn:disabled,
+.act-btn:disabled,
+.number-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
 }
 
 .secondary-btn {
@@ -966,7 +1062,7 @@ input[type="number"] {
 
 .danger-btn {
     background: var(--danger-bg);
-    border-color: #f3cbc6;
+    border-color: #eec3be;
     color: var(--danger);
 }
 
@@ -995,6 +1091,11 @@ input[type="number"] {
     box-shadow: var(--ring);
 }
 
+.sidebar .tab-btn:focus-visible,
+.sidebar .logout-btn:focus-visible {
+    box-shadow: 0 0 0 2px var(--seal-300);
+}
+
 .full-width {
     width: 100%;
 }
@@ -1002,13 +1103,13 @@ input[type="number"] {
 .small-btn {
     height: 34px;
     padding: 0 12px;
-    font-size: 13px;
+    font-size: var(--fs-sm);
 }
 
 .act-btn {
     height: 32px;
     padding: 0 11px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     border-radius: 9px;
     background: var(--surface);
     border-color: var(--line);
@@ -1035,7 +1136,7 @@ input[type="number"] {
     background: none;
     border: 0;
     color: var(--brand-600);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 600;
 }
 
@@ -1053,7 +1154,7 @@ input[type="number"] {
 }
 
 .autosave-status {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
 }
 
@@ -1071,7 +1172,7 @@ input[type="number"] {
     height: 46px;
     padding-right: 44px;
     background-color: var(--surface);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%238595a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10' cy='10' r='7'/%3E%3Cpath d='M21 21l-6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23687387' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10' cy='10' r='7'/%3E%3Cpath d='M21 21l-6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 15px center;
     box-shadow: var(--sh-1);
@@ -1095,21 +1196,23 @@ table {
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    font-size: 14px;
+    font-size: var(--fs-md);
 }
 
+/* رأس الجدول مثل رأس صفحة دفتر القيد: سطح ورقي وخط حبر سميك تحته */
 thead tr {
-    background: var(--grad);
+    background: var(--surface-2);
 }
 
 th {
-    padding: 13px 14px;
-    color: #ffffff;
-    font-size: 13px;
-    font-weight: 600;
+    padding: 12px 14px;
+    color: var(--ink-800);
+    font-size: var(--fs-sm);
+    font-weight: 700;
     text-align: right;
     white-space: nowrap;
     vertical-align: middle;
+    border-bottom: 2px solid var(--ink-800);
 }
 
 td {
@@ -1141,6 +1244,15 @@ th.num {
     white-space: nowrap;
 }
 
+/* جدول السجلات: صف واحد لكل سجل، والجدول يتمرر أفقياً على الشاشات الصغيرة */
+#recordsSection table {
+    min-width: 1080px;
+}
+
+#recordsSection td {
+    white-space: nowrap;
+}
+
 .money-cell {
     color: var(--brand-700);
     font-weight: 700;
@@ -1148,7 +1260,7 @@ th.num {
 
 .date-cell {
     color: var(--text-2);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     white-space: nowrap;
 }
 
@@ -1159,7 +1271,7 @@ th.num {
     background: var(--ink-100);
     color: var(--ink-700);
     font-weight: 700;
-    font-size: 13px;
+    font-size: var(--fs-sm);
 }
 
 .agency-count {
@@ -1215,7 +1327,7 @@ th.num {
 
 .empty-hint {
     color: var(--text-3);
-    font-size: 13.5px;
+    font-size: var(--fs-md);
 }
 
 /* ================= الشارات ================= */
@@ -1227,7 +1339,7 @@ th.num {
     align-items: center;
     padding: 2px 10px;
     border-radius: 999px;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     white-space: nowrap;
     vertical-align: middle;
@@ -1247,88 +1359,106 @@ th.num {
     background: var(--brand-50);
     color: var(--brand-700);
     border: 1px solid var(--brand-100);
-    font-size: 11px;
+    font-size: var(--fs-xs);
 }
 
-/* ================= لوحة التحكم ================= */
+/* ================= لوحة التحكم =================
+   العنصر المميز الوحيد في النظام: «المطلوب من المندوبين»
+   كإجمالي مُصدَّق في دفتر رسمي — رقم كبير بخط مزدوج تحته
+   (علامة الإجمالي النهائي في المحاسبة) وختم النقابة بحبر الختم. */
 
 .dash-hero {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 330px;
-    border-radius: var(--r-xl);
-    background: var(--grad);
-    color: #ffffff;
-    overflow: hidden;
-    box-shadow: var(--glow);
-    position: relative;
-    isolation: isolate;
-}
-
-.dash-hero::before {
-    content: "";
-    position: absolute;
-    width: 380px;
-    height: 380px;
-    right: -120px;
-    bottom: -220px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    z-index: -1;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+    align-items: stretch;
+    gap: 20px;
+    padding-bottom: 22px;
+    border-bottom: 3px double var(--line-strong);
 }
 
 .dash-hero-text {
-    padding: 32px 34px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 8px 2px;
 }
 
 .dash-date {
-    font-size: 13px;
-    opacity: 0.82;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--seal-700);
     margin-bottom: 6px;
 }
 
 .dash-hero-text h2 {
-    color: #ffffff;
-    font-size: 30px;
+    font-family: var(--font-display);
+    color: var(--ink-900);
+    font-size: var(--fs-3xl);
+    line-height: 1.5;
     margin-bottom: 6px;
 }
 
 .dash-hero-text p {
-    opacity: 0.86;
-    font-size: 14.5px;
+    color: var(--text-2);
+    font-size: var(--fs-base);
+    max-width: 52ch;
 }
 
 .dash-due {
+    position: relative;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 4px;
-    padding: 30px;
-    background: rgba(255, 255, 255, 0.1);
-    border-right: 1px solid rgba(255, 255, 255, 0.16);
-    backdrop-filter: blur(6px);
+    gap: 6px;
+    padding: 28px 30px;
+    border-radius: var(--r-xl);
+    background: var(--ink-900);
+    color: #ffffff;
+    overflow: hidden;
+    isolation: isolate;
+    box-shadow: var(--sh-2);
+}
+
+.dash-due .seal-stamp {
+    position: absolute;
+    width: 190px;
+    height: 190px;
+    left: -34px;
+    bottom: -46px;
+    color: var(--seal-300);
+    opacity: 0.16;
+    transform: rotate(-14deg);
+    z-index: -1;
+    pointer-events: none;
 }
 
 .dash-due span {
-    font-size: 13px;
-    font-weight: 500;
-    opacity: 0.88;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: #c3cbe0;
 }
 
 .dash-due strong {
-    font-family: var(--font-display);
-    font-size: 34px;
-    line-height: 1.3;
+    align-self: flex-start;
+    font-family: var(--font-body);
+    font-size: var(--fs-4xl);
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    padding-bottom: 4px;
+    border-bottom: 4px double var(--seal-300);
 }
 
 .dash-due small {
-    font-size: 12.5px;
-    opacity: 0.78;
+    margin-top: 6px;
+    font-size: var(--fs-sm);
+    color: #aab3ca;
 }
 
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 14px;
+    gap: 12px;
     margin: 20px 0;
 }
 
@@ -1336,57 +1466,73 @@ th.num {
     grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
-@media screen and (max-width: 1100px) {
+@media screen and (max-width: 1280px) {
     .stats-grid.dash-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-@media screen and (max-width: 600px) {
+@media screen and (max-width: 640px) {
     .stats-grid.dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* مؤشرات قابلة للضغط: تنقل إلى التفاصيل */
 .stat-card {
     position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    text-align: right;
+    font: inherit;
+    color: inherit;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
-    padding: 18px 20px 16px;
-    box-shadow: var(--sh-1);
-    overflow: hidden;
-    transition: transform 0.25s var(--ease), box-shadow 0.25s;
+    padding: 16px 18px;
+    transition: border-color 0.18s, background 0.18s;
 }
 
-.stat-card::before {
-    content: "";
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 4px;
-    background: var(--grad);
+button.stat-card:hover {
+    border-color: var(--seal-300);
+    background: var(--seal-50);
 }
 
-.stat-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--sh-2);
+button.stat-card:focus-visible {
+    outline: none;
+    box-shadow: var(--ring);
 }
 
 .stat-card span {
-    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
-    font-weight: 500;
+    font-weight: 600;
+}
+
+.stat-card span::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ink-600);
 }
 
 .stat-card strong {
     display: block;
-    font-family: var(--font-display);
-    font-size: 30px;
-    color: var(--ink-800);
-    margin-top: 4px;
+    font-family: var(--font-body);
+    font-size: var(--fs-3xl);
+    font-weight: 700;
+    color: var(--ink-900);
+    line-height: 1.3;
 }
 
-.stat-active::before { background: var(--success); }
+.stat-active span::before { background: var(--success); }
 .stat-active strong { color: var(--success); }
-.stat-missing::before { background: #c9a15a; }
+.stat-missing span::before { background: var(--warning); }
 .stat-missing strong { color: var(--warning); }
-.stat-cancelled::before { background: var(--danger); }
+.stat-cancelled span::before { background: var(--danger); }
 .stat-cancelled strong { color: var(--danger); }
 
 .dash-panels {
@@ -1409,7 +1555,8 @@ th.num {
 
 .status-bar {
     display: flex;
-    height: 14px;
+    gap: 2px;
+    height: 12px;
     border-radius: 999px;
     overflow: hidden;
     background: var(--ink-100);
@@ -1431,12 +1578,11 @@ th.num {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     padding: 10px 12px;
     border-radius: var(--r-md);
     background: var(--surface-2);
-    border: 1px solid var(--line);
 }
 
 .status-legend i {
@@ -1449,7 +1595,7 @@ th.num {
 .status-legend strong {
     margin-right: auto;
     color: var(--text);
-    font-size: 15px;
+    font-size: var(--fs-base);
 }
 
 .status-legend small {
@@ -1466,7 +1612,7 @@ th.num {
     grid-template-columns: 150px minmax(0, 1fr) 36px;
     align-items: center;
     gap: 12px;
-    font-size: 13.5px;
+    font-size: var(--fs-md);
 }
 
 .type-name {
@@ -1484,7 +1630,7 @@ th.num {
     display: block;
     height: 100%;
     border-radius: 999px;
-    background: var(--grad);
+    background: var(--seal-600);
 }
 
 .type-bar strong {
@@ -1493,6 +1639,7 @@ th.num {
 
 .rep-list {
     list-style: none;
+    counter-reset: rep;
 }
 
 .rep-list li {
@@ -1510,16 +1657,16 @@ th.num {
 
 .rep-list strong {
     display: block;
-    font-size: 14px;
+    font-size: var(--fs-md);
 }
 
 .rep-list small {
     color: var(--text-3);
-    font-size: 12px;
+    font-size: var(--fs-xs);
 }
 
 .rep-list b {
-    color: var(--brand-700);
+    color: var(--seal-700);
     white-space: nowrap;
 }
 
@@ -1539,7 +1686,7 @@ th.num {
     background: var(--brand-50);
     border: 1px solid var(--brand-100);
     color: var(--brand-700);
-    font-size: 13.5px;
+    font-size: var(--fs-md);
     font-weight: 500;
 }
 
@@ -1586,12 +1733,12 @@ th.num {
     border-radius: var(--r-md);
     background: var(--surface);
     border: 1px solid var(--line);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
 }
 
 .preview-box strong {
-    font-size: 14.5px;
+    font-size: var(--fs-base);
     color: var(--text);
     white-space: nowrap;
 }
@@ -1601,14 +1748,14 @@ th.num {
     background: var(--grad);
     border-color: transparent;
     color: rgba(255, 255, 255, 0.9);
-    font-size: 14px;
+    font-size: var(--fs-md);
     padding: 14px 16px;
 }
 
 .preview-box .preview-total strong {
     color: #ffffff;
     font-family: var(--font-display);
-    font-size: 21px;
+    font-size: var(--fs-xl);
 }
 
 #pendingAgencies > p {
@@ -1654,7 +1801,7 @@ th.num {
     border-radius: var(--r-sm);
     background: var(--surface-2);
     border: 1px solid var(--line);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
 }
 
@@ -1692,7 +1839,7 @@ th.num {
     background: var(--brand-50);
     border: 1px solid var(--brand-100);
     color: var(--brand-700);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     white-space: nowrap;
 }
@@ -1702,7 +1849,7 @@ th.num {
     min-width: 150px;
     height: 34px;
     margin-left: 4px;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     background-color: #ffffff;
 }
 
@@ -1733,7 +1880,7 @@ th.num {
 
 .report-total h2 {
     color: #ffffff;
-    font-size: 20px;
+    font-size: var(--fs-xl);
     margin-bottom: 16px;
 }
 
@@ -1755,13 +1902,13 @@ th.num {
 }
 
 .report-grid > div > strong:first-child {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     font-weight: 600;
 }
 
 .report-grid > div > span {
-    font-size: 15px;
+    font-size: var(--fs-base);
     font-weight: 700;
 }
 
@@ -1775,14 +1922,14 @@ th.num {
 }
 
 .report-total .report-grid > div > span {
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 500;
     color: rgba(255, 255, 255, 0.85);
 }
 
 .report-number {
     font-family: var(--font-display);
-    font-size: 20px;
+    font-size: var(--fs-xl);
     color: #ffffff;
 }
 
@@ -1790,7 +1937,7 @@ th.num {
     grid-column: 1 / -1;
     background: #ffffff;
     border-color: #ffffff;
-    box-shadow: 0 12px 26px -16px rgba(8, 20, 34, 0.6);
+    box-shadow: 0 12px 26px -16px rgba(18, 30, 51, 0.6);
 }
 
 .report-total .report-grid > .report-due > span {
@@ -1800,7 +1947,7 @@ th.num {
 
 .report-total .report-due .report-number {
     color: var(--brand-700);
-    font-size: 28px;
+    font-size: var(--fs-3xl);
 }
 
 .report-card .table-wrapper {
@@ -1824,7 +1971,7 @@ th.num {
 }
 
 .input-group > label small {
-    font-size: 12px;
+    font-size: var(--fs-xs);
     font-weight: 500;
     color: var(--text-3);
 }
@@ -1856,7 +2003,7 @@ th.num {
     border: 1px solid var(--line-strong);
     background: var(--surface);
     color: var(--text-2);
-    font-size: 13.5px;
+    font-size: var(--fs-md);
     font-weight: 600;
     transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.2s;
 }
@@ -1870,7 +2017,7 @@ th.num {
     background: var(--brand-600);
     border-color: var(--brand-600);
     color: #ffffff;
-    box-shadow: 0 6px 14px -8px rgba(52, 117, 112, 0.7);
+    box-shadow: 0 6px 14px -8px rgba(43, 56, 144, 0.7);
 }
 
 .chip input:focus-visible + span {
@@ -1896,7 +2043,7 @@ th.num {
 
 .row-go {
     color: var(--text-3);
-    font-size: 15px;
+    font-size: var(--fs-base);
     margin-right: 6px;
     vertical-align: middle;
 }
@@ -1952,7 +2099,7 @@ tr.cls-cancelled > td:first-child {
     padding: 0 7px;
     height: 19px;
     border-radius: 999px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     line-height: 1;
     white-space: nowrap;
@@ -2059,13 +2206,13 @@ tr.cls-cancelled > td:first-child {
     border-radius: 12px;
     background: transparent;
     color: var(--text-2);
-    font-size: 14px;
+    font-size: var(--fs-md);
     font-weight: 700;
     transition: background 0.2s, color 0.2s, box-shadow 0.25s;
 }
 
 .calc-tab .ti {
-    font-size: 19px;
+    font-size: var(--fs-xl);
 }
 
 .calc-tab:hover {
@@ -2092,7 +2239,7 @@ tr.cls-cancelled > td:first-child {
     align-items: center;
     border: 1px solid var(--line-strong);
     border-radius: var(--r-md);
-    background: #fbfcfd;
+    background: #ffffff;
     overflow: hidden;
     transition: border-color 0.2s, box-shadow 0.2s;
 }
@@ -2113,7 +2260,7 @@ tr.cls-cancelled > td:first-child {
 .input-suffix span {
     padding: 0 14px;
     color: var(--text-3);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     white-space: nowrap;
 }
@@ -2134,7 +2281,7 @@ tr.cls-cancelled > td:first-child {
     height: 44px;
     width: 44px;
     padding: 0;
-    font-size: 18px;
+    font-size: var(--fs-lg);
 }
 
 .calc-kpis {
@@ -2155,13 +2302,13 @@ tr.cls-cancelled > td:first-child {
 }
 
 .calc-kpis span {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     font-weight: 600;
 }
 
 .calc-kpis strong {
-    font-size: 19px;
+    font-size: var(--fs-xl);
     color: var(--text);
 }
 
@@ -2177,20 +2324,20 @@ tr.cls-cancelled > td:first-child {
 
 .calc-kpis .calc-kpi-main strong {
     color: #ffffff;
-    font-size: 23px;
+    font-size: var(--fs-2xl);
 }
 
 .calc-kpis .calc-state-ok {
-    background: linear-gradient(135deg, #2f7658, #3f8f69);
+    background: var(--success);
 }
 
 .calc-kpis .calc-state-short {
-    background: linear-gradient(135deg, #a3433a, #bf5a4f);
+    background: var(--danger);
     box-shadow: 0 12px 26px -16px rgba(176, 73, 63, 0.5);
 }
 
 .calc-kpis .calc-state-over {
-    background: linear-gradient(135deg, #9a6a24, #b98535);
+    background: var(--warning);
     box-shadow: 0 12px 26px -16px rgba(169, 119, 47, 0.5);
 }
 
@@ -2218,7 +2365,7 @@ tr.cls-cancelled > td:first-child {
     grid-column: 1 / -1;
 }
 
-@media screen and (max-width: 1100px) {
+@media screen and (max-width: 1280px) {
     .calc-quick {
         grid-template-columns: minmax(0, 1fr);
     }
@@ -2228,7 +2375,7 @@ tr.cls-cancelled > td:first-child {
     }
 }
 
-@media screen and (max-width: 700px) {
+@media screen and (max-width: 640px) {
     .calc-row {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
@@ -2245,14 +2392,14 @@ tr.cls-cancelled > td:first-child {
         flex: 1;
         justify-content: center;
         padding: 0 10px;
-        font-size: 13px;
+        font-size: var(--fs-sm);
     }
 }
 
 /* ================= دليل النظام ================= */
 
 .page-icon .ti {
-    font-size: 26px;
+    font-size: var(--fs-2xl);
     color: #ffffff;
 }
 
@@ -2260,13 +2407,13 @@ tr.cls-cancelled > td:first-child {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 13.5px;
+    font-size: var(--fs-md);
     color: var(--text-2);
     margin: 4px 4px 20px;
 }
 
 .guide-link .link-btn {
-    font-size: 13.5px;
+    font-size: var(--fs-md);
 }
 
 .guide-grid {
@@ -2286,13 +2433,13 @@ tr.cls-cancelled > td:first-child {
 
 .guide-text {
     color: var(--text-2);
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1.8;
     margin-bottom: 12px;
 }
 
 .guide-sub {
-    font-size: 14px;
+    font-size: var(--fs-md);
     color: var(--ink-700);
     margin: 16px 0 10px;
 }
@@ -2310,7 +2457,7 @@ tr.cls-cancelled > td:first-child {
     border-radius: 999px;
     border: 1px solid var(--line);
     background: var(--surface-2);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     box-shadow: inset -4px 0 0 var(--c);
 }
@@ -2324,7 +2471,7 @@ tr.cls-cancelled > td:first-child {
 .guide-shade {
     padding: 12px 10px;
     border-radius: var(--r-sm);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     text-align: center;
     border: 1px solid var(--line);
@@ -2339,7 +2486,7 @@ tr.cls-cancelled > td:first-child {
 .guide-list li {
     position: relative;
     padding-right: 16px;
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1.8;
     color: var(--text);
 }
@@ -2385,7 +2532,7 @@ tr.cls-cancelled > td:first-child {
     border: 1px solid var(--brand-100);
     color: var(--brand-700);
     font-weight: 700;
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1.8;
 }
 
@@ -2411,12 +2558,12 @@ tr.cls-cancelled > td:first-child {
 }
 
 .guide-split span {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
 }
 
 .guide-split strong {
-    font-size: 17px;
+    font-size: var(--fs-lg);
 }
 
 .guide-split .guide-split-due {
@@ -2429,13 +2576,13 @@ tr.cls-cancelled > td:first-child {
     color: #ffffff;
 }
 
-@media screen and (max-width: 1100px) {
+@media screen and (max-width: 1280px) {
     .guide-grid {
         grid-template-columns: minmax(0, 1fr);
     }
 }
 
-@media screen and (max-width: 600px) {
+@media screen and (max-width: 640px) {
     .guide-shades {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -2457,7 +2604,7 @@ tr.cls-cancelled > td:first-child {
 }
 
 .price-row > label {
-    font-size: 14px;
+    font-size: var(--fs-md);
     color: var(--text);
     font-weight: 500;
 }
@@ -2478,7 +2625,7 @@ tr.cls-cancelled > td:first-child {
 
 #additionPricesContainer .price-row > label:last-child {
     justify-content: flex-end;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     cursor: pointer;
 }
@@ -2542,19 +2689,19 @@ tr.cls-cancelled > td:first-child {
 }
 
 .committee-kpis .ck span {
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-2);
 }
 
 .committee-kpis .ck strong {
     font-family: var(--font-display);
-    font-size: 25px;
+    font-size: var(--fs-2xl);
     color: var(--ink-800);
 }
 
 .committee-kpis .ck small {
-    font-size: 12px;
+    font-size: var(--fs-xs);
     color: rgba(255, 255, 255, 0.78);
 }
 
@@ -2588,7 +2735,7 @@ tr.cls-cancelled > td:first-child {
     align-items: center;
     justify-content: center;
     padding: 24px;
-    background: rgba(8, 20, 34, 0.55);
+    background: rgba(18, 30, 51, 0.55);
     backdrop-filter: blur(5px);
     animation: fadeUp 0.2s ease;
 }
@@ -2602,7 +2749,7 @@ tr.cls-cancelled > td:first-child {
     padding: 28px;
     border-radius: var(--r-xl);
     background: var(--surface);
-    box-shadow: 0 40px 80px -30px rgba(8, 20, 34, 0.6);
+    box-shadow: 0 40px 80px -30px rgba(18, 30, 51, 0.6);
     animation: pop 0.35s var(--ease);
 }
 
@@ -2622,7 +2769,7 @@ tr.cls-cancelled > td:first-child {
     border: 1px solid var(--line);
     background: var(--surface);
     color: var(--text-2);
-    font-size: 22px;
+    font-size: var(--fs-2xl);
     line-height: 1;
     box-shadow: var(--sh-1);
     transition: background 0.2s, color 0.2s;
@@ -2633,39 +2780,240 @@ tr.cls-cancelled > td:first-child {
     color: var(--danger);
 }
 
-/* ================= رسالة عائمة ================= */
+/* ================= رسالة عائمة =================
+   تظهر أعلى الصفحة في الوسط حتى تُرى فوراً أثناء إدخال الوكالات،
+   ولون أيقونتها يدل على نوعها. */
 
 .app-toast {
     position: fixed;
-    bottom: 24px;
+    top: 18px;
     left: 50%;
-    transform: translate(-50%, 30px);
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-width: min(360px, calc(100vw - 32px));
     max-width: min(560px, calc(100vw - 32px));
-    padding: 14px 18px;
-    border-radius: var(--r-md);
-    background: var(--ink-800);
+    padding: 14px 18px 14px 20px;
+    border-radius: var(--r-lg);
+    background: var(--ink-900);
     color: #ffffff;
-    box-shadow: inset -4px 0 0 var(--brand-400), 0 20px 40px -16px rgba(8, 20, 34, 0.6);
+    box-shadow: 0 18px 40px -14px rgba(18, 30, 51, 0.55);
     opacity: 0;
+    transform: translate(-50%, -16px) scale(0.98);
     pointer-events: none;
-    transition: opacity 0.25s, transform 0.3s var(--ease);
+    transition: opacity 0.2s, transform 0.28s var(--ease);
     z-index: 3000;
-    line-height: 1.7;
+    line-height: 1.6;
+    cursor: pointer;
 }
 
 .app-toast.show {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translate(-50%, 0) scale(1);
+    pointer-events: auto;
+}
+
+.toast-icon {
+    font-size: var(--fs-2xl);
+    line-height: 1;
+    margin-top: 2px;
+    flex-shrink: 0;
+    color: var(--seal-300);
+}
+
+.toast-success .toast-icon { color: #7fd1a8; }
+.toast-error .toast-icon { color: #f3a39b; }
+.toast-warning .toast-icon { color: #f1c879; }
+
+.toast-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
 }
 
 .app-toast strong {
     display: block;
-    color: #9fd3c9;
+    font-size: var(--fs-base);
+    font-weight: 700;
+    color: #ffffff;
 }
 
 .app-toast span {
-    font-size: 13.5px;
-    color: #dbe5ee;
+    font-size: var(--fs-sm);
+    color: #c8cfdf;
+}
+
+/* ================= نافذة التأكيد ================= */
+
+.app-dialog {
+    border: 0;
+    padding: 0;
+    margin: auto;
+    background: transparent;
+    max-width: min(440px, calc(100vw - 32px));
+    width: 100%;
+    color: var(--text);
+}
+
+.app-dialog::backdrop {
+    background: rgba(18, 30, 51, 0.5);
+}
+
+.app-dialog[open] {
+    animation: pop 0.22s var(--ease);
+}
+
+.app-dialog-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 24px;
+    border-radius: var(--r-xl);
+    background: var(--surface);
+    box-shadow: 0 30px 60px -24px rgba(18, 30, 51, 0.55);
+    text-align: right;
+}
+
+.app-dialog-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--r-md);
+    display: grid;
+    place-items: center;
+    background: var(--seal-50);
+    color: var(--seal-600);
+    font-size: var(--fs-2xl);
+}
+
+.app-dialog.is-danger .app-dialog-icon {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.app-dialog h3 {
+    font-size: var(--fs-lg);
+    color: var(--ink-900);
+}
+
+.app-dialog-message {
+    font-size: var(--fs-md);
+    line-height: 1.8;
+    color: var(--text-2);
+}
+
+.app-dialog-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.app-dialog.is-danger .danger-btn {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #ffffff;
+}
+
+.app-dialog.is-danger .danger-btn:hover {
+    background: #8b2b24;
+}
+
+/* ================= عناصر جديدة ================= */
+
+/* حقل معطّل لأن الخيار لا ينطبق (مثل بدل الانتقال للصور المصدقة) */
+.input-group.is-disabled > label {
+    color: var(--text-3);
+}
+
+.input-group.is-disabled .number-control {
+    background: var(--surface-3);
+    border-style: dashed;
+}
+
+.input-group.is-disabled input:disabled {
+    color: var(--text-3);
+    cursor: not-allowed;
+}
+
+.transport-hint {
+    color: var(--text-3) !important;
+}
+
+/* آخر وكالة أُضيفت: تمييز لحظي حتى تُرى في القائمة الطويلة */
+.agency-item.is-new {
+    animation: newAgency 1.6s var(--ease);
+}
+
+@keyframes newAgency {
+    0%, 35% { outline: 2px solid var(--seal-500); outline-offset: 2px; }
+    100% { outline: 2px solid transparent; outline-offset: 6px; }
+}
+
+/* أسعار اللجان: مبلغ ونسبة مترابطان */
+.rate-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    min-width: 250px;
+}
+
+@media screen and (max-width: 1280px) {
+    .rate-pair {
+        grid-template-columns: minmax(0, 1fr);
+        min-width: 150px;
+    }
+}
+
+.committee-price-table td:first-child {
+    white-space: nowrap;
+}
+
+.rate-input {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    background: #ffffff;
+    overflow: hidden;
+    transition: border-color 0.18s, box-shadow 0.18s;
+}
+
+.rate-input:focus-within {
+    border-color: var(--seal-500);
+    box-shadow: var(--ring);
+}
+
+.rate-input input:not([type="checkbox"]) {
+    border: 0 !important;
+    box-shadow: none !important;
+    height: 40px;
+    min-width: 0;
+    text-align: center;
+    font-weight: 700;
+}
+
+.rate-input span {
+    padding: 0 10px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.rate-input .committee-rate {
+    color: var(--seal-700);
+}
+
+.rate-amount {
+    display: block;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    color: var(--text-3);
+}
+
+.committee-price-table td {
+    vertical-align: middle;
 }
 
 /* =========================================================
@@ -2687,7 +3035,7 @@ tr.cls-cancelled > td:first-child {
 }
 
 .modal-content .doc {
-    box-shadow: 0 16px 40px -18px rgba(15, 42, 68, 0.35);
+    box-shadow: 0 16px 40px -18px rgba(18, 30, 51, 0.35);
 }
 
 /* داخل المستندات نستخدم خط النص للعناوين أيضاً
@@ -2745,14 +3093,14 @@ tr.cls-cancelled > td:first-child {
 .doc-org strong {
     display: block;
     font-family: var(--font-display);
-    font-size: 21px;
+    font-size: var(--fs-xl);
     color: var(--ink-800);
     line-height: 1.4;
 }
 
 .doc-org span {
     color: var(--text-2);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 500;
 }
 
@@ -2761,13 +3109,13 @@ tr.cls-cancelled > td:first-child {
 }
 
 .doc-title h2 {
-    font-size: 22px;
+    font-size: var(--fs-2xl);
     color: var(--brand-700);
 }
 
 .doc-title span {
     color: var(--text-2);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
 }
 
 /* بيانات السجل */
@@ -2796,13 +3144,13 @@ tr.cls-cancelled > td:first-child {
 
 .doc-meta span {
     display: block;
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     color: var(--text-2);
     margin-bottom: 2px;
 }
 
 .doc-meta strong {
-    font-size: 16px;
+    font-size: var(--fs-lg);
     color: var(--ink-800);
 }
 
@@ -2815,7 +3163,7 @@ tr.cls-cancelled > td:first-child {
 }
 
 .doc-due {
-    background: var(--ink-800);
+    background: var(--ink-900);
     color: #ffffff;
     border-radius: var(--r-md);
     padding: 18px 20px;
@@ -2823,24 +3171,50 @@ tr.cls-cancelled > td:first-child {
     flex-direction: column;
     justify-content: center;
     gap: 4px;
-    box-shadow: inset -6px 0 0 var(--brand-400);
+}
+
+/* إجمالي مبلغ السجل داخل بطاقة المستحق */
+.doc-grand {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.doc-grand span {
+    color: #c7cdf0;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+}
+
+.doc-grand b {
+    font-size: var(--fs-xl);
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.doc-grand small {
+    color: #aab3ca;
+    font-size: var(--fs-xs);
 }
 
 .doc-due span {
-    color: #9fd3c9;
-    font-size: 13px;
+    color: #c7cdf0;
+    font-size: var(--fs-sm);
     font-weight: 600;
 }
 
 .doc-due strong {
     font-family: var(--font-display);
-    font-size: 28px;
+    font-size: var(--fs-3xl);
     line-height: 1.3;
 }
 
 .doc-due small {
     color: #aebdcd;
-    font-size: 12px;
+    font-size: var(--fs-xs);
 }
 
 .doc-kpis {
@@ -2861,13 +3235,13 @@ tr.cls-cancelled > td:first-child {
 .doc-kpis > div:nth-last-child(-n+4) { border-bottom: 0; }
 
 .doc-kpis dt {
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     color: var(--text-2);
     margin-bottom: 3px;
 }
 
 .doc-kpis dd {
-    font-size: 16px;
+    font-size: var(--fs-lg);
     font-weight: 700;
     color: var(--ink-800);
     white-space: nowrap;
@@ -2887,7 +3261,7 @@ tr.cls-cancelled > td:first-child {
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 17px;
+    font-size: var(--fs-lg);
     color: var(--ink-800);
     margin-bottom: 10px;
     break-after: avoid;
@@ -2902,7 +3276,7 @@ tr.cls-cancelled > td:first-child {
     display: grid;
     place-items: center;
     font-family: var(--font-body);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 700;
     flex-shrink: 0;
 }
@@ -2926,7 +3300,7 @@ tr.cls-cancelled > td:first-child {
     width: 100%;
     min-width: 0;
     border-collapse: collapse;
-    font-size: 13.5px;
+    font-size: var(--fs-md);
 }
 
 .doc thead tr {
@@ -2944,7 +3318,7 @@ tr.cls-cancelled > td:first-child {
     background: var(--ink-800);
     color: #ffffff;
     border-color: var(--ink-800);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     vertical-align: middle;
 }
 
@@ -3002,7 +3376,7 @@ tr.cls-cancelled > td:first-child {
 }
 
 .detail-table {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
 }
 
 .detail-table th small {
@@ -3011,7 +3385,7 @@ tr.cls-cancelled > td:first-child {
 }
 
 .small-text {
-    font-size: 12px;
+    font-size: var(--fs-xs);
     line-height: 1.6;
 }
 
@@ -3031,7 +3405,7 @@ tr.cls-cancelled > td:first-child {
     gap: 10px;
     padding: 9px 14px;
     border-bottom: 1px solid #e8edf2;
-    font-size: 13.5px;
+    font-size: var(--fs-md);
     line-height: 1.7;
 }
 
@@ -3041,7 +3415,7 @@ tr.cls-cancelled > td:first-child {
 
 .doc-empty {
     color: var(--text-2);
-    font-size: 13.5px;
+    font-size: var(--fs-md);
     padding: 10px 0;
 }
 
@@ -3058,7 +3432,7 @@ tr.cls-cancelled > td:first-child {
 
 .doc-sign div {
     text-align: center;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     font-weight: 600;
 }
@@ -3209,7 +3583,7 @@ tr.cls-cancelled > td:first-child {
 
 /* ================= الشاشات المتوسطة والصغيرة ================= */
 
-@media screen and (max-width: 1200px) {
+@media screen and (max-width: 1280px) {
     .agency-layout {
         grid-template-columns: 1fr;
     }
@@ -3231,7 +3605,7 @@ tr.cls-cancelled > td:first-child {
     }
 }
 
-@media screen and (max-width: 1000px) {
+@media screen and (max-width: 1024px) {
 
     .app-page {
         grid-template-columns: 1fr;
@@ -3253,13 +3627,13 @@ tr.cls-cancelled > td:first-child {
 
     .mobile-bar-title strong {
         display: block;
-        font-size: 14.5px;
+        font-size: var(--fs-base);
         color: var(--ink-800);
         line-height: 1.3;
     }
 
     .mobile-bar-title span {
-        font-size: 12.5px;
+        font-size: var(--fs-sm);
         color: var(--brand-700);
         font-weight: 600;
     }
@@ -3277,7 +3651,7 @@ tr.cls-cancelled > td:first-child {
         bottom: 0;
         width: min(320px, 86vw);
         height: 100%;
-        box-shadow: -20px 0 50px -20px rgba(26, 44, 63, 0.35);
+        box-shadow: -20px 0 50px -20px rgba(18, 30, 51, 0.35);
         transform: translateX(105%);
         transition: transform 0.35s var(--ease);
         z-index: 80;
@@ -3292,7 +3666,7 @@ tr.cls-cancelled > td:first-child {
         position: fixed;
         inset: 0;
         z-index: 70;
-        background: rgba(26, 44, 63, 0.45);
+        background: rgba(18, 30, 51, 0.45);
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.3s;
@@ -3321,7 +3695,7 @@ tr.cls-cancelled > td:first-child {
     }
 }
 
-@media screen and (max-width: 800px) {
+@media screen and (max-width: 640px) {
 
     .login-shell {
         grid-template-columns: 1fr;
@@ -3343,9 +3717,8 @@ tr.cls-cancelled > td:first-child {
         grid-template-columns: 1fr;
     }
 
-    .dash-due {
-        border-right: 0;
-        border-top: 1px solid rgba(255, 255, 255, 0.16);
+    .dash-due strong {
+        font-size: var(--fs-3xl);
     }
 
     .committee-kpis,
@@ -3371,7 +3744,7 @@ tr.cls-cancelled > td:first-child {
     }
 
     .page-title h2 {
-        font-size: 20px;
+        font-size: var(--fs-xl);
     }
 
     .toolbar {
@@ -3397,14 +3770,14 @@ tr.cls-cancelled > td:first-child {
     .modal-content { padding: 16px; }
 }
 
-@media screen and (max-width: 560px) {
+@media screen and (max-width: 640px) {
     .form-grid.three-columns,
     .committee-filters {
         grid-template-columns: 1fr;
     }
 
     .brand h1 {
-        font-size: 13.5px;
+        font-size: var(--fs-md);
     }
 
     .brand-org {

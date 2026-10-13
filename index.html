@@ -9,13 +9,16 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@600;700&display=swap" rel="stylesheet">
+    <meta name="theme-color" content="#121e33">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
 
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
+
+    <a class="skip-link" href="#mainContent">تخطٍّ إلى المحتوى</a>
 
     <!-- ================= LOGIN ================= -->
 
@@ -264,7 +267,7 @@
 
         <!-- MAIN -->
 
-        <main class="main-content">
+        <main class="main-content" id="mainContent" tabindex="-1">
 
             <!-- ================= DASHBOARD ================= -->
 
@@ -282,6 +285,18 @@
                     </div>
 
                     <div class="dash-due">
+                        <svg class="seal seal-stamp" viewBox="0 0 120 120" aria-hidden="true">
+                            <defs><path id="sealArcDash" d="M60,60 m-45,0 a45,45 0 1,1 90,0 a45,45 0 1,1 -90,0"/></defs>
+                            <circle cx="60" cy="60" r="57" fill="none" stroke="currentColor" stroke-width="2.2"/>
+                            <circle cx="60" cy="60" r="53" fill="none" stroke="currentColor" stroke-width="0.8"/>
+                            <circle cx="60" cy="60" r="35" fill="none" stroke="currentColor" stroke-width="0.8"/>
+                            <text font-size="10" font-weight="700" fill="currentColor"><textPath href="#sealArcDash">نقابة المحامين ✦ فرع إدلب ✦ تدقيق السجلات ✦</textPath></text>
+                            <g transform="translate(60 62) scale(0.52) translate(-50 -50)" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M50 22 V76"/><path d="M26 32 H74"/><path d="M36 78 H64"/>
+                                <path d="M26 32 L17 54 M26 32 L35 54"/><path d="M14 54 Q26 66 38 54 Z"/>
+                                <path d="M74 32 L65 54 M74 32 L83 54"/><path d="M62 54 Q74 66 86 54 Z"/>
+                            </g>
+                        </svg>
                         <span>المطلوب من المندوبين</span>
                         <strong id="totalRepresentativeAmount">0 ل.س</strong>
                         <small id="dashDueNote"></small>
@@ -291,30 +306,30 @@
 
                 <div class="stats-grid dash-kpis">
 
-                    <div class="stat-card">
+                    <button type="button" class="stat-card" onclick="switchSection('recordsSection')" title="عرض السجلات">
                         <span>السجلات</span>
                         <strong id="totalRecords">0</strong>
-                    </div>
+                    </button>
 
-                    <div class="stat-card">
+                    <button type="button" class="stat-card" onclick="switchSection('reportsSection')" title="عرض التقارير">
                         <span>كل الوكالات</span>
                         <strong id="totalAgencies">0</strong>
-                    </div>
+                    </button>
 
-                    <div class="stat-card stat-active">
+                    <button type="button" class="stat-card stat-active" onclick="switchSection('reportsSection')" title="عرض التقارير">
                         <span>فعالة</span>
                         <strong id="activeAgencies">0</strong>
-                    </div>
+                    </button>
 
-                    <div class="stat-card stat-cancelled">
+                    <button type="button" class="stat-card stat-cancelled" onclick="switchSection('reportsSection')" title="عرض التقارير">
                         <span>ملغاة</span>
                         <strong id="cancelledAgencies">0</strong>
-                    </div>
+                    </button>
 
-                    <div class="stat-card stat-missing">
+                    <button type="button" class="stat-card stat-missing" onclick="switchSection('reportsSection')" title="عرض التقارير">
                         <span>مفقودة</span>
                         <strong id="missingAgencies">0</strong>
-                    </div>
+                    </button>
 
                 </div>
 
@@ -378,7 +393,7 @@
                     <input
                         type="text"
                         id="recordSearch"
-                        placeholder="ابحث برقم السجل أو المكتب أو المندوب..."
+                        placeholder="ابحث برقم السجل أو المكتب أو المندوب…"
                     >
 
                     <button
@@ -418,7 +433,11 @@
                                     </th>
 
                                     <th class="num">
-                                        السعر الأساسي
+                                        سعر الوكالات
+                                    </th>
+
+                                    <th class="num">
+                                        إجمالي السجل
                                     </th>
 
                                     <th class="num">
@@ -510,7 +529,7 @@
                                 </label>
 
                                 <input
-                                    type="date"
+                                    type="date" lang="en-GB"
                                     id="recordDate"
                                     dir="ltr"
                                 >
@@ -618,7 +637,7 @@
                                         وكالة عامة
                                     </option>
 
-                                    <option value="special">
+                                    <option value="special" selected>
                                         وكالة خاصة
                                     </option>
 
@@ -681,7 +700,7 @@
                                 <label>حفظ</label>
                                 <div class="number-control">
                                     <button type="button" class="number-btn minus-btn" data-target="saveCount">−</button>
-                                    <input type="number" id="saveCount" min="0" value="0">
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="saveCount" min="0" value="0">
                                     <button type="button" class="number-btn plus-btn" data-target="saveCount">+</button>
                                 </div>
                             </div>
@@ -691,7 +710,7 @@
                                 <label>أصالة وبأي صفة كانت</label>
                                 <div class="number-control">
                                     <button type="button" class="number-btn minus-btn" data-target="originalityCount">−</button>
-                                    <input type="number" id="originalityCount" min="0" value="0">
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="originalityCount" min="0" value="0">
                                     <button type="button" class="number-btn plus-btn" data-target="originalityCount">+</button>
                                 </div>
                             </div>
@@ -701,7 +720,7 @@
                                 <label>توقيع إضافي</label>
                                 <div class="number-control">
                                     <button type="button" class="number-btn minus-btn" data-target="signatureCount">−</button>
-                                    <input type="number" id="signatureCount" min="0" value="0">
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="signatureCount" min="0" value="0">
                                     <button type="button" class="number-btn plus-btn" data-target="signatureCount">+</button>
                                 </div>
                             </div>
@@ -711,7 +730,7 @@
                                 <label>إضافة إلى التركة</label>
                                 <div class="number-control">
                                     <button type="button" class="number-btn minus-btn" data-target="inheritanceCount">−</button>
-                                    <input type="number" id="inheritanceCount" min="0" value="0">
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="inheritanceCount" min="0" value="0">
                                     <button type="button" class="number-btn plus-btn" data-target="inheritanceCount">+</button>
                                 </div>
                             </div>
@@ -721,7 +740,7 @@
                                 <label>ولاية عن الأولاد</label>
                                 <div class="number-control">
                                     <button type="button" class="number-btn minus-btn" data-target="childrenCount">−</button>
-                                    <input type="number" id="childrenCount" min="0" value="0">
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="childrenCount" min="0" value="0">
                                     <button type="button" class="number-btn plus-btn" data-target="childrenCount">+</button>
                                 </div>
                             </div>
@@ -731,7 +750,7 @@
                                 <label>وكيل عن</label>
                                 <div class="number-control">
                                     <button type="button" class="number-btn minus-btn" data-target="agentsCount">−</button>
-                                    <input type="number" id="agentsCount" min="0" value="0">
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="agentsCount" min="0" value="0">
                                     <button type="button" class="number-btn plus-btn" data-target="agentsCount">+</button>
                                 </div>
                             </div>
@@ -741,7 +760,7 @@
                                 <label>بدل انتقال</label>
                                 <div class="number-control">
                                     <button type="button" class="number-btn minus-btn" data-target="transportCount">−</button>
-                                    <input type="number" id="transportCount" min="0" value="0">
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="transportCount" min="0" value="0">
                                     <button type="button" class="number-btn plus-btn" data-target="transportCount">+</button>
                                 </div>
                             </div>
@@ -781,7 +800,7 @@
                                         </button>
 
                                         <input
-                                            type="number"
+                                            type="text" inputmode="numeric" data-num="int" autocomplete="off"
                                             id="missingPleading"
                                             min="0"
                                             value="0"
@@ -824,7 +843,7 @@
                                     </button>
 
                                     <input
-                                        type="number"
+                                        type="text" inputmode="numeric" data-num="int" autocomplete="off"
                                         id="missingAmbulance"
                                         min="0"
                                         value="0"
@@ -865,7 +884,7 @@
                                     </button>
 
                                     <input
-                                        type="number"
+                                        type="text" inputmode="numeric" data-num="int" autocomplete="off"
                                         id="missingAid"
                                         min="0"
                                         value="0"
@@ -920,7 +939,7 @@
                             <textarea
                                 id="agencyNotes"
                                 rows="3"
-                                placeholder="مثال: لا يوجد رقم إيصال..."
+                                placeholder="مثال: لا يوجد رقم إيصال…"
                             ></textarea>
 
                         </div>
@@ -1098,12 +1117,12 @@
 
                         <div class="input-group">
                             <label for="filterFrom"><i class="ti ti-calendar"></i> من تاريخ</label>
-                            <input type="date" id="filterFrom" dir="ltr">
+                            <input type="date" lang="en-GB" id="filterFrom" dir="ltr">
                         </div>
 
                         <div class="input-group">
                             <label for="filterTo"><i class="ti ti-calendar"></i> إلى تاريخ</label>
-                            <input type="date" id="filterTo" dir="ltr">
+                            <input type="date" lang="en-GB" id="filterTo" dir="ltr">
                         </div>
 
                         <div class="input-group filter-wide">
@@ -1194,12 +1213,12 @@
 
                         <div class="input-group">
                             <label for="committeeFrom"><i class="ti ti-calendar"></i> من تاريخ</label>
-                            <input type="date" id="committeeFrom" dir="ltr">
+                            <input type="date" lang="en-GB" id="committeeFrom" dir="ltr">
                         </div>
 
                         <div class="input-group">
                             <label for="committeeTo"><i class="ti ti-calendar"></i> إلى تاريخ</label>
-                            <input type="date" id="committeeTo" dir="ltr">
+                            <input type="date" lang="en-GB" id="committeeTo" dir="ltr">
                         </div>
 
                         <div class="input-group">
@@ -1219,6 +1238,7 @@
                         <button type="button" class="secondary-btn" onclick="printCommitteesReport(false)"><i class="ti ti-printer"></i> طباعة</button>
                         <button type="button" class="secondary-btn" onclick="exportCommitteesToExcel()"><i class="ti ti-file-spreadsheet"></i> تصدير Excel</button>
                         <button type="button" class="secondary-btn" onclick="resetCommitteeFilters()"><i class="ti ti-filter-off"></i> إلغاء الفلترة</button>
+                        <button type="button" class="secondary-btn manager-only" onclick="openCommitteePrices()"><i class="ti ti-percentage"></i> تعديل نسب اللجان</button>
                     </div>
 
                 </div>
@@ -1335,10 +1355,10 @@
 
                 </div>
 
-                <div class="content-card">
+                <div class="content-card" id="committeePricesCard">
 
                     <h3>
-                        <i class="ti ti-heart-handshake"></i> حصص لجنتي الإسعاف والتعاون
+                        <i class="ti ti-heart-handshake"></i> أسعار اللجان: الإسعاف والتعاون
                     </h3>
 
                     <div id="committeePricesContainer"></div>
