@@ -586,6 +586,14 @@
 
                         </div>
 
+                        <!-- إعادة سجل غير محفوظ من ملف (مثلاً بعد امتلاء مساحة المتصفح) -->
+                        <div class="import-draft-row">
+                            <button type="button" class="link-btn" id="importDraftBtn">
+                                <i class="ti ti-file-import" aria-hidden="true"></i> استيراد سجل غير محفوظ من ملف
+                            </button>
+                            <input type="file" id="importDraftInput" accept="application/json,.json" class="hidden">
+                        </div>
+
                     </div>
 
                     <!-- AGENCY FORM -->
@@ -1531,6 +1539,8 @@
                         يُفضّل تحميل نسخة احتياطية قبل أي تحديث على النظام، ويمكن استعادتها لاحقاً على أي جهاز أو متصفح بدون فقدان أي سجل.
                     </p>
 
+                    <p class="storage-info" id="storageInfo"></p>
+
                     <div class="button-row">
 
                         <button
@@ -1595,4 +1605,31 @@
     <div id="printRoot" aria-hidden="true"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
-    <script src="script.js"></script>
+    <!--
+        تحميل النظام: إذا كانت السجلات منقولة إلى المخزن الكبير (IndexedDB)
+        تُقرأ أولاً، ثم يُشغَّل script.js. وإلا يُشغَّل مباشرة كما كان.
+    -->
+    <script>
+        (function () {
+            function start() {
+                var s = document.createElement("script");
+                s.src = "script.js";
+                document.body.appendChild(s);
+            }
+            var inIDB = false;
+            try { inIDB = localStorage.getItem("audit_records_store") === "idb"; } catch (e) {}
+            if (!inIDB) { start(); return; }
+            try {
+                var req = indexedDB.open("audit_db", 1);
+                req.onupgradeneeded = function () { req.result.createObjectStore("kv"); };
+                req.onsuccess = function () {
+                    try {
+                        var get = req.result.transaction("kv", "readonly").objectStore("kv").get("audit_records");
+                        get.onsuccess = function () { window.__AUDIT_IDB_RECORDS = get.result; start(); };
+                        get.onerror = function () { window.__AUDIT_IDB_ERROR = get.error || "read"; start(); };
+                    } catch (e) { window.__AUDIT_IDB_ERROR = e; start(); }
+                };
+                req.onerror = function () { window.__AUDIT_IDB_ERROR = req.error || "open"; start(); };
+            } catch (e) { window.__AUDIT_IDB_ERROR = e; start(); }
+        })();
+    </script>
