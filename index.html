@@ -113,6 +113,10 @@
                 <span id="mobileSectionName">الرئيسية</span>
             </div>
 
+            <button type="button" class="menu-toggle mobile-search" onclick="openGlobalSearch()" aria-label="بحث عن سجل أو وكالة">
+                <i class="ti ti-search"></i>
+            </button>
+
         </header>
 
         <div class="nav-overlay" id="navOverlay"></div>
@@ -139,6 +143,13 @@
                 </button>
 
             </div>
+
+            <!-- البحث السريع في كل النظام -->
+            <button type="button" class="search-trigger" onclick="openGlobalSearch()" aria-keyshortcuts="Control+K">
+                <i class="ti ti-search" aria-hidden="true"></i>
+                <span>ابحث عن سجل أو وكالة…</span>
+                <kbd>Ctrl K</kbd>
+            </button>
 
             <!-- بطاقة المستخدم -->
 
@@ -290,6 +301,34 @@
                     </button>
 
                 </div>
+
+                <!-- نشاط الفترة: إحصائيات حسب تاريخ السجل مع المقارنة بالفترة السابقة -->
+                <section class="content-card activity-card" aria-labelledby="activityTitle">
+
+                    <div class="activity-head">
+                        <div>
+                            <h3 id="activityTitle">نشاط الفترة</h3>
+                            <p class="activity-sub" id="activityRange"></p>
+                        </div>
+                        <div class="period-chips" role="radiogroup" aria-label="الفترة" id="activityPeriods">
+                            <button type="button" role="radio" data-period="month">هذا الشهر</button>
+                            <button type="button" role="radio" data-period="lastMonth">الشهر الماضي</button>
+                            <button type="button" role="radio" data-period="quarter">آخر 3 أشهر</button>
+                            <button type="button" role="radio" data-period="year">هذه السنة</button>
+                            <button type="button" role="radio" data-period="all">الكل</button>
+                        </div>
+                    </div>
+
+                    <div class="activity-tiles" id="activityTiles"></div>
+
+                    <div class="activity-chart-head">
+                        <h4 id="activityChartTitle">الوكالات المدخلة</h4>
+                        <button type="button" class="link-btn" id="activityTableToggle" aria-pressed="false">عرض كجدول</button>
+                    </div>
+
+                    <div class="activity-chart" id="activityChart"></div>
+
+                </section>
 
                 <div class="dash-panels">
 

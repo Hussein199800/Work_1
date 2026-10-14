@@ -4091,6 +4091,174 @@ function renderRecords() {
 }
 
 /* =========================================================
+البحث السريع في كل النظام (Ctrl + K)
+ابحث برقم السجل أو المكتب أو المندوب، أو برقم وكالة لتعرف
+في أي سجل هي. Enter يفتح النتيجة، والأسهم تتنقل بين النتائج.
+========================================================= */
+
+function globalSearchResults(query) {
+
+    const q = normalizeDigits(String(query || "")).trim().toLowerCase();
+
+    if (!q) {
+        return [];
+    }
+
+    const out = [];
+
+    records.forEach(function (record) {
+        const hay = [record.recordNumber, record.officeName, record.representativeName].join(" ").toLowerCase();
+        if (hay.indexOf(q) !== -1) {
+            out.push({ kind: "record", record: record, score: String(record.recordNumber).toLowerCase() === q ? 0 : 2 });
+        }
+    });
+
+    /* أرقام الوكالات: المطابقة التامة أولاً */
+    if (/^\d+$/.test(q)) {
+        records.forEach(function (record) {
+            (record.agencies || []).forEach(function (agency, index) {
+                const n = String(agency.number).trim();
+                if (n === q || n.indexOf(q) === 0) {
+                    out.push({ kind: "agency", record: record, agency: agency, index: index, score: n === q ? 1 : 3 });
+                }
+            });
+        });
+    }
+
+    return out
+        .sort(function (a, b) { return a.score - b.score; })
+        .slice(0, 14);
+}
+
+function openGlobalSearch() {
+
+    if (!currentUser || document.getElementById("globalSearch")) {
+        return;
+    }
+
+    setNavOpen(false);
+
+    const dialog = document.createElement("dialog");
+    dialog.id = "globalSearch";
+    dialog.className = "search-dialog no-print";
+    dialog.setAttribute("aria-label", "بحث سريع");
+    dialog.innerHTML =
+        '<div class="search-card">' +
+            '<label class="search-box"><i class="ti ti-search" aria-hidden="true"></i>' +
+                '<input type="text" id="globalSearchInput" placeholder="رقم سجل، اسم مكتب أو مندوب، أو رقم وكالة…" autocomplete="off" aria-controls="globalSearchList">' +
+                '<kbd>Esc</kbd></label>' +
+            '<div class="search-list" id="globalSearchList" role="listbox"></div>' +
+            '<p class="search-foot"><span><kbd>↑</kbd><kbd>↓</kbd> للتنقل</span><span><kbd>Enter</kbd> للفتح</span></p>' +
+        "</div>";
+
+    document.body.appendChild(dialog);
+
+    const input = dialog.querySelector("input");
+    const list = dialog.querySelector(".search-list");
+    let results = [];
+    let active = 0;
+
+    const open = function (item, edit) {
+        dialog.close();
+        if (item.kind === "record") {
+            showFinalRecordReport(item.record.id, "summary");
+        } else if (edit) {
+            openAgencyForEdit(item.record.id, item.index);
+        } else {
+            showTypeAgencies(item.record.id, item.agency.type, "summary");
+        }
+    };
+
+    const render = function () {
+
+        results = globalSearchResults(input.value);
+        active = Math.min(active, Math.max(0, results.length - 1));
+
+        if (!input.value.trim()) {
+            list.innerHTML = '<p class="search-empty">اكتب رقم سجل أو رقم وكالة أو اسماً. مثال: 21 يعرض الوكالة رقم 21 والسجل الذي فيه.</p>';
+            return;
+        }
+
+        if (!results.length) {
+            list.innerHTML = '<p class="search-empty">لا توجد نتائج مطابقة. جرّب رقماً أو اسماً آخر.</p>';
+            return;
+        }
+
+        const canEdit = currentUser && currentUser.role !== "viewer";
+
+        list.innerHTML = results.map(function (item, i) {
+            const r = item.record;
+            if (item.kind === "record") {
+                return '<div class="search-item' + (i === active ? " is-active" : "") + '" role="option" data-i="' + i + '" aria-selected="' + (i === active) + '">' +
+                    '<span class="search-icon"><i class="ti ti-books" aria-hidden="true"></i></span>' +
+                    "<span class=\"search-text\"><b>سجل " + escapeHTML(r.recordNumber) + "</b><small>" + escapeHTML(r.officeName) + " — " + escapeHTML(r.representativeName) +
+                    " — " + formatDay(getRecordDay(r)) + " — " + (r.agencies || []).length + " وكالة</small></span>" +
+                    '<span class="search-go">التقرير</span></div>';
+            }
+            const a = item.agency;
+            return '<div class="search-item' + (i === active ? " is-active" : "") + '" role="option" data-i="' + i + '" aria-selected="' + (i === active) + '">' +
+                '<span class="search-icon search-icon-agency" style="--c:' + (AGENCY_TYPE_COLORS[a.type] || "#45577c") + '">' + escapeHTML(a.number) + "</span>" +
+                '<span class="search-text"><b>وكالة ' + escapeHTML(a.number) + " — " + escapeHTML(AGENCY_NAMES[a.type] || "") + "</b><small>سجل " + escapeHTML(r.recordNumber) + " — " +
+                escapeHTML(r.officeName) + " — " + getAgencyStatusName(a.status) + "</small></span>" +
+                (canEdit ? '<button type="button" class="act-btn search-edit" data-edit="' + i + '"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                "</div>";
+        }).join("");
+    };
+
+    input.addEventListener("input", function () {
+        active = 0;
+        render();
+    });
+
+    input.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            if (!results.length) return;
+            active = (active + (event.key === "ArrowDown" ? 1 : -1) + results.length) % results.length;
+            render();
+            list.querySelector(".is-active")?.scrollIntoView({ block: "nearest" });
+        } else if (event.key === "Enter" && results[active]) {
+            event.preventDefault();
+            open(results[active], false);
+        }
+    });
+
+    list.addEventListener("click", function (event) {
+        const edit = event.target.closest("[data-edit]");
+        if (edit) {
+            open(results[number(edit.dataset.edit)], true);
+            return;
+        }
+        const row = event.target.closest(".search-item");
+        if (row) {
+            open(results[number(row.dataset.i)], false);
+        }
+    });
+
+    dialog.addEventListener("click", function (event) {
+        if (event.target === dialog) dialog.close();
+    });
+
+    dialog.addEventListener("close", function () {
+        dialog.remove();
+    });
+
+    dialog.showModal();
+    render();
+    input.focus();
+}
+
+window.openGlobalSearch = openGlobalSearch;
+
+/* Ctrl + K (أو ⌘ + K) يفتح البحث من أي مكان */
+document.addEventListener("keydown", function (event) {
+    if ((event.ctrlKey || event.metaKey) && (event.key === "k" || event.key === "K" || event.code === "KeyK")) {
+        event.preventDefault();
+        openGlobalSearch();
+    }
+});
+
+/* =========================================================
 قائمة ⋮ لإجراءات السجل
 قائمة عائمة واحدة تُفتح بجانب الزر (خارج الجدول حتى لا تُقص).
 ========================================================= */
@@ -9817,7 +9985,291 @@ cancelEditBtn.addEventListener(
 Dashboard
 ========================================================= */
 
+/* =========================================================
+نشاط الفترة (لوحة التحكم)
+إحصائيات حسب «تاريخ السجل» لفترة مختارة، مع المقارنة بالفترة
+السابقة المساوية لها، ومخطط أعمدة للوكالات المدخلة.
+========================================================= */
+
+let activityPeriod = "month";
+let activityAsTable = false;
+
+try {
+    activityPeriod = localStorage.getItem("audit_ui_activity_period") || "month";
+} catch (e) {}
+
+function dayStr(d) {
+    return toDayString(d);
+}
+
+/* «YYYY-MM-DD» إلى تاريخ محلي (بدون انزياح المنطقة الزمنية) */
+function parseDay(s) {
+    const p = String(s).split("-").map(Number);
+    return new Date(p[0], p[1] - 1, p[2]);
+}
+
+/* حدود الفترة الحالية والسابقة المساوية لها (أيام بصيغة YYYY-MM-DD) */
+function activityRanges(period) {
+
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    let from, to, prevFrom, prevTo, bucket;
+
+    if (period === "lastMonth") {
+        from = new Date(y, m - 1, 1); to = new Date(y, m, 0);
+        prevFrom = new Date(y, m - 2, 1); prevTo = new Date(y, m - 1, 0);
+        bucket = "day";
+    } else if (period === "quarter") {
+        from = new Date(y, m - 2, 1); to = now;
+        prevFrom = new Date(y, m - 5, 1); prevTo = new Date(y, m - 2, 0);
+        bucket = "month";
+    } else if (period === "year") {
+        from = new Date(y, 0, 1); to = now;
+        prevFrom = new Date(y - 1, 0, 1); prevTo = new Date(y - 1, m, now.getDate());
+        bucket = "month";
+    } else if (period === "all") {
+        const days = records.map(getRecordDay).filter(Boolean).sort();
+        from = days.length ? parseDay(days[0]) : now; to = now;
+        prevFrom = null; prevTo = null;
+        bucket = "month";
+    } else {
+        from = new Date(y, m, 1); to = now;
+        prevFrom = new Date(y, m - 1, 1); prevTo = new Date(y, m - 1, Math.min(now.getDate(), new Date(y, m, 0).getDate()));
+        bucket = "day";
+    }
+
+    return {
+        from: dayStr(from), to: dayStr(to),
+        prevFrom: prevFrom ? dayStr(prevFrom) : null, prevTo: prevTo ? dayStr(prevTo) : null,
+        bucket: bucket
+    };
+}
+
+function activityTotals(from, to) {
+
+    const t = { records: 0, agencies: 0, grand: 0, due: 0, transport: 0 };
+
+    records.forEach(function (record) {
+        const day = getRecordDay(record);
+        if (!day || day < from || day > to) return;
+        t.records += 1;
+        (record.agencies || []).forEach(function (a) {
+            if (a.status === "cancelled") return;
+            t.agencies += 1;
+            t.grand += getAgencyGrandTotal(a);
+            t.due += number(a.representativeAmount);
+            t.transport += getAgencyTransport(a).count;
+        });
+    });
+
+    return t;
+}
+
+function deltaHTML(current, previous) {
+    if (previous === null || previous === undefined) return "";
+    if (!previous) {
+        return current ? '<span class="delta delta-up">جديد مقارنة بالفترة السابقة</span>' : '<span class="delta">لا تغيير</span>';
+    }
+    const pct = ((current - previous) / previous) * 100;
+    const sign = pct > 0 ? "+" : pct < 0 ? "−" : "";
+    const cls = pct > 0 ? "delta-up" : pct < 0 ? "delta-down" : "";
+    const icon = pct > 0 ? "ti-trending-up" : pct < 0 ? "ti-trending-down" : "ti-minus";
+    return '<span class="delta ' + cls + '"><i class="ti ' + icon + '" aria-hidden="true"></i>' +
+        sign + new Intl.NumberFormat(NUMBER_LOCALE, { maximumFractionDigits: 1 }).format(Math.abs(pct)) + "% عن الفترة السابقة</span>";
+}
+
+/* سلاسل الأعمدة: يوم بيوم للشهر، أو شهر بشهر للفترات الأطول */
+function activitySeries(range) {
+
+    const buckets = [];
+    const index = {};
+    const start = parseDay(range.from);
+    const end = parseDay(range.to);
+
+    if (range.bucket === "day") {
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            const key = dayStr(d);
+            index[key] = buckets.length;
+            buckets.push({ key: key, label: String(d.getDate()), full: formatDay(key), value: 0 });
+        }
+    } else {
+        for (let d = new Date(start.getFullYear(), start.getMonth(), 1); d <= end; d.setMonth(d.getMonth() + 1)) {
+            const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+            index[key] = buckets.length;
+            const name = d.toLocaleDateString(NUMBER_LOCALE, { month: "short" });
+            buckets.push({ key: key, label: name, full: d.toLocaleDateString(NUMBER_LOCALE, { month: "long", year: "numeric" }), value: 0 });
+        }
+    }
+
+    records.forEach(function (record) {
+        const day = getRecordDay(record);
+        if (!day || day < range.from || day > range.to) return;
+        const key = range.bucket === "day" ? day : day.slice(0, 7);
+        if (index[key] === undefined) return;
+        buckets[index[key]].value += (record.agencies || []).filter(function (a) { return a.status !== "cancelled"; }).length;
+    });
+
+    return buckets;
+}
+
+/* تقريب أعلى المحور إلى رقم نظيف */
+function niceMax(v) {
+    if (v <= 4) return 4;
+    const pow = Math.pow(10, Math.floor(Math.log10(v)));
+    const n = v / pow;
+    const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+    return step * pow;
+}
+
+function activityChartHTML(series) {
+
+    if (!series.length || series.every(function (b) { return b.value === 0; })) {
+        return '<p class="empty-hint activity-empty">لا توجد وكالات مدخلة في هذه الفترة. أنشئ سجلاً بتاريخ ضمنها ليظهر هنا.</p>';
+    }
+
+    if (activityAsTable) {
+        return '<div class="table-wrapper"><table class="ledger-table"><thead><tr><th>الفترة</th><th class="num">الوكالات</th></tr></thead><tbody>' +
+            series.filter(function (b) { return b.value > 0; }).map(function (b) {
+                return "<tr><td>" + escapeHTML(b.full) + '</td><td class="num">' + b.value + "</td></tr>";
+            }).join("") + "</tbody></table></div>";
+    }
+
+    const max = niceMax(Math.max.apply(null, series.map(function (b) { return b.value; })));
+    const W = 760, H = 220, padL = 8, padR = 34, padT = 12, padB = 26;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const slot = plotW / series.length;
+    const barW = Math.min(24, Math.max(4, slot - 4));
+    const ticks = [0, max / 2, max];
+    const labelEvery = series.length > 16 ? Math.ceil(series.length / 10) : 1;
+
+    let svg = '<svg viewBox="0 0 ' + W + " " + H + '" class="activity-svg" direction="ltr" role="img" aria-label="الوكالات المدخلة في الفترة">';
+
+    ticks.forEach(function (t) {
+        const y = padT + plotH - (t / max) * plotH;
+        svg += '<line class="grid" x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '"/>' +
+            '<text class="tick" x="' + (W - padR + 8) + '" y="' + (y + 4) + '" text-anchor="start">' + Math.round(t) + "</text>";
+    });
+
+    /* الأعمدة من اليمين إلى اليسار مع اتجاه القراءة العربي */
+    series.forEach(function (b, i) {
+        const cx = W - padR - slot * (i + 0.5);
+        const h = (b.value / max) * plotH;
+        const x = cx - barW / 2;
+        const y = padT + plotH - h;
+        const r = Math.min(4, barW / 2, h);
+        if (b.value > 0) {
+            svg += '<path class="bar" d="M' + x + " " + (padT + plotH) + " V" + (y + r) + " Q" + x + " " + y + " " + (x + r) + " " + y +
+                " H" + (x + barW - r) + " Q" + (x + barW) + " " + y + " " + (x + barW) + " " + (y + r) + " V" + (padT + plotH) + ' Z"/>';
+        }
+        /* منطقة لمس أكبر من العمود */
+        svg += '<rect class="hit" x="' + (cx - slot / 2) + '" y="' + padT + '" width="' + slot + '" height="' + plotH + '" tabindex="0" data-i="' + i + '"/>';
+        if (i % labelEvery === 0) {
+            svg += '<text class="xlabel" x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle">' + escapeHTML(b.label) + "</text>";
+        }
+    });
+
+    svg += '<line class="baseline" x1="' + padL + '" x2="' + (W - padR) + '" y1="' + (padT + plotH) + '" y2="' + (padT + plotH) + '"/>';
+    svg += "</svg>";
+
+    return '<div class="activity-plot">' + svg + '<div class="chart-tip" role="status" aria-live="polite"></div></div>';
+}
+
+function renderActivity() {
+
+    const tiles = document.getElementById("activityTiles");
+    const chart = document.getElementById("activityChart");
+
+    if (!tiles || !chart) {
+        return;
+    }
+
+    const range = activityRanges(activityPeriod);
+    const cur = activityTotals(range.from, range.to);
+    const prev = range.prevFrom ? activityTotals(range.prevFrom, range.prevTo) : null;
+
+    document.querySelectorAll("#activityPeriods [data-period]").forEach(function (b) {
+        const on = b.dataset.period === activityPeriod;
+        b.classList.toggle("is-on", on);
+        b.setAttribute("aria-checked", on ? "true" : "false");
+    });
+
+    const rangeEl = document.getElementById("activityRange");
+    if (rangeEl) {
+        rangeEl.textContent = "من " + formatDay(range.from) + " إلى " + formatDay(range.to) + " (حسب تاريخ السجل)";
+    }
+
+    const tile = function (label, value, previous, isMoney) {
+        return '<div class="a-tile"><span>' + label + "</span><strong>" + (isMoney ? money(value) : value) + "</strong>" +
+            deltaHTML(value, previous) + "</div>";
+    };
+
+    tiles.innerHTML =
+        tile("السجلات", cur.records, prev && prev.records) +
+        tile("الوكالات غير الملغاة", cur.agencies, prev && prev.agencies) +
+        tile("بدلات الانتقال", cur.transport, prev && prev.transport) +
+        tile("إجمالي مبالغ السجلات", cur.grand, prev && prev.grand, true) +
+        tile("المطلوب من المندوبين", cur.due, prev && prev.due, true);
+
+    const series = activitySeries(range);
+    chart.innerHTML = activityChartHTML(series);
+
+    const title = document.getElementById("activityChartTitle");
+    if (title) {
+        title.textContent = range.bucket === "day" ? "الوكالات المدخلة يوماً بيوم" : "الوكالات المدخلة شهراً بشهر";
+    }
+
+    /* تلميح الأعمدة بالمرور أو بلوحة المفاتيح */
+    const plot = chart.querySelector(".activity-plot");
+    if (plot) {
+        const tip = plot.querySelector(".chart-tip");
+        const show = function (el) {
+            const b = series[number(el.dataset.i)];
+            if (!b) return;
+            tip.textContent = "";
+            const v = document.createElement("strong");
+            v.textContent = b.value + " وكالة";
+            const l = document.createElement("span");
+            l.textContent = b.full;
+            tip.appendChild(v);
+            tip.appendChild(l);
+            const pr = plot.getBoundingClientRect();
+            const er = el.getBoundingClientRect();
+            tip.style.left = Math.min(Math.max(0, er.left - pr.left + er.width / 2 - 60), pr.width - 120) + "px";
+            tip.classList.add("show");
+            plot.querySelectorAll(".hit").forEach(function (h) { h.classList.toggle("is-hover", h === el); });
+        };
+        const hide = function () {
+            tip.classList.remove("show");
+            plot.querySelectorAll(".hit").forEach(function (h) { h.classList.remove("is-hover"); });
+        };
+        plot.querySelectorAll(".hit").forEach(function (h) {
+            h.addEventListener("pointerenter", function () { show(h); });
+            h.addEventListener("focus", function () { show(h); });
+            h.addEventListener("blur", hide);
+        });
+        plot.addEventListener("pointerleave", hide);
+    }
+}
+
+document.getElementById("activityPeriods")?.addEventListener("click", function (event) {
+    const b = event.target.closest("[data-period]");
+    if (!b) return;
+    activityPeriod = b.dataset.period;
+    try { localStorage.setItem("audit_ui_activity_period", activityPeriod); } catch (e) {}
+    renderActivity();
+});
+
+document.getElementById("activityTableToggle")?.addEventListener("click", function () {
+    activityAsTable = !activityAsTable;
+    this.textContent = activityAsTable ? "عرض كمخطط" : "عرض كجدول";
+    this.setAttribute("aria-pressed", activityAsTable ? "true" : "false");
+    renderActivity();
+});
+
 function updateDashboard() {
+
+    renderActivity();
 
     const agencies = [];
 
