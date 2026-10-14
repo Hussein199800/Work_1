@@ -64,6 +64,22 @@ certified_legal:
 
 };
 
+/* نوع الوكالة الافتراضي عند إضافة وكالة جديدة */
+const DEFAULT_AGENCY_TYPE = "special";
+
+/*
+    أنواع الوكالات التي يُضاف إليها بدل الانتقال (المندوب الخارجي).
+    لا يُضاف إلى الصور المصدقة (طبق الأصل) ولا إلى الوكالة التنفيذية.
+*/
+const TRANSPORT_AGENCY_TYPES = ["general", "special", "legal"];
+
+function isTransportEligible(type) {
+    return TRANSPORT_AGENCY_TYPES.indexOf(type) !== -1;
+}
+
+/* كل الأرقام والتواريخ بالأرقام الغربية (0-9) */
+const NUMBER_LOCALE = "ar-SY-u-nu-latn";
+
 /* =========================================================
 الإضافات
 ========================================================= */
@@ -606,8 +622,78 @@ function (key) {
 );
 
 /* =========================================================
+نسب لجنتي الإسعاف والتعاون
+حصة كل لجنة = نسبة مئوية من سعر الوكالة، لكل نوع وكالة نسبته.
+أول مرة تُشتق النسب من المبالغ الثابتة السابقة مقسومة على سعر
+الوكالة الحالي (مثال: 300 ÷ 1700 = 17.647%)، فلا يتغير أي مبلغ.
+المبالغ الثابتة (audit_committee_shares) تبقى محفوظة ومحدّثة
+للتوافق مع النسخ الاحتياطية والإصدارات السابقة.
+========================================================= */
+
+const COMMITTEE_RATES_KEY = "audit_committee_rates";
+
+function deriveCommitteeRates(shares, priceTable) {
+    const rates = {};
+    Object.keys(AGENCY_NAMES).forEach(function (type) {
+        const share = (shares && shares[type]) || DEFAULT_COMMITTEE_SHARES[type] || { ambulance: 0, cooperation: 0 };
+        const price = number(priceTable && priceTable[type] && priceTable[type].agency);
+        rates[type] = {
+            ambulance: price > 0 ? (number(share.ambulance) / price) * 100 : 0,
+            cooperation: price > 0 ? (number(share.cooperation) / price) * 100 : 0
+        };
+    });
+    return rates;
+}
+
+let committeeRates = loadData(COMMITTEE_RATES_KEY, null);
+
+if (!committeeRates || typeof committeeRates !== "object") {
+    committeeRates = deriveCommitteeRates(committeeShares, prices);
+}
+
+(function ensureCommitteeRates() {
+    const derived = deriveCommitteeRates(committeeShares, prices);
+    Object.keys(AGENCY_NAMES).forEach(function (type) {
+        if (!committeeRates[type] || typeof committeeRates[type] !== "object") {
+            committeeRates[type] = derived[type];
+        }
+        ["ambulance", "cooperation"].forEach(function (field) {
+            if (typeof committeeRates[type][field] !== "number" || !Number.isFinite(committeeRates[type][field])) {
+                committeeRates[type][field] = derived[type][field];
+            }
+        });
+    });
+})();
+
+/* مبلغ الحصة = سعر الوكالة × النسبة، مقرّباً لأقرب ليرة */
+function committeeAmount(price, rate) {
+    return Math.round(number(price) * number(rate) / 100);
+}
+
+function formatRate(rate) {
+    return new Intl.NumberFormat(NUMBER_LOCALE, { maximumFractionDigits: 3 }).format(number(rate)) + "%";
+}
+
+/* المبالغ الثابتة المقابلة للنسب بالأسعار الحالية (للتوافق فقط) */
+function syncCommitteeSharesFromRates() {
+    Object.keys(AGENCY_NAMES).forEach(function (type) {
+        const price = number(prices[type] && prices[type].agency);
+        const rate = committeeRates[type] || { ambulance: 0, cooperation: 0 };
+        committeeShares[type] = {
+            ambulance: committeeAmount(price, rate.ambulance),
+            cooperation: committeeAmount(price, rate.cooperation)
+        };
+    });
+}
+
+/* =========================================================
 حفظ الإعدادات
 ========================================================= */
+
+saveData(
+COMMITTEE_RATES_KEY,
+committeeRates
+);
 
 saveData(
 "audit_committee_shares",
@@ -646,6 +732,9 @@ stampPrices
 let currentUser = null;
 
 let pendingAgencies = [];
+
+/* آخر وكالة أُضيفت (تُميَّز في القائمة) */
+let lastAddedAgencyId = null;
 
 /* =========================================================
 DOM
@@ -739,13 +828,26 @@ function formatDay(day) {
     }
     const parts = day.split("-").map(Number);
     try {
-        return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString("ar-SY");
+        return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString(NUMBER_LOCALE);
     } catch (e) {
         return day;
     }
 }
 
+/* تحويل الأرقام العربية الهندية (٠-٩ و ۰-۹) والفاصلة العشرية العربية إلى أرقام غربية */
+function normalizeDigits(text) {
+    return String(text)
+        .replace(/[٠-٩]/g, function (d) { return String(d.charCodeAt(0) - 0x0660); })
+        .replace(/[۰-۹]/g, function (d) { return String(d.charCodeAt(0) - 0x06F0); })
+        .replace(/٫/g, ".");
+}
+
 function number(value) {
+
+/* نص من حقل إدخال: أرقام عربية أو فواصل آلاف لا تتحول إلى صفر */
+if (typeof value === "string") {
+    value = normalizeDigits(value).replace(/[,\s٬]/g, "");
+}
 
 const n =
     Number(value);
@@ -767,7 +869,8 @@ function money(value) {
 
 return (
     new Intl.NumberFormat(
-        "ar-SY"
+        NUMBER_LOCALE,
+        { maximumFractionDigits: 2 }
     ).format(
         Number(value) || 0
     ) +
@@ -1040,7 +1143,7 @@ function updateProfileCard() {
 
     if (date) {
         try {
-            date.textContent = new Date().toLocaleDateString("ar-SY", { year: "numeric", month: "long", day: "numeric" });
+            date.textContent = new Date().toLocaleDateString(NUMBER_LOCALE, { year: "numeric", month: "long", day: "numeric" });
         } catch (e) {
             date.textContent = todayDay();
         }
@@ -1235,6 +1338,16 @@ function (button) {
 
 function switchSection(id) {
 
+/* لا فتح لقسم زرّه مخفي عن صلاحية المستخدم (مثل السجلات للمشاهد) */
+const allowedButton =
+    document.querySelector(
+        '.tab-btn[data-section="' + id + '"]'
+    );
+
+if (allowedButton && allowedButton.classList.contains("hidden")) {
+    id = "dashboardSection";
+}
+
 try {
     localStorage.setItem("activeSection", id);
     sessionStorage.setItem("activeSection", id);
@@ -1388,6 +1501,71 @@ window.switchSection =
 switchSection;
 
 /* =========================================================
+حقول الأرقام
+حقول نصية بلوحة أرقام (data-num) بدل type="number" حتى تظهر
+الأرقام غربية دائماً مهما كانت لغة المتصفح. تُنظَّف أثناء الكتابة:
+الأرقام العربية تتحول لغربية، وكل ما ليس رقماً يُحذف.
+========================================================= */
+
+document.addEventListener(
+    "input",
+    function (event) {
+
+        const input = event.target;
+
+        if (!input || !input.matches || !input.matches("input[data-num]")) {
+            return;
+        }
+
+        const decimal = input.dataset.num === "dec";
+        let clean = normalizeDigits(input.value).replace(decimal ? /[^\d.]/g : /[^\d]/g, "");
+
+        if (decimal) {
+            const dot = clean.indexOf(".");
+            if (dot !== -1) {
+                clean = clean.slice(0, dot + 1) + clean.slice(dot + 1).replace(/\./g, "");
+            }
+        }
+
+        if (clean !== input.value) {
+            const caret = input.selectionStart;
+            const diff = input.value.length - clean.length;
+            input.value = clean;
+            try {
+                input.setSelectionRange(Math.max(0, caret - diff), Math.max(0, caret - diff));
+            } catch (e) {}
+        }
+    },
+    true
+);
+
+/* الصفوف القابلة للضغط تعمل بلوحة المفاتيح أيضاً (Enter أو مسافة) */
+document.addEventListener("keydown", function (event) {
+    const row = event.target && event.target.closest && event.target.closest(".clickable-row");
+    if (row && event.target === row && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        row.click();
+    }
+});
+
+/* سهم أعلى/أسفل يزيد وينقص العدد كما في حقول الأرقام العادية */
+document.addEventListener("keydown", function (event) {
+
+    const input = event.target;
+
+    if (
+        !input || !input.matches || !input.matches('input[data-num="int"]') ||
+        (event.key !== "ArrowUp" && event.key !== "ArrowDown")
+    ) {
+        return;
+    }
+
+    event.preventDefault();
+    input.value = Math.max(0, number(input.value) + (event.key === "ArrowUp" ? 1 : -1));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+});
+
+/* =========================================================
 أزرار + و -
 ========================================================= */
 
@@ -1496,7 +1674,7 @@ function getCurrentAgencyPricing() {
     return getPricingForType(
         document.getElementById(
             "agencyType"
-        )?.value || "general"
+        )?.value || DEFAULT_AGENCY_TYPE
     );
 }
 
@@ -1982,9 +2160,12 @@ const additions = {
             )?.value
         ),
 
-    /* الوكالة الملغاة لا يُحسب عليها بدل انتقال */
+    /* الوكالة الملغاة، والأنواع التي لا يُضاف لها البدل، لا يُحسب عليها بدل انتقال */
     transport:
-        cancelled
+        cancelled ||
+        !isTransportEligible(
+            document.getElementById("agencyType")?.value || DEFAULT_AGENCY_TYPE
+        )
             ? 0
             : number(
                 document.getElementById(
@@ -2063,7 +2244,7 @@ const type =
     document.getElementById(
         "agencyType"
     )?.value ||
-    "general";
+    DEFAULT_AGENCY_TYPE;
 
 
 const basePrice =
@@ -2251,9 +2432,196 @@ function changePendingTransport(index, value) {
     if (!agency) {
         return;
     }
+    if (number(value) > 0 && !isTransportEligible(agency.type)) {
+        notify("بدل الانتقال لا يُضاف إلى " + (AGENCY_NAMES[agency.type] || "هذا النوع") + ".", "warning");
+        renderPendingAgencies();
+        return;
+    }
     setAgencyTransportCount(agency, value);
     renderPendingAgencies();
 }
+
+/*
+    حقل بدل الانتقال في نموذج الوكالة يتبع نوع الوكالة:
+    الأنواع غير المشمولة يُصفَّر حقلها ويُقفل،
+    والمشمولة تأخذ بدلاً واحداً تلقائياً إذا كان المندوب خارجياً.
+*/
+function syncTransportField() {
+
+    const type = document.getElementById("agencyType")?.value || DEFAULT_AGENCY_TYPE;
+    const input = document.getElementById("transportCount");
+
+    if (!input) {
+        return;
+    }
+
+    syncChoiceChips();
+
+    const group = input.closest(".input-group");
+    const eligible = isTransportEligible(type);
+
+    if (!eligible) {
+        input.value = 0;
+    } else if (isExternalRepresentative() && number(input.value) === 0 && !input.dataset.userZero) {
+        input.value = 1;
+    }
+
+    input.disabled = !eligible;
+    group?.querySelectorAll(".number-btn").forEach(function (button) {
+        button.disabled = !eligible;
+    });
+    group?.classList.toggle("is-disabled", !eligible);
+
+    let hint = group?.querySelector(".transport-hint");
+    if (group && !hint) {
+        hint = document.createElement("small");
+        hint.className = "field-hint transport-hint";
+        group.appendChild(hint);
+    }
+    if (hint) {
+        hint.textContent = eligible ? "" : "لا يُضاف لهذا النوع";
+    }
+}
+
+document.getElementById("agencyType")?.addEventListener("change", function () {
+    syncTransportField();
+    updatePreview();
+});
+
+/* =========================================================
+أزرار الاختيار الملونة (نوع الوكالة وحالتها)
+تعرض خيارات القائمة المخفية كأزرار بضغطة واحدة، كل نوع بلونه
+المعروف في التقارير. القائمة الأصلية تبقى مصدر القيمة لبقية الكود.
+========================================================= */
+
+const AGENCY_STATUS_COLORS = {
+    active: "#23704f",
+    missing: "#8f5f12",
+    cancelled: "#a8352c"
+};
+
+function buildChoiceChips(selectId, containerId, colors) {
+
+    const select = document.getElementById(selectId);
+    const box = document.getElementById(containerId);
+
+    if (!select || !box) {
+        return;
+    }
+
+    box.innerHTML = Array.from(select.options).map(function (option) {
+        const color = colors[option.value] || "#45577c";
+        return '<button type="button" role="radio" class="choice-chip" data-value="' + option.value + '" style="--chip-color:' + color + '">' +
+            '<span class="chip-dot" aria-hidden="true"></span>' + escapeHTML(option.textContent.trim()) + "</button>";
+    }).join("");
+
+    box.addEventListener("click", function (event) {
+        const chip = event.target.closest(".choice-chip");
+        if (!chip || select.value === chip.dataset.value) {
+            return;
+        }
+        select.value = chip.dataset.value;
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        syncChoiceChips();
+        chip.focus();
+    });
+
+    /* الأسهم تنقل بين الخيارات (اليسار = التالي في الواجهة العربية) */
+    box.addEventListener("keydown", function (event) {
+        const keys = { ArrowLeft: 1, ArrowDown: 1, ArrowRight: -1, ArrowUp: -1 };
+        if (!(event.key in keys)) {
+            return;
+        }
+        event.preventDefault();
+        const chips = Array.from(box.querySelectorAll(".choice-chip"));
+        const current = chips.findIndex(function (c) { return c.dataset.value === select.value; });
+        const next = chips[(current + keys[event.key] + chips.length) % chips.length];
+        next.click();
+    });
+
+    syncChoiceChips();
+}
+
+function syncChoiceChips() {
+
+    [["agencyType", "agencyTypeChips"], ["agencyStatus", "agencyStatusChips"]].forEach(function (pair) {
+
+        const select = document.getElementById(pair[0]);
+        const box = document.getElementById(pair[1]);
+
+        if (!select || !box) {
+            return;
+        }
+
+        box.querySelectorAll(".choice-chip").forEach(function (chip) {
+            const on = chip.dataset.value === select.value;
+            chip.classList.toggle("is-on", on);
+            chip.setAttribute("aria-checked", on ? "true" : "false");
+            chip.tabIndex = on ? 0 : -1;
+        });
+    });
+}
+
+document.getElementById("agencyStatus")?.addEventListener("change", syncChoiceChips);
+
+window.addEventListener("DOMContentLoaded", function () {
+    buildChoiceChips("agencyType", "agencyTypeChips", AGENCY_TYPE_COLORS);
+    buildChoiceChips("agencyStatus", "agencyStatusChips", AGENCY_STATUS_COLORS);
+});
+
+/* =========================================================
+شريط ملخص السجل الثابت أسفل صفحة الإنشاء
+========================================================= */
+
+function updateRecordDock() {
+
+    const count = document.getElementById("dockCount");
+
+    if (!count) {
+        return;
+    }
+
+    let grand = 0;
+    let rep = 0;
+
+    pendingAgencies.forEach(function (agency) {
+        grand += getAgencyGrandTotal(agency);
+        rep += agency.status === "cancelled" ? 0 : number(agency.representativeAmount);
+    });
+
+    count.textContent = pendingAgencies.length;
+    document.getElementById("dockGrand").textContent = money(grand);
+    document.getElementById("dockRep").textContent = money(rep);
+}
+
+/*
+    Ctrl + Enter يضيف الوكالة من أي حقل في صفحة الإنشاء.
+    لا نستخدم Enter وحده حتى لا تُضاف وكالة إضافية بضغطة غير مقصودة.
+*/
+document.addEventListener("keydown", function (event) {
+
+    if (
+        event.key !== "Enter" ||
+        !(event.ctrlKey || event.metaKey) ||
+        document.querySelector("dialog[open]") ||
+        !document.getElementById("newRecordSection")?.classList.contains("active-section")
+    ) {
+        return;
+    }
+
+    event.preventDefault();
+    document.getElementById("addAgencyBtn")?.click();
+});
+
+/* إذا صفّر المستخدم البدل يدوياً لا نعيده تلقائياً حتى الوكالة التالية */
+document.getElementById("transportCount")?.addEventListener("input", function () {
+    if (number(this.value) === 0) {
+        this.dataset.userZero = "1";
+    } else {
+        delete this.dataset.userZero;
+    }
+});
 
 window.changePendingTransport = changePendingTransport;
 
@@ -2284,17 +2652,37 @@ function applyRepresentativeType() {
     const external = isExternalRepresentative();
     const formTransport = document.getElementById("transportCount");
 
+    const finish = function () {
+        updateRepresentativeTypeHint();
+        syncTransportField();
+        renderPendingAgencies();
+        updatePreview();
+
+        if (typeof saveRecordDraft === "function") {
+            saveRecordDraft();
+        }
+    };
+
     if (external) {
 
+        /* البدل يُضاف فقط للعامة والخاصة والشرعية */
         pendingAgencies.forEach(function (agency) {
-            if (number(agency.additions && agency.additions.transport) === 0) {
+            if (
+                isTransportEligible(agency.type) &&
+                number(agency.additions && agency.additions.transport) === 0
+            ) {
                 setAgencyTransportCount(agency, 1);
             }
         });
 
-        if (formTransport && number(formTransport.value) === 0) {
-            formTransport.value = 1;
+        if (formTransport) {
+            delete formTransport.dataset.userZero;
+            if (number(formTransport.value) === 0) {
+                formTransport.value = 1;
+            }
         }
+
+        finish();
 
     } else {
 
@@ -2302,26 +2690,28 @@ function applyRepresentativeType() {
             return number(agency.additions && agency.additions.transport) > 0;
         });
 
-        if (
-            withTransport.length > 0 &&
-            confirm("هل تريد إزالة بدل الانتقال من " + withTransport.length + " وكالة مضافة؟")
-        ) {
-            withTransport.forEach(function (agency) {
-                setAgencyTransportCount(agency, 0);
-            });
-        }
-
         if (formTransport) {
             formTransport.value = 0;
         }
-    }
 
-    updateRepresentativeTypeHint();
-    renderPendingAgencies();
-    updatePreview();
+        if (withTransport.length === 0) {
+            finish();
+            return;
+        }
 
-    if (typeof saveRecordDraft === "function") {
-        saveRecordDraft();
+        appConfirm({
+            title: "إزالة بدل الانتقال",
+            message: "المندوب أصبح داخلياً. هل تريد إزالة بدل الانتقال من " + withTransport.length + " وكالة مضافة؟",
+            confirmText: "إزالة البدل",
+            cancelText: "إبقاء البدل"
+        }).then(function (ok) {
+            if (ok) {
+                withTransport.forEach(function (agency) {
+                    setAgencyTransportCount(agency, 0);
+                });
+            }
+            finish();
+        });
     }
 }
 
@@ -2348,13 +2738,21 @@ addAgencyBtn.addEventListener(
             "viewer"
         ) {
 
-            alert(
-                "ليس لديك صلاحية."
-            );
+            notify("ليس لديك صلاحية.", "error");
 
             return;
 
         }
+
+        /* ضغطتان سريعتان (نقر مزدوج) لا تضيفان وكالتين */
+        if (addAgencyBtn.dataset.busy) {
+            return;
+        }
+
+        addAgencyBtn.dataset.busy = "1";
+        setTimeout(function () {
+            delete addAgencyBtn.dataset.busy;
+        }, 700);
 
 
         const agency =
@@ -2369,18 +2767,72 @@ addAgencyBtn.addEventListener(
             بدل استبداله برقم جديد.
         */
 
+        const commit = function () {
 
-        pendingAgencies.push(
-            agency
-        );
+            pendingAgencies.push(
+                agency
+            );
 
+            lastAddedAgencyId = agency.id;
 
-        renderPendingAgencies();
+            renderPendingAgencies();
 
-        clearAgencyForm();
+            clearAgencyForm();
+
+            announceAgencyAdded(agency);
+        };
+
+        /*
+            حماية من الإضافة المكررة دون انتباه:
+            إذا كان رقم الوكالة موجوداً في هذا السجل ولم تُعلَّم «مكررة»
+            نطلب التأكيد قبل الإضافة.
+        */
+        const sameNumber = pendingAgencies.some(function (item) {
+            return String(item.number).trim() === String(agency.number).trim();
+        });
+
+        if (sameNumber && !agency.duplicate) {
+            appConfirm({
+                title: "رقم الوكالة مضاف مسبقاً",
+                message: "الوكالة رقم " + agency.number + " موجودة في هذا السجل. هل تريد إضافتها مرة أخرى؟",
+                confirmText: "إضافتها مرة أخرى",
+                cancelText: "إلغاء",
+                danger: true
+            }).then(function (ok) {
+                if (ok) {
+                    agency.duplicate = true;
+                    commit();
+                }
+            });
+            return;
+        }
+
+        commit();
 
     }
 );
+
+/* رسالة واضحة بعد كل إضافة، مع وميض عدّاد الوكالات */
+function announceAgencyAdded(agency) {
+
+    notify(
+        "<strong>تمت إضافة الوكالة رقم " + escapeHTML(agency.number) + "</strong>" +
+        "<span>" + escapeHTML(AGENCY_NAMES[agency.type] || agency.typeName || "") +
+        " — " + getAgencyStatusName(agency.status) +
+        " — عدد الوكالات الآن: " + pendingAgencies.length + "</span>",
+        "success",
+        3500,
+        true
+    );
+
+    const counter = document.getElementById("agencyCounter");
+
+    if (counter) {
+        counter.classList.remove("bump");
+        void counter.offsetWidth;
+        counter.classList.add("bump");
+    }
+}
 
 }
 
@@ -2433,6 +2885,8 @@ if (counter) {
 
 }
 
+updateRecordDock();
+
 
 if (
     pendingAgencies.length ===
@@ -2440,7 +2894,7 @@ if (
 ) {
 
     container.innerHTML =
-        "<p>لا توجد وكالات مضافة.</p>";
+        '<p class="empty-hint">لا توجد وكالات مضافة بعد. أدخل بيانات الوكالة ثم اضغط «إضافة الوكالة».</p>';
 
     return;
 
@@ -2464,7 +2918,7 @@ container.innerHTML =
 
                 if (
                     agency.status !== "cancelled" &&
-                    (external || transportCount > 0)
+                    ((external && isTransportEligible(agency.type)) || transportCount > 0)
                 ) {
 
                     const options = [0, 1, 2, 3];
@@ -2490,7 +2944,7 @@ container.innerHTML =
                 return `
 
                     <div
-                        class="agency-item cls-card cls-${agency.status || "active"}"
+                        class="agency-item cls-card cls-${agency.status || "active"}${agency.id && agency.id === lastAddedAgencyId ? " is-new" : ""}"
                         style="--cls-color:${getAgencyClass(agency).color};--cls-tint:${hexToRgba(getAgencyClass(agency).color, getAgencyClass(agency).tint)}"
                     >
 
@@ -2698,10 +3152,22 @@ document.getElementById(
     agency.additions.originality || 0;
 
 
-document.getElementById(
-    "transportCount"
-).value =
-    agency.additions.transport;
+const editTransportInput =
+    document.getElementById(
+        "transportCount"
+    );
+
+editTransportInput.value =
+    number(agency.additions.transport);
+
+/* الحفاظ على اختيار «بدون بدل» المحفوظ للوكالة */
+if (number(agency.additions.transport) === 0) {
+    editTransportInput.dataset.userZero = "1";
+} else {
+    delete editTransportInput.dataset.userZero;
+}
+
+syncTransportField();
 
 
 document.getElementById(
@@ -2783,24 +3249,34 @@ editPendingAgency;
 
 function removePendingAgency(index) {
 
-if (
-    !confirm(
-        "هل تريد حذف هذه الوكالة؟"
-    )
-) {
+const agency = pendingAgencies[index];
 
+if (!agency) {
     return;
-
 }
 
+appConfirm({
+    title: "حذف الوكالة",
+    message: "هل تريد حذف الوكالة رقم " + agency.number + " من هذا السجل؟",
+    confirmText: "حذف الوكالة",
+    cancelText: "إلغاء",
+    danger: true
+}).then(function (ok) {
 
-pendingAgencies.splice(
-    index,
-    1
-);
+    if (!ok) {
+        return;
+    }
 
+    const position = pendingAgencies.indexOf(agency);
 
-renderPendingAgencies();
+    if (position !== -1) {
+        pendingAgencies.splice(position, 1);
+    }
+
+    renderPendingAgencies();
+
+    notify("تم حذف الوكالة رقم " + escapeHTML(agency.number) + ".", "info", 2500);
+});
 
 }
 
@@ -2836,7 +3312,7 @@ const typeInput =
 if (typeInput) {
 
     typeInput.value =
-        "general";
+        DEFAULT_AGENCY_TYPE;
 
 }
 
@@ -2883,18 +3359,23 @@ if (statusInput) {
 );
 
 
-/* المندوب الخارجي: بدل الانتقال مفعّل افتراضياً لكل وكالة جديدة */
+/*
+    المندوب الخارجي: بدل الانتقال مفعّل افتراضياً لكل وكالة جديدة
+    من الأنواع المشمولة فقط (عامة، خاصة، شرعية).
+*/
 
 const transportInput =
     document.getElementById(
         "transportCount"
     );
 
-if (transportInput && isExternalRepresentative()) {
+if (transportInput) {
 
-    transportInput.value = 1;
+    delete transportInput.dataset.userZero;
 
 }
+
+syncTransportField();
 
 
 const notes =
@@ -3002,11 +3483,15 @@ const additions = {
         ),
 
     transport:
-        number(
-            document.getElementById(
-                "transportCount"
-            )?.value
+        isTransportEligible(
+            document.getElementById("agencyType")?.value || DEFAULT_AGENCY_TYPE
         )
+            ? number(
+                document.getElementById(
+                    "transportCount"
+                )?.value
+            )
+            : 0
 
 };
 
@@ -3297,9 +3782,7 @@ recordForm.addEventListener(
             "viewer"
         ) {
 
-            alert(
-                "ليس لديك صلاحية."
-            );
+            notify("ليس لديك صلاحية.", "error");
 
             return;
 
@@ -3311,9 +3794,7 @@ recordForm.addEventListener(
             0
         ) {
 
-            alert(
-                "يجب إضافة وكالة واحدة على الأقل."
-            );
+            notify("يجب إضافة وكالة واحدة على الأقل.", "error");
 
             return;
 
@@ -3344,9 +3825,7 @@ recordForm.addEventListener(
             !representativeName
         ) {
 
-            alert(
-                "يرجى تعبئة بيانات السجل."
-            );
+            notify("يرجى تعبئة بيانات السجل.", "error");
 
             return;
 
@@ -3462,10 +3941,12 @@ recordForm.addEventListener(
         renderReports();
 
 
-        alert(
-            editingId
-                ? "تم تعديل السجل بنجاح."
-                : "تم حفظ السجل بنجاح."
+        notify(
+            "<strong>" + (editingId ? "تم تعديل السجل بنجاح" : "تم حفظ السجل بنجاح") + "</strong>" +
+            "<span>سجل " + escapeHTML(record.recordNumber) + " — " + record.agencies.length + " وكالة</span>",
+            "success",
+            4000,
+            true
         );
 
 
@@ -3565,7 +4046,7 @@ function renderRecords() {
 
     if (records.length === 0) {
         tbody.innerHTML =
-            '<tr><td colspan="8"><div class="empty-state"><p>لا توجد سجلات محفوظة بعد.</p>' +
+            '<tr><td colspan="9"><div class="empty-state"><p>لا توجد سجلات محفوظة بعد.</p>' +
             '<button type="button" class="primary-btn" onclick="switchSection(\'newRecordSection\')">إنشاء سجل جديد</button></div></td></tr>';
         return;
     }
@@ -3594,24 +4075,289 @@ function renderRecords() {
             "<td>" + escapeHTML(record.representativeName) + "</td>" +
             '<td class="num"><span class="agency-count">' + (record.agencies || []).length + "</span>" + bar + "</td>" +
             '<td class="num">' + money(getRecordBaseTotal(record)) + "</td>" +
+            '<td class="num">' + money(getRecordGrandTotal(record)) + "</td>" +
             '<td class="num money-cell">' + money(getRecordRepresentativeTotal(record)) + "</td>" +
             '<td class="date-cell">' + date + "</td>" +
-            '<td><div class="row-actions">' +
-                '<div class="action-group">' +
-                    '<button type="button" class="act-btn" onclick="viewRecord(\'' + record.id + '\')">عرض</button>' +
-                    (canEdit ? '<button type="button" class="act-btn" onclick="editRecord(\'' + record.id + '\')">تعديل</button>' : "") +
-                    (canDelete ? '<button type="button" class="act-btn act-danger" onclick="deleteRecord(\'' + record.id + '\')">حذف</button>' : "") +
-                "</div>" +
-                '<div class="action-group report-group">' +
-                    '<button type="button" class="act-btn" onclick="showFinalRecordReport(\'' + record.id + '\', \'summary\')">تقرير مختصر</button>' +
-                    '<button type="button" class="act-btn" onclick="showFinalRecordReport(\'' + record.id + '\', \'detailed\')">تقرير مفصل</button>' +
-                "</div>" +
+            /* الإجراءات الأكثر استخداماً ظاهرة، والباقي في قائمة ⋮ */
+            '<td><div class="action-group">' +
+                '<button type="button" class="act-btn act-primary" onclick="showFinalRecordReport(\'' + record.id + '\', \'summary\')"><i class="ti ti-file-text" aria-hidden="true"></i> التقرير</button>' +
+                (canEdit ? '<button type="button" class="act-btn" onclick="editRecord(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                '<button type="button" class="act-btn act-more" aria-haspopup="menu" aria-label="إجراءات أخرى للسجل ' + escapeHTML(record.recordNumber) + '" onclick="openRecordMenu(this, \'' + record.id + '\')"><i class="ti ti-dots-vertical" aria-hidden="true"></i></button>' +
             "</div></td>" +
             "</tr>";
 
     }).join("");
 
 }
+
+/* =========================================================
+البحث السريع في كل النظام (Ctrl + K)
+ابحث برقم السجل أو المكتب أو المندوب، أو برقم وكالة لتعرف
+في أي سجل هي. Enter يفتح النتيجة، والأسهم تتنقل بين النتائج.
+========================================================= */
+
+function globalSearchResults(query) {
+
+    const q = normalizeDigits(String(query || "")).trim().toLowerCase();
+
+    if (!q) {
+        return [];
+    }
+
+    const out = [];
+
+    records.forEach(function (record) {
+        const hay = [record.recordNumber, record.officeName, record.representativeName].join(" ").toLowerCase();
+        if (hay.indexOf(q) !== -1) {
+            out.push({ kind: "record", record: record, score: String(record.recordNumber).toLowerCase() === q ? 0 : 2 });
+        }
+    });
+
+    /* أرقام الوكالات: المطابقة التامة أولاً */
+    if (/^\d+$/.test(q)) {
+        records.forEach(function (record) {
+            (record.agencies || []).forEach(function (agency, index) {
+                const n = String(agency.number).trim();
+                if (n === q || n.indexOf(q) === 0) {
+                    out.push({ kind: "agency", record: record, agency: agency, index: index, score: n === q ? 1 : 3 });
+                }
+            });
+        });
+    }
+
+    return out
+        .sort(function (a, b) { return a.score - b.score; })
+        .slice(0, 14);
+}
+
+function openGlobalSearch() {
+
+    if (!currentUser || document.getElementById("globalSearch")) {
+        return;
+    }
+
+    setNavOpen(false);
+
+    const dialog = document.createElement("dialog");
+    dialog.id = "globalSearch";
+    dialog.className = "search-dialog no-print";
+    dialog.setAttribute("aria-label", "بحث سريع");
+    dialog.innerHTML =
+        '<div class="search-card">' +
+            '<label class="search-box"><i class="ti ti-search" aria-hidden="true"></i>' +
+                '<input type="text" id="globalSearchInput" placeholder="رقم سجل، اسم مكتب أو مندوب، أو رقم وكالة…" autocomplete="off" aria-controls="globalSearchList">' +
+                '<kbd>Esc</kbd></label>' +
+            '<div class="search-list" id="globalSearchList" role="listbox"></div>' +
+            '<p class="search-foot"><span><kbd>↑</kbd><kbd>↓</kbd> للتنقل</span><span><kbd>Enter</kbd> للفتح</span></p>' +
+        "</div>";
+
+    document.body.appendChild(dialog);
+
+    const input = dialog.querySelector("input");
+    const list = dialog.querySelector(".search-list");
+    let results = [];
+    let active = 0;
+
+    const open = function (item, edit) {
+        dialog.close();
+        if (item.kind === "record") {
+            showFinalRecordReport(item.record.id, "summary");
+        } else if (edit) {
+            openAgencyForEdit(item.record.id, item.index);
+        } else {
+            showTypeAgencies(item.record.id, item.agency.type, "summary");
+        }
+    };
+
+    const render = function () {
+
+        results = globalSearchResults(input.value);
+        active = Math.min(active, Math.max(0, results.length - 1));
+
+        if (!input.value.trim()) {
+            list.innerHTML = '<p class="search-empty">اكتب رقم سجل أو رقم وكالة أو اسماً. مثال: 21 يعرض الوكالة رقم 21 والسجل الذي فيه.</p>';
+            return;
+        }
+
+        if (!results.length) {
+            list.innerHTML = '<p class="search-empty">لا توجد نتائج مطابقة. جرّب رقماً أو اسماً آخر.</p>';
+            return;
+        }
+
+        const canEdit = currentUser && currentUser.role !== "viewer";
+
+        list.innerHTML = results.map(function (item, i) {
+            const r = item.record;
+            if (item.kind === "record") {
+                return '<div class="search-item' + (i === active ? " is-active" : "") + '" role="option" data-i="' + i + '" aria-selected="' + (i === active) + '">' +
+                    '<span class="search-icon"><i class="ti ti-books" aria-hidden="true"></i></span>' +
+                    "<span class=\"search-text\"><b>سجل " + escapeHTML(r.recordNumber) + "</b><small>" + escapeHTML(r.officeName) + " — " + escapeHTML(r.representativeName) +
+                    " — " + formatDay(getRecordDay(r)) + " — " + (r.agencies || []).length + " وكالة</small></span>" +
+                    '<span class="search-go">التقرير</span></div>';
+            }
+            const a = item.agency;
+            return '<div class="search-item' + (i === active ? " is-active" : "") + '" role="option" data-i="' + i + '" aria-selected="' + (i === active) + '">' +
+                '<span class="search-icon search-icon-agency" style="--c:' + (AGENCY_TYPE_COLORS[a.type] || "#45577c") + '">' + escapeHTML(a.number) + "</span>" +
+                '<span class="search-text"><b>وكالة ' + escapeHTML(a.number) + " — " + escapeHTML(AGENCY_NAMES[a.type] || "") + "</b><small>سجل " + escapeHTML(r.recordNumber) + " — " +
+                escapeHTML(r.officeName) + " — " + getAgencyStatusName(a.status) + "</small></span>" +
+                (canEdit ? '<button type="button" class="act-btn search-edit" data-edit="' + i + '"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                "</div>";
+        }).join("");
+    };
+
+    input.addEventListener("input", function () {
+        active = 0;
+        render();
+    });
+
+    input.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            if (!results.length) return;
+            active = (active + (event.key === "ArrowDown" ? 1 : -1) + results.length) % results.length;
+            render();
+            list.querySelector(".is-active")?.scrollIntoView({ block: "nearest" });
+        } else if (event.key === "Enter" && results[active]) {
+            event.preventDefault();
+            open(results[active], false);
+        }
+    });
+
+    list.addEventListener("click", function (event) {
+        const edit = event.target.closest("[data-edit]");
+        if (edit) {
+            open(results[number(edit.dataset.edit)], true);
+            return;
+        }
+        const row = event.target.closest(".search-item");
+        if (row) {
+            open(results[number(row.dataset.i)], false);
+        }
+    });
+
+    dialog.addEventListener("click", function (event) {
+        if (event.target === dialog) dialog.close();
+    });
+
+    dialog.addEventListener("close", function () {
+        dialog.remove();
+    });
+
+    dialog.showModal();
+    render();
+    input.focus();
+}
+
+window.openGlobalSearch = openGlobalSearch;
+
+/* Ctrl + K (أو ⌘ + K) يفتح البحث من أي مكان */
+document.addEventListener("keydown", function (event) {
+    if ((event.ctrlKey || event.metaKey) && (event.key === "k" || event.key === "K" || event.code === "KeyK")) {
+        event.preventDefault();
+        openGlobalSearch();
+    }
+});
+
+/* =========================================================
+قائمة ⋮ لإجراءات السجل
+قائمة عائمة واحدة تُفتح بجانب الزر (خارج الجدول حتى لا تُقص).
+========================================================= */
+
+function closeRecordMenu() {
+    const menu = document.getElementById("recordMenu");
+    if (menu) {
+        if (menu._opener) menu._opener.setAttribute("aria-expanded", "false");
+        menu.remove();
+    }
+}
+
+function openRecordMenu(button, id) {
+
+    const wasOpenForThis = document.getElementById("recordMenu")?._opener === button;
+    closeRecordMenu();
+    if (wasOpenForThis) return;
+
+    const canEdit = currentUser && currentUser.role !== "viewer";
+    const canDelete = currentUser && currentUser.role === "manager";
+
+    const items = [
+        { icon: "ti-eye", text: "عرض التفاصيل", run: function () { viewRecord(id); } },
+        { icon: "ti-file-description", text: "التقرير المفصل", run: function () { showFinalRecordReport(id, "detailed"); } },
+        { icon: "ti-file-spreadsheet", text: "تصدير Excel", run: function () { exportRecordToExcel(id); } }
+    ];
+
+    if (canEdit) {
+        items.push({ icon: "ti-edit", text: "تعديل السجل", run: function () { editRecord(id); } });
+    }
+
+    if (canDelete) {
+        items.push({ icon: "ti-trash", text: "حذف السجل", danger: true, run: function () { deleteRecord(id); } });
+    }
+
+    const menu = document.createElement("div");
+    menu.id = "recordMenu";
+    menu.className = "row-menu no-print";
+    menu.setAttribute("role", "menu");
+    menu._opener = button;
+
+    items.forEach(function (item) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.setAttribute("role", "menuitem");
+        b.className = "row-menu-item" + (item.danger ? " is-danger" : "");
+        b.innerHTML = '<i class="ti ' + item.icon + '" aria-hidden="true"></i>';
+        b.appendChild(document.createTextNode(item.text));
+        b.addEventListener("click", function () {
+            closeRecordMenu();
+            item.run();
+        });
+        menu.appendChild(b);
+    });
+
+    document.body.appendChild(menu);
+    button.setAttribute("aria-expanded", "true");
+
+    /* موضع القائمة: تحت الزر، وتبقى داخل الشاشة */
+    const r = button.getBoundingClientRect();
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    let left = Math.min(Math.max(8, r.right - mw), window.innerWidth - mw - 8);
+    let top = r.bottom + 6;
+    if (top + mh > window.innerHeight - 8) {
+        top = Math.max(8, r.top - mh - 6);
+    }
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+
+    menu.querySelector(".row-menu-item")?.focus();
+}
+
+document.addEventListener("click", function (event) {
+    const menu = document.getElementById("recordMenu");
+    if (menu && !menu.contains(event.target) && !event.target.closest(".act-more")) {
+        closeRecordMenu();
+    }
+});
+
+document.addEventListener("keydown", function (event) {
+    const menu = document.getElementById("recordMenu");
+    if (!menu) return;
+    if (event.key === "Escape") {
+        const opener = menu._opener;
+        closeRecordMenu();
+        opener?.focus();
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const items = Array.from(menu.querySelectorAll(".row-menu-item"));
+        const i = items.indexOf(document.activeElement);
+        items[(i + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
+    }
+});
+
+window.addEventListener("scroll", closeRecordMenu, true);
+window.addEventListener("resize", closeRecordMenu);
+
+window.openRecordMenu = openRecordMenu;
 
 /* =========================================================
 إجمالي السعر الأساسي
@@ -3681,9 +4427,7 @@ const record =
 
 if (!record) {
 
-    alert(
-        "السجل غير موجود."
-    );
+    notify("السجل غير موجود.", "error");
 
     return;
 
@@ -3788,50 +4532,64 @@ if (
     "manager"
 ) {
 
-    alert(
-        "الحذف متاح للمدير فقط."
-    );
+    notify("الحذف متاح للمدير فقط.", "error");
 
     return;
 
 }
 
 
-if (
-    !confirm(
-        "هل أنت متأكد من حذف السجل؟"
-    )
-) {
-
-    return;
-
-}
-
-
-records =
-    records.filter(
+const target =
+    records.find(
         function (record) {
-
-            return (
-                record.id !==
-                id
-            );
-
+            return record.id === id;
         }
     );
 
+if (!target) {
+    return;
+}
 
-saveData(
-    "audit_records",
-    records
-);
+appConfirm({
+    title: "حذف السجل نهائياً",
+    message: "سيُحذف السجل رقم " + target.recordNumber + " (" + target.officeName + ") مع " +
+        (target.agencies || []).length + " وكالة. لا يمكن التراجع عن هذا الحذف.",
+    confirmText: "حذف السجل",
+    cancelText: "إلغاء",
+    danger: true
+}).then(function (ok) {
+
+    if (!ok) {
+        return;
+    }
+
+    records =
+        records.filter(
+            function (record) {
+
+                return (
+                    record.id !==
+                    id
+                );
+
+            }
+        );
 
 
-renderRecords();
+    saveData(
+        "audit_records",
+        records
+    );
 
-updateDashboard();
 
-renderReports();
+    renderRecords();
+
+    updateDashboard();
+
+    renderReports();
+
+    notify("تم حذف السجل رقم " + escapeHTML(target.recordNumber) + ".", "info");
+});
 
 }
 
@@ -3843,8 +4601,42 @@ deleteRecord;
 ========================================================= */
 
 /*
-    إجمالي الوكالة = سعر الوكالة + القيمة الكاملة لبدل الانتقال
-    + الإضافات النقدية الأخرى (للوكالة غير الملغاة).
+    قيمة الإضافات المحسوبة كطوابع مرافعة (حفظ، توقيع إضافي...) بالليرة:
+    عددها × سعر طابع المرافعة المطبّق على الوكالة.
+    طوابع بدل الانتقال لا تدخل هنا (لها بند مستقل).
+*/
+function getAgencyStampAdditionsValue(agency) {
+
+    if (!agency || agency.status === "cancelled") {
+        return 0;
+    }
+
+    let count;
+
+    if (typeof agency.pleadingAdditions === "number") {
+        count = number(agency.pleadingAdditions) - getAgencyTransport(agency).stamps;
+    } else {
+        /* سجلات قديمة جداً لا تحتوي عدد طوابع الإضافات */
+        count = 0;
+        Object.keys(ADDITION_NAMES).forEach(function (key) {
+            if (key === "transport") return;
+            const applied = agency.appliedPrices && agency.appliedPrices.additions && agency.appliedPrices.additions[key];
+            const isPleading = applied ? !!applied.isPleading : !!additionStampStatus[key];
+            if (isPleading) count += number(agency.additions && agency.additions[key]);
+        });
+    }
+
+    const stampPrice =
+        number(agency.appliedPrices && agency.appliedPrices.stamps && agency.appliedPrices.stamps.pleading) ||
+        number(stampPrices.pleading);
+
+    return Math.max(0, count) * stampPrice;
+}
+
+/*
+    إجمالي الوكالة = سعر الوكالة
+    + القيمة المالية للإضافات (الطوابع والنقدية)
+    + القيمة الكاملة لبدل الانتقال (طابعه + حصة الفرع + حصة المندوب).
     حصة الفرع من بدل الانتقال موجودة ضمن additionsTotal
     فتُطرح منه حتى لا تُحسب مرتين.
 */
@@ -3855,7 +4647,15 @@ function getAgencyGrandTotal(agency) {
     const transport = getAgencyTransport(agency);
     return number(agency.basePrice) +
         Math.max(0, number(agency.additionsTotal) - transport.cash) +
+        getAgencyStampAdditionsValue(agency) +
         transport.total;
+}
+
+/* إجمالي مبلغ السجل = مجموع إجماليات وكالاته غير الملغاة */
+function getRecordGrandTotal(record) {
+    return (record.agencies || []).reduce(function (sum, agency) {
+        return sum + getAgencyGrandTotal(agency);
+    }, 0);
 }
 
 /* سعر الوكالة مع بدل الانتقال (مثال: 1700 + 200 = 1900) */
@@ -3944,7 +4744,13 @@ function getRecordFinalStats(record) {
 
     const transport = sumTransport(active);
 
+    const stampAdditionsValue = active.reduce(function (sum, agency) {
+        return sum + getAgencyStampAdditionsValue(agency);
+    }, 0);
+
     return {
+        stampAdditionsValue: stampAdditionsValue,
+        grandTotal: getRecordGrandTotal(record),
         agencies: agencies,
         active: active,
         cancelled: agencies.length - active.length,
@@ -3966,15 +4772,26 @@ function getRecordFinalStats(record) {
 حصص لجنتي الإسعاف والتعاون
 ========================================================= */
 
+/* حصة كل لجنة = سعر الوكالة المسجّل في السجل × نسبة نوعها */
 function getAgencyCommittee(agency) {
     if (!agency || agency.status === "cancelled") {
         return { ambulance: 0, cooperation: 0 };
     }
-    const share = committeeShares[agency.type] || { ambulance: 0, cooperation: 0 };
+    const rate = committeeRates[agency.type] || { ambulance: 0, cooperation: 0 };
+    const price =
+        number(agency.basePrice) ||
+        number(prices[agency.type] && prices[agency.type].agency);
     return {
-        ambulance: number(share.ambulance),
-        cooperation: number(share.cooperation)
+        ambulance: committeeAmount(price, rate.ambulance),
+        cooperation: committeeAmount(price, rate.cooperation)
     };
+}
+
+/* نسبة اللجنة مع مبلغها بسعر الوكالة الحالي (للعرض) */
+function committeeRateHTML(type, field) {
+    const rate = (committeeRates[type] || {})[field];
+    const price = number(prices[type] && prices[type].agency);
+    return formatRate(rate) + '<small class="rate-amount">' + money(committeeAmount(price, rate)) + "</small>";
 }
 
 function sumCommittees(agencies) {
@@ -4007,17 +4824,16 @@ function sumCommittees(agencies) {
 function committeesByTypeTableHTML(c) {
 
     let html = '<table class="doc-table"><thead><tr><th>نوع الوكالة</th><th class="num">العدد</th>' +
-        '<th class="num">حصة الإسعاف للوكالة</th><th class="num">لجنة الإسعاف</th>' +
-        '<th class="num">حصة التعاون للوكالة</th><th class="num">لجنة التعاون</th><th class="num">المجموع</th></tr></thead><tbody>';
+        '<th class="num">نسبة الإسعاف</th><th class="num">لجنة الإسعاف</th>' +
+        '<th class="num">نسبة التعاون</th><th class="num">لجنة التعاون</th><th class="num">المجموع</th></tr></thead><tbody>';
 
     Object.keys(AGENCY_NAMES).forEach(function (type) {
         const item = c.byType[type] || { count: 0, ambulance: 0, cooperation: 0 };
-        const unit = committeeShares[type] || { ambulance: 0, cooperation: 0 };
         html += "<tr" + (item.count === 0 ? ' class="row-zero"' : "") + "><td>" + AGENCY_NAMES[type] + "</td>" +
             '<td class="num">' + item.count + "</td>" +
-            '<td class="num">' + money(unit.ambulance) + "</td>" +
+            '<td class="num">' + committeeRateHTML(type, "ambulance") + "</td>" +
             '<td class="num">' + money(item.ambulance) + "</td>" +
-            '<td class="num">' + money(unit.cooperation) + "</td>" +
+            '<td class="num">' + committeeRateHTML(type, "cooperation") + "</td>" +
             '<td class="num">' + money(item.cooperation) + "</td>" +
             '<td class="num">' + money(item.ambulance + item.cooperation) + "</td></tr>";
     });
@@ -4031,34 +4847,57 @@ function committeesByTypeTableHTML(c) {
 }
 
 /* =========================================================
-الختم الرسمي (يستخدم في رأس التقارير)
+شعار النظام: دفتر قيد مفتوح وعليه علامة «تمّ التدقيق» ✓
+يُستخدم في الدخول، والقائمة، ولوحة التحكم، وترويسة التقارير.
+- الشكل الافتراضي: مربع بحواف دائرية (حبر كحلي) وفيه الدفتر بالأبيض.
+- mark-outline: بلا مربع، بلون النص (علامة مائية).
+الألوان من متغيرات CSS (‎--bm-tile، ‎--bm-ink، ‎--bm-badge‎).
+الأماكن في الصفحة: ‎<svg class="seal …" data-seal>‎ تُملأ بـ anchorSeals.
 ========================================================= */
 
-let sealCounter = 0;
-
-function sealSVG() {
-    sealCounter += 1;
-    const id = "sealArc" + sealCounter;
-    return '<svg class="seal" viewBox="0 0 120 120" aria-hidden="true">' +
-        '<defs><path id="' + id + '" d="M60,60 m-45,0 a45,45 0 1,1 90,0 a45,45 0 1,1 -90,0"/></defs>' +
-        '<circle cx="60" cy="60" r="57" fill="none" stroke="currentColor" stroke-width="2.2"/>' +
-        '<circle cx="60" cy="60" r="53" fill="none" stroke="currentColor" stroke-width="0.8"/>' +
-        '<circle cx="60" cy="60" r="35" fill="none" stroke="currentColor" stroke-width="0.8"/>' +
-        '<text font-size="10" font-weight="700" fill="currentColor"><textPath href="#' + id + '">نقابة المحامين ✦ فرع إدلب ✦ تدقيق السجلات ✦</textPath></text>' +
-        '<g transform="translate(60 62) scale(0.52) translate(-50 -50)" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">' +
-        '<path d="M50 22 V76"/><path d="M26 32 H74"/><path d="M36 78 H64"/>' +
-        '<path d="M26 32 L17 54 M26 32 L35 54"/><path d="M14 54 Q26 66 38 54 Z"/>' +
-        '<path d="M74 32 L65 54 M74 32 L83 54"/><path d="M62 54 Q74 66 86 54 Z"/>' +
-        "</g></svg>";
+function sealSVG(extraClass) {
+    const outline = /\bmark-outline\b|\bseal-stamp\b/.test(extraClass || "");
+    return '<svg class="seal brand-mark' + (outline ? " mark-outline" : "") + (extraClass ? " " + extraClass : "") +
+        '" viewBox="0 0 64 64" aria-hidden="true">' +
+        (outline ? "" : '<rect class="bm-tile" x="2" y="2" width="60" height="60" rx="17"/>') +
+        '<g class="bm-book" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">' +
+            /* صفحتا الدفتر */
+            '<path d="M32 21 C26.5 17 19 16.5 13 18.5 V43.5 C19 41.5 26.5 42 32 46 Z"/>' +
+            '<path d="M32 21 C37.5 17 45 16.5 51 18.5 V35"/>' +
+            '<path d="M32 46 C34.5 44.2 37.2 43.1 40 42.6"/>' +
+            /* سطور القيد */
+            '<path d="M18 25.5 C21.5 24.7 24.8 24.9 27.5 26" stroke-width="2"/>' +
+            '<path d="M18 31.5 C21.5 30.7 24.8 30.9 27.5 32" stroke-width="2"/>' +
+            '<path d="M18 37.5 C21.5 36.7 24.8 36.9 27.5 38" stroke-width="2"/>' +
+            '<path d="M36.5 26 C39.2 24.9 42.5 24.7 46 25.5" stroke-width="2"/>' +
+            '<path d="M36.5 32 C39.2 30.9 42.5 30.7 46 31.5" stroke-width="2"/>' +
+        "</g>" +
+        /* علامة التدقيق */
+        '<circle class="bm-badge" cx="47" cy="45.5" r="10.5"/>' +
+        '<path class="bm-check" d="M42.3 45.6 L45.6 48.9 L51.8 42.4" fill="none" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+        "</svg>";
 }
 
+/* أماكن الشعار في الصفحة تُملأ بالشعار الموحّد (نفس الحجم والصنف) */
+function anchorSeals() {
+    document.querySelectorAll("svg.seal[data-seal]").forEach(function (old) {
+        const extra = Array.from(old.classList).filter(function (c) { return c !== "seal"; }).join(" ");
+        const holder = document.createElement("div");
+        holder.innerHTML = sealSVG(extra);
+        old.replaceWith(holder.firstChild);
+    });
+}
+
+anchorSeals();
+
+/* أرقام ترقيم الأقسام: غربية مثل بقية النظام */
 function arabicDigit(n) {
-    return String(n).replace(/[0-9]/g, function (d) { return "٠١٢٣٤٥٦٧٨٩"[d]; });
+    return String(n);
 }
 
 function todayArabic() {
     try {
-        return new Date().toLocaleDateString("ar-SY", { year: "numeric", month: "long", day: "numeric" });
+        return new Date().toLocaleDateString(NUMBER_LOCALE, { year: "numeric", month: "long", day: "numeric" });
     } catch (e) {
         return new Date().toISOString().slice(0, 10);
     }
@@ -4119,7 +4958,9 @@ function buildFinalRecordReport(record, mode) {
 
     html += '<div class="doc-summary-row">' +
         '<div class="doc-due"><span>المبلغ المستحق على المندوب</span><strong>' + money(stats.representativeTotal) + "</strong>" +
-        "<small>عن " + stats.active.length + " وكالة غير ملغاة</small></div>" +
+        "<small>عن " + stats.active.length + " وكالة غير ملغاة</small>" +
+        '<div class="doc-grand"><span>إجمالي مبلغ السجل</span><b>' + money(stats.grandTotal) + "</b>" +
+        "<small>سعر الوكالات + الإضافات (الطوابع والنقدية) + بدل الانتقال</small></div></div>" +
         '<dl class="doc-kpis">' +
             "<div><dt>فعالة</dt><dd>" + (stats.active.length - stats.missingAgenciesCount) + "</dd></div>" +
             "<div><dt>مفقودة</dt><dd>" + stats.missingAgenciesCount + "</dd></div>" +
@@ -4127,6 +4968,7 @@ function buildFinalRecordReport(record, mode) {
             "<div><dt>سعر الوكالات</dt><dd>" + money(baseTotal) + "</dd></div>" +
             "<div><dt>عدد الإضافات</dt><dd>" + stats.additionsCount + "</dd></div>" +
             "<div><dt>الإضافات النقدية</dt><dd>" + money(stats.additionsTotal) + "</dd></div>" +
+            "<div><dt>قيمة طوابع الإضافات</dt><dd>" + money(stats.stampAdditionsValue) + "</dd></div>" +
             "<div><dt>الطوابع الناقصة</dt><dd>" + missingTotalCount + "</dd></div>" +
             "<div><dt>قيمة الطوابع الناقصة</dt><dd>" + money(stats.missingValue) + "</dd></div>" +
             (stats.transport.count > 0
@@ -4136,6 +4978,9 @@ function buildFinalRecordReport(record, mode) {
                   "<div><dt>المطلوب من بدل الانتقال</dt><dd>" + money(stats.transport.cash) + "</dd></div>"
                 : "") +
         "</dl></div>";
+
+    /* أزرار التدقيق السريع: كل بند موجود في السجل بضغطة واحدة */
+    html += quickAuditHTML(record, mode);
 
     /* الوكالات حسب النوع */
     html += '<section class="doc-section">' + secTitle("الوكالات حسب النوع") +
@@ -4150,7 +4995,7 @@ function buildFinalRecordReport(record, mode) {
         const clickable = allOfType > 0;
         html += "<tr" +
             (clickable
-                ? ' class="clickable-row" title="اضغط لعرض ' + AGENCY_NAMES[type] + ' فقط" onclick="showTypeAgencies(\'' + record.id + "', '" + type + "', '" + mode + '\')"'
+                ? ' class="clickable-row" tabindex="0" role="button" title="اضغط لعرض ' + AGENCY_NAMES[type] + ' فقط" onclick="showTypeAgencies(\'' + record.id + "', '" + type + "', '" + mode + '\')"'
                 : ' class="row-zero"') +
             "><td>" + agencyTypeDot(type) + AGENCY_NAMES[type] +
             (clickable ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
@@ -4161,6 +5006,8 @@ function buildFinalRecordReport(record, mode) {
 
     if (stats.transport.count > 0) {
         html += '<section class="doc-section">' + secTitle("بدل الانتقال") +
+            '<button type="button" class="audit-link no-print" onclick="showAgencyAudit(\'' + record.id + "', 'transport', '" + mode + '\')">' +
+            '<i class="ti ti-list-search" aria-hidden="true"></i> عرض الوكالات التي عليها بدل انتقال (' + stats.transport.count + ')</button>' +
             '<div class="table-wrapper">' + transportTableHTML(stats.transport) + "</div></section>";
     }
 
@@ -4171,9 +5018,9 @@ function buildFinalRecordReport(record, mode) {
         html += '<section class="doc-section">' + secTitle("تفاصيل الوكالات") +
             '<div class="table-wrapper"><table class="doc-table detail-table"><thead><tr>' +
             "<th>رقم الوكالة</th><th>النوع</th><th>الحالة</th>" +
-            '<th class="num">السعر</th><th class="num">بدل الانتقال</th><th>الإضافات</th><th class="num">قيمة الإضافات</th>' +
+            '<th class="num">السعر</th><th class="num">بدل الانتقال</th><th>الإضافات</th><th class="num">قيمة الإضافات<br><small>طوابع ونقدية</small></th>' +
             '<th>الطوابع الناقصة</th><th class="num">المطلوب من المندوب</th>' +
-            '<th class="num total-col">الإجمالي<br><small>السعر + الانتقال + الإضافات</small></th><th>ملاحظات</th>' +
+            '<th class="num total-col">الإجمالي<br><small>السعر + الإضافات + الانتقال</small></th><th>ملاحظات</th>' +
             "</tr></thead><tbody>";
 
         stats.agencies.slice().sort(function (a, b) { return number(a.number) - number(b.number); }).forEach(function (agency) {
@@ -4182,7 +5029,7 @@ function buildFinalRecordReport(record, mode) {
             const isCancelled = agency.status === "cancelled";
             const transport = getAgencyTransport(agency);
             const base = isCancelled ? 0 : number(agency.basePrice);
-            const add = isCancelled ? 0 : Math.max(0, number(agency.additionsTotal) - transport.cash);
+            const add = isCancelled ? 0 : Math.max(0, number(agency.additionsTotal) - transport.cash) + getAgencyStampAdditionsValue(agency);
             const rep = isCancelled ? 0 : number(agency.representativeAmount);
             const grand = getAgencyGrandTotal(agency);
 
@@ -4227,9 +5074,12 @@ function buildFinalRecordReport(record, mode) {
 
         html += '<section class="doc-section">' + secTitle("الطوابع الناقصة") +
             '<table class="doc-table"><thead><tr><th>الطابع</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
-            "<tr><td>مرافعة</td><td class=\"num\">" + stats.missing.pleading + '</td><td class="num">' + money(stats.missing.pleading * number(stampPrices.pleading)) + "</td></tr>" +
-            "<tr><td>إسعاف</td><td class=\"num\">" + stats.missing.ambulance + '</td><td class="num">' + money(stats.missing.ambulance * number(stampPrices.ambulance)) + "</td></tr>" +
-            "<tr><td>معونة</td><td class=\"num\">" + stats.missing.aid + '</td><td class="num">' + money(stats.missing.aid * number(stampPrices.aid)) + "</td></tr>" +
+            ["pleading", "ambulance", "aid"].map(function (k) {
+                const names = { pleading: "مرافعة", ambulance: "إسعاف", aid: "معونة" };
+                return "<tr" + auditRowAttrs(record, "missing:" + k, mode, stats.missing[k]) + "><td>" + names[k] +
+                    (stats.missing[k] ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
+                    '</td><td class="num">' + stats.missing[k] + '</td><td class="num">' + money(stats.missing[k] * number(stampPrices[k])) + "</td></tr>";
+            }).join("") +
             '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(stats.missingValue) + "</td></tr></tfoot></table></section>";
 
         html += '<section class="doc-section">' + secTitle("الإضافات") +
@@ -4241,7 +5091,9 @@ function buildFinalRecordReport(record, mode) {
             const count = stats.active.reduce(function (sum, a) { return sum + number(a.additions && a.additions[key]); }, 0);
             const cash = stats.active.reduce(function (sum, a) { return sum + number(a.additionValues && a.additionValues[key]); }, 0);
             addCountTotal += count; addCashTotal += cash;
-            html += "<tr" + (count === 0 ? ' class="row-zero"' : "") + "><td>" + ADDITION_NAMES[key] + '</td><td class="num">' + count + '</td><td class="num">' + money(cash) + "</td></tr>";
+            html += "<tr" + auditRowAttrs(record, "add:" + key, mode, count) + "><td>" + ADDITION_NAMES[key] +
+                (count ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
+                '</td><td class="num">' + count + '</td><td class="num">' + money(cash) + "</td></tr>";
         });
 
         html += '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + addCountTotal + '</td><td class="num">' + money(addCashTotal) + "</td></tr></tfoot></table></section>";
@@ -4354,7 +5206,13 @@ function buildTypeAgenciesDoc(record, type, backMode, forPrint) {
             "<div><dt>الإجمالي</dt><dd>" + money(sumGrand) + "</dd></div>" +
         "</dl></div>";
 
-    html += '<section class="doc-section doc-section-flow"><h3><span class="sec-no">١</span>' + escapeHTML(typeName) + " — التفاصيل كما أُدخلت</h3>" +
+    /* أرقام وكالات هذا النوع للمطابقة السريعة مع السجل الورقي */
+    if (list.length) {
+        html += '<div class="audit-numbers audit-numbers-wide"><span>أرقام الوكالات للمطابقة مع السجل</span>' +
+            agencyNumbersStripHTML(list, false) + "</div>";
+    }
+
+    html += '<section class="doc-section doc-section-flow"><h3><span class="sec-no">1</span>' + escapeHTML(typeName) + " — التفاصيل كما أُدخلت</h3>" +
         '<div class="table-wrapper"><table class="doc-table detail-table cls-table"><thead><tr>' +
         "<th>رقم الوكالة</th><th>الحالة</th>" +
         '<th class="num">السعر</th><th class="num">بدل الانتقال</th><th>الإضافات</th><th>الطوابع الناقصة</th>' +
@@ -4386,6 +5244,8 @@ function showTypeAgencies(recordId, type, backMode) {
     modalContent.innerHTML = buildTypeAgenciesDoc(record, type, backMode || "summary", false);
     modal.classList.remove("hidden");
     modalContent.scrollTop = 0;
+    /* الحاوية التي تتمرر فعلاً هي .modal-content */
+    modalContent.closest(".modal-content")?.scrollTo(0, 0);
 }
 
 function printTypeAgencies(recordId, type, pdf) {
@@ -4401,6 +5261,233 @@ function printTypeAgencies(recordId, type, pdf) {
 window.showTypeAgencies = showTypeAgencies;
 window.printTypeAgencies = printTypeAgencies;
 
+/* =========================================================
+التدقيق السريع لبند واحد من السجل
+الضغط على «بدل الانتقال» أو «نقص مرافعة» أو أي إضافة (حفظ، وكيل عن…)
+يعرض الوكالات التي فيها هذا البند فقط، من كل الأنواع، مع أرقامها
+مصفوفة في الأعلى للمطابقة السريعة مع السجل الورقي، وزر تعديل لكل وكالة.
+filter: "transport" | "missing:pleading|ambulance|aid" | "add:<مفتاح الإضافة>"
+========================================================= */
+
+const AUDIT_STAMP_NAMES = {
+    pleading: "نقص مرافعة",
+    ambulance: "نقص إسعاف",
+    aid: "نقص معونة"
+};
+
+function auditFilterInfo(filter) {
+
+    filter = String(filter || "");
+
+    if (filter === "transport") {
+        return {
+            label: "بدل الانتقال",
+            icon: "ti-route",
+            count: function (agency) { return getAgencyTransport(agency).count; }
+        };
+    }
+
+    const parts = filter.split(":");
+    const key = parts[1];
+
+    if (parts[0] === "missing" && AUDIT_STAMP_NAMES[key]) {
+        return {
+            label: AUDIT_STAMP_NAMES[key],
+            icon: "ti-receipt",
+            count: function (agency) {
+                return number((agency.stamps || agency.missingStamps || {})[key]);
+            }
+        };
+    }
+
+    if (parts[0] === "add" && ADDITION_NAMES[key]) {
+        return {
+            label: ADDITION_NAMES[key],
+            icon: "ti-circle-plus",
+            count: function (agency) {
+                return number(agency.additions && agency.additions[key]);
+            }
+        };
+    }
+
+    return null;
+}
+
+/* الوكالات غير الملغاة التي فيها البند، مرتبة حسب رقم الوكالة */
+function auditAgencies(record, filter) {
+
+    const info = auditFilterInfo(filter);
+
+    if (!info) {
+        return [];
+    }
+
+    return (record.agencies || [])
+        .map(function (agency, index) {
+            return { agency: agency, index: index, count: agency.status === "cancelled" ? 0 : info.count(agency) };
+        })
+        .filter(function (item) { return item.count > 0; })
+        .sort(function (a, b) {
+            return String(a.agency.number).localeCompare(String(b.agency.number), "ar", { numeric: true });
+        });
+}
+
+/* صف قابل للضغط في جداول التقرير المختصر */
+function auditRowAttrs(record, filter, mode, count) {
+    if (!count) {
+        return ' class="row-zero"';
+    }
+    const info = auditFilterInfo(filter);
+    return ' class="clickable-row" tabindex="0" role="button" title="اضغط لعرض الوكالات التي فيها ' + info.label + '"' +
+        ' onclick="showAgencyAudit(\'' + record.id + "', '" + filter + "', '" + mode + '\')"';
+}
+
+/* أزرار التدقيق السريع أعلى التقرير: كل بند موجود في السجل مع عدده */
+function quickAuditHTML(record, mode) {
+
+    const filters = ["transport"]
+        .concat(Object.keys(AUDIT_STAMP_NAMES).map(function (k) { return "missing:" + k; }))
+        .concat(Object.keys(ADDITION_NAMES).filter(function (k) { return k !== "transport"; }).map(function (k) { return "add:" + k; }));
+
+    const chips = filters.map(function (filter) {
+        const info = auditFilterInfo(filter);
+        const list = auditAgencies(record, filter);
+        if (!list.length) return "";
+        const total = list.reduce(function (s, item) { return s + item.count; }, 0);
+        return '<button type="button" class="audit-chip" onclick="showAgencyAudit(\'' + record.id + "', '" + filter + "', '" + mode + '\')">' +
+            '<i class="ti ' + info.icon + '" aria-hidden="true"></i>' + info.label +
+            "<b>" + total + "</b><small>" + list.length + " وكالة</small></button>";
+    }).join("");
+
+    if (!chips) {
+        return "";
+    }
+
+    return '<section class="quick-audit no-print" aria-label="تدقيق سريع">' +
+        '<h4><i class="ti ti-list-search" aria-hidden="true"></i> تدقيق سريع: اضغط على بند لعرض وكالاته فقط</h4>' +
+        '<div class="audit-chips">' + chips + "</div></section>";
+}
+
+/* أرقام الوكالات مصفوفة للمطابقة السريعة مع السجل الورقي */
+function agencyNumbersStripHTML(list, showCount) {
+    return '<div class="numbers-strip" aria-label="أرقام الوكالات">' +
+        list.map(function (item) {
+            const state = item.agency.status === "missing" ? " is-missing" : item.agency.status === "cancelled" ? " is-cancelled" : "";
+            return '<span class="num-tag' + state + '" title="' + getAgencyStatusName(item.agency.status) + '">' + escapeHTML(item.agency.number) +
+                (showCount && item.count > 1 ? "<small>×" + item.count + "</small>" : "") + "</span>";
+        }).join("") +
+        "</div>";
+}
+
+function buildAgencyAuditDoc(record, filter, backMode, forPrint) {
+
+    const info = auditFilterInfo(filter);
+    const list = auditAgencies(record, filter);
+    const canEdit = !forPrint && currentUser && currentUser.role !== "viewer";
+    const total = list.reduce(function (s, item) { return s + item.count; }, 0);
+
+    let html = '<div class="final-report doc doc-detailed doc-type-view doc-audit">';
+
+    if (!forPrint) {
+        html += '<div class="report-actions no-print">' +
+            '<button type="button" class="secondary-btn" onclick="showFinalRecordReport(\'' + record.id + "', '" + backMode + '\')"><i class="ti ti-arrow-right"></i> رجوع للتقرير</button>' +
+            '<button type="button" class="primary-btn" onclick="printAgencyAudit(\'' + record.id + "', '" + filter + '\', true)"><i class="ti ti-file-type-pdf"></i> حفظ PDF</button>' +
+            '<button type="button" class="secondary-btn" onclick="printAgencyAudit(\'' + record.id + "', '" + filter + '\', false)"><i class="ti ti-printer"></i> طباعة</button>' +
+            '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button>' +
+            "</div>";
+    }
+
+    html += docLetterhead(
+        "الوكالات التي فيها " + info.label,
+        "سجل " + escapeHTML(record.recordNumber) + " — " + escapeHTML(record.officeName) + " — المندوب: " +
+        escapeHTML(record.representativeName) + " — " + formatDay(getRecordDay(record))
+    );
+
+    html += '<div class="audit-summary">' +
+        '<div class="audit-total"><span>' + info.label + "</span><strong>" + total + "</strong><small>في " + list.length + " وكالة</small></div>" +
+        '<div class="audit-numbers"><span>أرقام الوكالات للمطابقة مع السجل</span>' +
+        (list.length ? agencyNumbersStripHTML(list, true) : '<p class="doc-empty">لا توجد وكالات فيها هذا البند.</p>') +
+        "</div></div>";
+
+    if (list.length) {
+
+        let rows = "";
+
+        list.forEach(function (item) {
+
+            const a = item.agency;
+            const ms = a.stamps || a.missingStamps || {};
+            const statusClass = a.status === "missing" ? "st-missing" : "st-active";
+
+            const stampParts = [];
+            if (number(ms.pleading)) stampParts.push("مرافعة " + number(ms.pleading));
+            if (number(ms.ambulance)) stampParts.push("إسعاف " + number(ms.ambulance));
+            if (number(ms.aid)) stampParts.push("معونة " + number(ms.aid));
+
+            const additionsText = agencyAdditionsToText(a, false);
+
+            rows += "<tr" + agencyRowAttrs(a, "") + ">" +
+                '<td><strong class="audit-no">' + escapeHTML(a.number) + "</strong>" + (a.duplicate ? ' <span class="badge badge-warning">مكررة</span>' : "") + "</td>" +
+                "<td>" + agencyTypeDot(a.type) + escapeHTML(AGENCY_NAMES[a.type] || a.type || "-") + "</td>" +
+                '<td><span class="status-pill ' + statusClass + '">' + getAgencyStatusName(a.status) + "</span></td>" +
+                '<td class="num audit-count">' + item.count + "</td>" +
+                '<td class="small-text">' + (additionsText === "-" ? "—" : escapeHTML(additionsText)) + "</td>" +
+                '<td class="small-text">' + (stampParts.length ? stampParts.join("<br>") : "—") + "</td>" +
+                '<td class="num">' + money(a.representativeAmount) + "</td>" +
+                '<td class="small-text">' + (a.notes ? formatNotesHTML(a.notes) : "—") + "</td>" +
+                (canEdit ? '<td class="no-print"><button type="button" class="act-btn" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
+                "</tr>";
+        });
+
+        html += '<section class="doc-section doc-section-flow"><h3><span class="sec-no">1</span>التفاصيل كما أُدخلت</h3>' +
+            '<div class="table-wrapper"><table class="doc-table detail-table cls-table"><thead><tr>' +
+            "<th>رقم الوكالة</th><th>النوع</th><th>الحالة</th>" +
+            '<th class="num">' + escapeHTML(info.label) + "</th><th>كل الإضافات</th><th>الطوابع الناقصة</th>" +
+            '<th class="num">المطلوب من المندوب</th><th>ملاحظات</th>' +
+            (canEdit ? '<th class="no-print"></th>' : "") +
+            "</tr></thead><tbody>" + rows + "</tbody>" +
+            '<tfoot><tr><td colspan="3">الإجمالي (' + list.length + " وكالة)</td>" +
+            '<td class="num">' + total + "</td><td></td><td></td><td></td><td></td>" +
+            (canEdit ? '<td class="no-print"></td>' : "") +
+            "</tr></tfoot></table></div></section>";
+    }
+
+    if (forPrint) {
+        html += docSignatures();
+    }
+
+    html += "</div>";
+
+    return html;
+}
+
+function showAgencyAudit(recordId, filter, backMode) {
+    const record = records.find(function (item) { return item.id === recordId; });
+    if (!record || !auditFilterInfo(filter)) return;
+    const modalContent = document.getElementById("modalContent");
+    const modal = document.getElementById("recordModal");
+    if (!modalContent || !modal) return;
+    modalContent.innerHTML = buildAgencyAuditDoc(record, filter, backMode || "summary", false);
+    modal.classList.remove("hidden");
+    modalContent.scrollTop = 0;
+    /* الحاوية التي تتمرر فعلاً هي .modal-content */
+    modalContent.closest(".modal-content")?.scrollTo(0, 0);
+}
+
+function printAgencyAudit(recordId, filter, pdf) {
+    const record = records.find(function (item) { return item.id === recordId; });
+    const info = auditFilterInfo(filter);
+    if (!record || !info) return;
+    openReportDocument(
+        buildAgencyAuditDoc(record, filter, "summary", true),
+        info.label + " - سجل " + sanitizeFileNamePart(record.recordNumber),
+        { pdf: !!pdf, landscape: true }
+    );
+}
+
+window.showAgencyAudit = showAgencyAudit;
+window.printAgencyAudit = printAgencyAudit;
+
 function showFinalRecordReport(id, mode) {
     const record = records.find(function (item) { return item.id === id; });
     if (!record) return;
@@ -4410,6 +5497,8 @@ function showFinalRecordReport(id, mode) {
     modalContent.innerHTML = buildFinalRecordReport(record, mode || "summary");
     modal.classList.remove("hidden");
     modalContent.scrollTop = 0;
+    /* الحاوية التي تتمرر فعلاً هي .modal-content */
+    modalContent.closest(".modal-content")?.scrollTo(0, 0);
 }
 
 /* =========================================================
@@ -4444,7 +5533,24 @@ window.addEventListener("afterprint", function () {
     printCleanupTimer = setTimeout(cleanupPrint, 300);
 });
 
-function showToast(html, ms) {
+/* =========================================================
+رسائل النظام: إشعارات قصيرة ونافذة تأكيد بتصميم النظام
+بدل نوافذ المتصفح (alert / confirm).
+========================================================= */
+
+const TOAST_ICONS = {
+    success: "ti-circle-check",
+    error: "ti-alert-circle",
+    warning: "ti-alert-triangle",
+    info: "ti-info-circle"
+};
+
+/*
+    html: نص الرسالة (قد يحتوي <strong> و <span> لسطرين).
+    variant: success | error | warning | info
+    rich: true إذا كان html يحتوي سطرين جاهزين.
+*/
+function showToast(html, ms, variant) {
 
     let toast = document.getElementById("appToast");
 
@@ -4452,16 +5558,110 @@ function showToast(html, ms) {
         toast = document.createElement("div");
         toast.id = "appToast";
         toast.className = "app-toast no-print";
+        toast.setAttribute("role", "status");
+        toast.setAttribute("aria-live", "polite");
         document.body.appendChild(toast);
+        toast.addEventListener("click", function () {
+            toast.classList.remove("show");
+        });
     }
 
-    toast.innerHTML = html;
+    variant = variant || "info";
+
+    toast.className = "app-toast no-print toast-" + variant;
+    toast.setAttribute("role", variant === "error" ? "alert" : "status");
+    toast.innerHTML =
+        '<i class="ti ' + (TOAST_ICONS[variant] || TOAST_ICONS.info) + ' toast-icon" aria-hidden="true"></i>' +
+        '<div class="toast-body">' + html + "</div>";
+
+    /* إعادة تشغيل الحركة حتى لو كانت الرسالة السابقة ظاهرة */
+    void toast.offsetWidth;
     toast.classList.add("show");
 
     clearTimeout(toast._timer);
     toast._timer = setTimeout(function () {
         toast.classList.remove("show");
-    }, ms || 6000);
+    }, ms || (variant === "error" ? 6000 : 4000));
+}
+
+function notify(message, variant, ms, rich) {
+    showToast(rich ? message : "<strong>" + message + "</strong>", ms, variant || "info");
+}
+
+/* رسالة تظهر بعد إعادة تحميل الصفحة (حفظ الأسعار، الاستعادة...) */
+const FLASH_KEY = "audit_flash_message";
+
+function flashNotify(message, variant) {
+    try {
+        sessionStorage.setItem(FLASH_KEY, JSON.stringify({ message: message, variant: variant || "info" }));
+    } catch (e) {}
+}
+
+window.addEventListener("DOMContentLoaded", function () {
+    let flash = null;
+    try {
+        flash = JSON.parse(sessionStorage.getItem(FLASH_KEY) || "null");
+        sessionStorage.removeItem(FLASH_KEY);
+    } catch (e) {}
+    if (flash && flash.message) {
+        notify(flash.message, flash.variant, 4500);
+    }
+});
+
+/*
+    نافذة تأكيد بتصميم النظام. تُرجع Promise بقيمة true عند التأكيد.
+    options: { title, message, confirmText, cancelText, danger }
+*/
+function appConfirm(options) {
+
+    options = options || {};
+
+    return new Promise(function (resolve) {
+
+        const dialog = document.createElement("dialog");
+        dialog.className = "app-dialog no-print" + (options.danger ? " is-danger" : "");
+        dialog.setAttribute("aria-labelledby", "appDialogTitle");
+
+        dialog.innerHTML =
+            '<form method="dialog" class="app-dialog-card">' +
+                '<div class="app-dialog-icon" aria-hidden="true"><i class="ti ' + (options.danger ? "ti-alert-triangle" : "ti-help-circle") + '"></i></div>' +
+                '<h3 id="appDialogTitle"></h3>' +
+                '<p class="app-dialog-message"></p>' +
+                '<div class="app-dialog-actions">' +
+                    '<button type="submit" value="ok" class="' + (options.danger ? "danger-btn" : "primary-btn") + ' app-dialog-ok"></button>' +
+                    '<button type="submit" value="cancel" class="secondary-btn app-dialog-cancel"></button>' +
+                "</div>" +
+            "</form>";
+
+        dialog.querySelector("h3").textContent = options.title || "تأكيد";
+        dialog.querySelector(".app-dialog-message").textContent = options.message || "";
+        dialog.querySelector(".app-dialog-ok").textContent = options.confirmText || "تأكيد";
+        dialog.querySelector(".app-dialog-cancel").textContent = options.cancelText || "إلغاء";
+
+        document.body.appendChild(dialog);
+
+        dialog.addEventListener("close", function () {
+            const ok = dialog.returnValue === "ok";
+            dialog.remove();
+            resolve(ok);
+        });
+
+        /* الضغط خارج البطاقة = إلغاء */
+        dialog.addEventListener("click", function (event) {
+            if (event.target === dialog) {
+                dialog.close("cancel");
+            }
+        });
+
+        if (typeof dialog.showModal === "function") {
+            dialog.showModal();
+            /* زر الإلغاء أولاً في الحذف حتى لا يُحذف شيء بضغطة Enter */
+            (options.danger ? dialog.querySelector(".app-dialog-cancel") : dialog.querySelector(".app-dialog-ok")).focus();
+        } else {
+            dialog.remove();
+            resolve(window.confirm(options.message || options.title || ""));
+        }
+    });
 }
 
 function openReportDocument(bodyHTML, title, options) {
@@ -4743,10 +5943,10 @@ function buildCommitteesDoc(forPrint) {
         "<small>عن " + totals.count + " وكالة غير ملغاة في " + list.length + " سجل</small></div>" +
         "</div>";
 
-    html += '<section class="doc-section"><h3><span class="sec-no">١</span>حسب نوع الوكالة</h3>' +
+    html += '<section class="doc-section"><h3><span class="sec-no">1</span>حسب نوع الوكالة</h3>' +
         '<div class="table-wrapper">' + committeesByTypeTableHTML(totals) + "</div></section>";
 
-    html += '<section class="doc-section"><h3><span class="sec-no">٢</span>حسب السجل</h3>' +
+    html += '<section class="doc-section"><h3><span class="sec-no">2</span>حسب السجل</h3>' +
         '<div class="table-wrapper"><table class="doc-table"><thead><tr><th>رقم السجل</th><th>المكتب</th><th>المندوب</th><th>التاريخ</th>' +
         '<th class="num">الوكالات</th><th class="num">لجنة الإسعاف</th><th class="num">لجنة التعاون</th><th class="num">المجموع</th></tr></thead><tbody>';
 
@@ -4768,7 +5968,7 @@ function buildCommitteesDoc(forPrint) {
     if (forPrint) {
         html += docSignatures();
     } else {
-        html += '<p class="field-hint">الحصص محسوبة من قسم الأسعار ← حصص لجنتي الإسعاف والتعاون، والوكالات الملغاة غير محسوبة.</p>';
+        html += '<p class="field-hint">حصة كل لجنة = سعر الوكالة في السجل × نسبة نوعها (من قسم الأسعار ← أسعار اللجان)، والوكالات الملغاة غير محسوبة.</p>';
     }
 
     html += "</div>";
@@ -4802,7 +6002,7 @@ function printCommitteesReport(pdf) {
 function exportCommitteesToExcel() {
 
     if (typeof XLSX === "undefined") {
-        alert("تعذر تحميل مكتبة الإكسل. تأكد من الاتصال بالإنترنت ثم حدّث الصفحة.");
+        notify("تعذر تحميل مكتبة الإكسل. تأكد من الاتصال بالإنترنت ثم حدّث الصفحة.", "error");
         return;
     }
 
@@ -4812,16 +6012,16 @@ function exportCommitteesToExcel() {
 
     const typeRows = Object.keys(AGENCY_NAMES).map(function (type) {
         const item = totals.byType[type];
-        const unit = committeeShares[type] || { ambulance: 0, cooperation: 0 };
-        return [AGENCY_NAMES[type], item.count, number(unit.ambulance), item.ambulance, number(unit.cooperation), item.cooperation, item.ambulance + item.cooperation];
+        const rate = committeeRates[type] || { ambulance: 0, cooperation: 0 };
+        return [AGENCY_NAMES[type], item.count, formatRate(rate.ambulance), item.ambulance, formatRate(rate.cooperation), item.cooperation, item.ambulance + item.cooperation];
     });
 
     const typesSheet = buildStyledTableSheet({
         title: "حصص لجنتي الإسعاف والتعاون — حسب نوع الوكالة",
         subtitle: subtitle,
-        headers: ["نوع الوكالة", "العدد", "حصة الإسعاف للوكالة", "لجنة الإسعاف", "حصة التعاون للوكالة", "لجنة التعاون", "المجموع"],
+        headers: ["نوع الوكالة", "العدد", "نسبة الإسعاف", "لجنة الإسعاف", "نسبة التعاون", "لجنة التعاون", "المجموع"],
         rows: typeRows,
-        moneyCols: [2, 3, 4, 5, 6],
+        moneyCols: [3, 5, 6],
         totalRow: ["الإجمالي", totals.count, "", totals.ambulance, "", totals.cooperation, totals.ambulance + totals.cooperation],
         widths: [26, 10, 18, 18, 18, 18, 18]
     });
@@ -4851,6 +6051,15 @@ function exportCommitteesToExcel() {
     document.getElementById(id)?.addEventListener("change", renderCommittees);
 });
 
+/* من صفحة حصص اللجان إلى بطاقة أسعار اللجان في قسم الأسعار */
+function openCommitteePrices() {
+    switchSection("pricesSection");
+    setTimeout(function () {
+        document.getElementById("committeePricesCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+}
+
+window.openCommitteePrices = openCommitteePrices;
 window.renderCommittees = renderCommittees;
 window.resetCommitteeFilters = resetCommitteeFilters;
 window.printCommitteesReport = printCommitteesReport;
@@ -4879,9 +6088,7 @@ const record =
 
 if (!record) {
 
-    alert(
-        "السجل غير موجود."
-    );
+    notify("السجل غير موجود.", "error");
 
     return;
 
@@ -5117,7 +6324,7 @@ let html = `
                         </th>
 
                         <th class="total-col">
-                            الإجمالي (السعر + الإضافات)
+                            الإجمالي (السعر + الإضافات + الانتقال)
                         </th>
 
                     </tr>
@@ -5873,7 +7080,7 @@ function filteredAgenciesTableHTML(matched, forPrint) {
 function openAgencyForEdit(recordId, index) {
 
     if (!currentUser || currentUser.role === "viewer") {
-        alert("ليس لديك صلاحية.");
+        notify("ليس لديك صلاحية.", "error");
         return;
     }
 
@@ -5915,7 +7122,7 @@ let activeCalcTab = "council";
 function calcNumberControl(id, value) {
     return '<div class="number-control">' +
         '<button type="button" class="number-btn minus-btn" data-target="' + id + '">−</button>' +
-        '<input type="number" id="' + id + '" min="0" value="' + (value || 0) + '">' +
+        '<input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="' + id + '" min="0" value="' + (value || 0) + '">' +
         '<button type="button" class="number-btn plus-btn" data-target="' + id + '">+</button>' +
         "</div>";
 }
@@ -5964,7 +7171,7 @@ function calcShellHTML() {
             "اختر السجلات ومدى أرقام الوكالات التي تشملها هذه الحصة (السجل قد يمتد على عدة أشهر). هذا الحساب منفصل ولا يغيّر أي رقم في النظام.</p>" +
             '<div class="form-grid calc-top">' +
                 '<div class="input-group"><label for="ccShare"><i class="ti ti-coin"></i> حصة المجلس عن كل بدل انتقال</label>' +
-                    '<div class="input-suffix"><input type="number" id="ccShare" min="0"><span>ل.س</span></div>' +
+                    '<div class="input-suffix"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="ccShare" min="0"><span>ل.س</span></div>' +
                     '<small id="ccShareHint"></small></div>' +
                 '<div class="input-group"><label for="ccName"><i class="ti ti-tag"></i> اسم الحساب (للحفظ)</label>' +
                     '<input type="text" id="ccName" placeholder="مثال: حصة المجلس — آب 2026"></div>' +
@@ -5989,7 +7196,7 @@ function calcShellHTML() {
                 '<h3><i class="ti ti-file-dollar"></i> بيانات الوكالة</h3>' +
                 '<div class="form-grid">' +
                     '<div class="input-group"><label for="qcType"><i class="ti ti-file-certificate"></i> نوع الوكالة</label><select id="qcType">' +
-                        Object.keys(AGENCY_NAMES).map(function (t) { return '<option value="' + t + '">' + AGENCY_NAMES[t] + "</option>"; }).join("") +
+                        Object.keys(AGENCY_NAMES).map(function (t) { return '<option value="' + t + '"' + (t === DEFAULT_AGENCY_TYPE ? " selected" : "") + ">" + AGENCY_NAMES[t] + "</option>"; }).join("") +
                     "</select></div>" +
                     '<div class="input-group"><label for="qcRep"><i class="ti ti-route"></i> نوع المندوب</label><select id="qcRep">' +
                         '<option value="internal">مندوب داخلي</option><option value="external">مندوب خارجي (مع بدل انتقال)</option>' +
@@ -6020,10 +7227,10 @@ function calcShellHTML() {
             '<h3><i class="ti ti-scale"></i> مطابقة ما سلّمه المندوب مع المطلوب</h3>' +
             '<div class="form-grid">' +
                 '<div class="input-group filter-wide"><label for="rcRecord"><i class="ti ti-books"></i> السجل</label><select id="rcRecord"></select></div>' +
-                '<div class="input-group"><label for="rcFrom"><i class="ti ti-number"></i> من وكالة رقم</label><input type="number" id="rcFrom" min="0" placeholder="الكل"></div>' +
-                '<div class="input-group"><label for="rcTo"><i class="ti ti-number"></i> إلى وكالة رقم</label><input type="number" id="rcTo" min="0" placeholder="الكل"></div>' +
+                '<div class="input-group"><label for="rcFrom"><i class="ti ti-number"></i> من وكالة رقم</label><input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="rcFrom" min="0" placeholder="الكل"></div>' +
+                '<div class="input-group"><label for="rcTo"><i class="ti ti-number"></i> إلى وكالة رقم</label><input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="rcTo" min="0" placeholder="الكل"></div>' +
                 '<div class="input-group"><label for="rcReceived"><i class="ti ti-cash"></i> المبلغ المقبوض فعلاً</label>' +
-                    '<div class="input-suffix"><input type="number" id="rcReceived" min="0" placeholder="0"><span>ل.س</span></div></div>' +
+                    '<div class="input-suffix"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="rcReceived" min="0" placeholder="0"><span>ل.س</span></div></div>' +
             "</div>" +
         "</div>" +
         '<div id="rcResult"></div>' +
@@ -6042,9 +7249,9 @@ function councilRowHTML(row) {
     row = row || { recordId: "", from: "", to: "" };
     return '<div class="calc-row">' +
         '<div class="input-group"><label>السجل</label><select class="cc-record">' + recordOptionsHTML(row.recordId) + "</select></div>" +
-        '<div class="input-group"><label>من وكالة رقم</label><input type="number" class="cc-from" min="0" placeholder="الكل" value="' + escapeHTML(row.from) + '"></div>' +
-        '<div class="input-group"><label>إلى وكالة رقم</label><input type="number" class="cc-to" min="0" placeholder="الكل" value="' + escapeHTML(row.to) + '"></div>' +
-        '<button type="button" class="act-btn act-danger cc-remove" title="حذف هذا السطر"><i class="ti ti-trash"></i></button>' +
+        '<div class="input-group"><label>من وكالة رقم</label><input type="text" inputmode="numeric" data-num="int" autocomplete="off" class="cc-from" min="0" placeholder="الكل" value="' + escapeHTML(row.from) + '"></div>' +
+        '<div class="input-group"><label>إلى وكالة رقم</label><input type="text" inputmode="numeric" data-num="int" autocomplete="off" class="cc-to" min="0" placeholder="الكل" value="' + escapeHTML(row.to) + '"></div>' +
+        '<button type="button" class="act-btn act-danger cc-remove" title="حذف هذا السطر" aria-label="حذف هذا السطر"><i class="ti ti-trash"></i></button>' +
         "</div>";
 }
 
@@ -6159,7 +7366,7 @@ function buildCouncilDoc(result, name) {
                 "<div><dt>حصة الفرع من البدل</dt><dd>" + money(result.total.cash) + "</dd></div>" +
                 "<div><dt>الباقي للصندوق</dt><dd>" + money(result.total.fund) + "</dd></div>" +
             "</dl></div>" +
-        '<section class="doc-section"><h3><span class="sec-no">١</span>التفاصيل حسب السجل</h3>' + councilTableHTML(result) + "</section>" +
+        '<section class="doc-section"><h3><span class="sec-no">1</span>التفاصيل حسب السجل</h3>' + councilTableHTML(result) + "</section>" +
         '<p class="doc-empty">هذا الحساب منفصل عن الحسابات الأساسية للنظام ولا يغيّر المطلوب من المندوبين.</p>' +
         docSignatures() +
         "</div>";
@@ -6176,7 +7383,7 @@ function saveCouncilCalc() {
     const rows = readCouncilRows().filter(function (r) { return r.recordId; });
 
     if (!rows.length) {
-        alert("اختر سجلاً واحداً على الأقل قبل الحفظ.");
+        notify("اختر سجلاً واحداً على الأقل قبل الحفظ.", "error");
         return;
     }
 
@@ -6196,7 +7403,7 @@ function saveCouncilCalc() {
 
     saveData(COUNCIL_SAVED_KEY, councilSaved);
     renderCouncilSaved();
-    showToast("<strong>تم حفظ الحساب</strong><span>" + escapeHTML(name) + " — " + money(result.total.council) + "</span>", 4000);
+    showToast("<strong>تم حفظ الحساب</strong><span>" + escapeHTML(name) + " — " + money(result.total.council) + "</span>", 4000, "success");
 }
 
 function loadCouncilCalc(id) {
@@ -6210,10 +7417,18 @@ function loadCouncilCalc(id) {
 }
 
 function deleteCouncilCalc(id) {
-    if (!confirm("حذف هذا الحساب المحفوظ؟")) return;
-    councilSaved = councilSaved.filter(function (s) { return s.id !== id; });
-    saveData(COUNCIL_SAVED_KEY, councilSaved);
-    renderCouncilSaved();
+    appConfirm({
+        title: "حذف الحساب المحفوظ",
+        message: "هل تريد حذف هذا الحساب المحفوظ؟",
+        confirmText: "حذف",
+        cancelText: "إلغاء",
+        danger: true
+    }).then(function (ok) {
+        if (!ok) return;
+        councilSaved = councilSaved.filter(function (s) { return s.id !== id; });
+        saveData(COUNCIL_SAVED_KEY, councilSaved);
+        renderCouncilSaved();
+    });
 }
 
 function renderCouncilSaved() {
@@ -6229,7 +7444,7 @@ function renderCouncilSaved() {
                 '<td class="num">' + s.rows.length + '</td><td class="num">' + number(s.transports) + '</td><td class="num money-cell">' + money(s.council) + "</td>" +
                 '<td><div class="action-group">' +
                     '<button type="button" class="act-btn" onclick="loadCouncilCalc(\'' + s.id + '\')"><i class="ti ti-folder-open"></i> فتح</button>' +
-                    '<button type="button" class="act-btn act-danger" onclick="deleteCouncilCalc(\'' + s.id + '\')"><i class="ti ti-trash"></i></button>' +
+                    '<button type="button" class="act-btn act-danger" aria-label="حذف الحساب المحفوظ" title="حذف الحساب المحفوظ" onclick="deleteCouncilCalc(\'' + s.id + '\')"><i class="ti ti-trash"></i></button>' +
                 "</div></td></tr>";
         }).join("") +
         "</tbody></table></div>";
@@ -6256,6 +7471,18 @@ function updateQuickCalc() {
         additions[key] = calcValue("qc_add_" + key);
     });
 
+    /* بدل الانتقال للعامة والخاصة والشرعية فقط */
+    const eligible = isTransportEligible(type);
+    const transportField = document.getElementById("qc_add_transport");
+    if (!eligible) {
+        additions.transport = 0;
+        if (transportField) transportField.value = 0;
+    }
+    if (transportField) {
+        transportField.disabled = !eligible;
+        transportField.closest(".input-group")?.classList.toggle("is-disabled", !eligible);
+    }
+
     const missing = {
         pleading: calcValue("qcMissPleading"),
         ambulance: calcValue("qcMissAmbulance"),
@@ -6271,8 +7498,16 @@ function updateQuickCalc() {
     const tCash = tCount * number(pricing.transport.cashRemainder);
     const tShare = tCount * number(pricing.transport.representativeShare);
     const otherAdditions = Math.max(0, addRes.total - tCash);
-    const grand = number(pricing.agency) + tTotal + otherAdditions;
-    const committee = committeeShares[type] || { ambulance: 0, cooperation: 0 };
+    const tStamps = pricing.transport.pleadingStamp ? tCount : 0;
+    const stampAdditionsValue = Math.max(0, addRes.pleadingStamps - tStamps) * number(stampPrices.pleading);
+    const grand = number(pricing.agency) + otherAdditions + stampAdditionsValue + tTotal;
+
+    /* حصص اللجان: النسبة الثابتة لنوع الوكالة × سعر الوكالة، تلقائياً */
+    const rate = committeeRates[type] || { ambulance: 0, cooperation: 0 };
+    const committee = {
+        ambulance: committeeAmount(pricing.agency, rate.ambulance),
+        cooperation: committeeAmount(pricing.agency, rate.cooperation)
+    };
 
     const tile = function (label, value, cls) {
         return '<div class="' + (cls || "") + '"><span>' + label + "</span><strong>" + value + "</strong></div>";
@@ -6285,19 +7520,21 @@ function updateQuickCalc() {
             tile("بدل الانتقال", money(tTotal * qty)) +
             tile("سعر الوكالة مع البدل", money((number(pricing.agency) + tTotal) * qty)) +
             tile("الإضافات النقدية", money(otherAdditions * qty)) +
+            tile("قيمة طوابع الإضافات", money(stampAdditionsValue * qty)) +
             tile("قيمة الطوابع الناقصة", money(stamps.missingValue * qty)) +
             tile("طوابع المرافعة المطلوبة", stamps.requiredPleading * qty) +
             tile("حصة المندوب من الانتقال", money(tShare * qty)) +
-            tile("لجنة الإسعاف", money(number(committee.ambulance) * qty)) +
-            tile("لجنة التعاون", money(number(committee.cooperation) * qty)) +
-            tile("الإجمالي (السعر + الانتقال + الإضافات)", money(grand * qty)) +
+            tile("لجنة الإسعاف (" + formatRate(rate.ambulance) + ")", money(committee.ambulance * qty)) +
+            tile("لجنة التعاون (" + formatRate(rate.cooperation) + ")", money(committee.cooperation * qty)) +
+            tile("الإجمالي (السعر + الإضافات + الانتقال)", money(grand * qty)) +
             tile("المطلوب من المندوب", money(rep * qty), "calc-kpi-main") +
         "</div>" +
-        (external && tCount === 0 ? '<p class="field-hint">المندوب خارجي لكن عدد بدل الانتقال صفر.</p>' : "");
+        (external && !eligible ? '<p class="field-hint">بدل الانتقال لا يُضاف إلى ' + AGENCY_NAMES[type] + ".</p>" : "") +
+        (external && eligible && tCount === 0 ? '<p class="field-hint">المندوب خارجي لكن عدد بدل الانتقال صفر.</p>' : "");
 }
 
 function resetQuickCalc() {
-    document.querySelectorAll('[data-panel="quick"] input[type=number]').forEach(function (input) {
+    document.querySelectorAll('[data-panel="quick"] input[data-num]').forEach(function (input) {
         input.value = input.id === "qcQty" ? 1 : 0;
     });
     const rep = document.getElementById("qcRep");
@@ -6366,7 +7603,7 @@ function updateReconcile() {
         "<small>المطلوب " + money(required) + " — المقبوض " + money(received) + "</small></div>" +
         '<dl class="doc-kpis"><div><dt>عدد الوكالات</dt><dd>' + list.length + "</dd></div><div><dt>المطلوب</dt><dd>" + money(required) +
         "</dd></div><div><dt>المقبوض</dt><dd>" + money(received) + "</dd></div><div><dt>المكتب</dt><dd>" + escapeHTML(record.officeName) + "</dd></div></dl></div>" +
-        '<section class="doc-section"><h3><span class="sec-no">١</span>المطلوب حسب نوع الوكالة</h3>' + breakdown + "</section>" +
+        '<section class="doc-section"><h3><span class="sec-no">1</span>المطلوب حسب نوع الوكالة</h3>' + breakdown + "</section>" +
         docSignatures() + "</div>";
 }
 
@@ -6406,9 +7643,12 @@ function renderCalculator() {
         });
 
         root.addEventListener("change", function (event) {
-            if (event.target.id === "qcRep") {
+            if (event.target.id === "qcRep" || event.target.id === "qcType") {
                 const tr = document.getElementById("qc_add_transport");
-                if (tr) tr.value = event.target.value === "external" ? Math.max(1, number(tr.value)) : 0;
+                const external = document.getElementById("qcRep")?.value === "external";
+                const eligible = isTransportEligible(document.getElementById("qcType")?.value);
+                if (tr && event.target.id === "qcRep") tr.value = external && eligible ? Math.max(1, number(tr.value)) : 0;
+                if (tr && event.target.id === "qcType" && external && eligible && number(tr.value) === 0) tr.value = 1;
             }
             if (event.target.closest('[data-panel="council"]')) updateCouncilCalc();
             if (event.target.closest('[data-panel="quick"]')) updateQuickCalc();
@@ -6492,13 +7732,13 @@ function renderGuide() {
 
     html += guideCard("palette", "ألوان الوكالات والعلامات",
         '<p class="guide-text">كل وكالة في التقارير والقوائم تُلوَّن حتى تميّزها بنظرة واحدة:</p>' +
-        '<h4 class="guide-sub">١. لون الشريط = نوع الوكالة</h4>' +
+        '<h4 class="guide-sub">1. لون الشريط = نوع الوكالة</h4>' +
         '<div class="guide-chips">' +
         Object.keys(AGENCY_NAMES).map(function (type) {
             return '<span class="guide-chip" style="--c:' + AGENCY_TYPE_COLORS[type] + '">' + agencyTypeDot(type) + AGENCY_NAMES[type] + "</span>";
         }).join("") +
         "</div>" +
-        '<h4 class="guide-sub">٢. شدة التظليل = عدد الإضافات (بدون بدل الانتقال)</h4>' +
+        '<h4 class="guide-sub">2. شدة التظليل = عدد الإضافات (بدون بدل الانتقال)</h4>' +
         '<div class="guide-shades">' +
         [0, 1, 2, 3].map(function (level) {
             const tint = [0.04, 0.13, 0.23, 0.34][level];
@@ -6506,7 +7746,7 @@ function renderGuide() {
                 (level === 3 ? "3 أو أكثر" : additionsCountLabel(level)) + "</div>";
         }).join("") +
         "</div>" +
-        '<h4 class="guide-sub">٣. العلامات</h4>' +
+        '<h4 class="guide-sub">3. العلامات</h4>' +
         '<ul class="guide-list">' +
             '<li><span class="cls-mark cls-mark-add" style="--cls-color:' + demoColor + '">+2</span> عدد الإضافات في الوكالة (توقيع، أصالة، وكيل عن…).</li>' +
             '<li><span class="cls-mark cls-mark-transport">انتقال</span> الوكالة عليها بدل انتقال.</li>' +
@@ -6541,7 +7781,7 @@ function renderGuide() {
 
     /* ٤) بدل الانتقال */
     html += guideCard("route", "بدل الانتقال (المندوب الخارجي)",
-        '<p class="guide-text">عند اختيار «مندوب خارجي» في بيانات السجل يُضاف بدل الانتقال إلى كل وكالة، ويمكن تغييره أو إطفاؤه لكل وكالة من قائمتها.</p>' +
+        '<p class="guide-text">عند اختيار «مندوب خارجي» في بيانات السجل يُضاف بدل الانتقال تلقائياً إلى الوكالات <b>العامة والخاصة والشرعية فقط</b>، ولا يُضاف إلى الصور المصدقة (طبق الأصل) ولا إلى الوكالة التنفيذية. ويمكن تغييره أو إطفاؤه لكل وكالة من قائمتها.</p>' +
         '<div class="guide-split">' +
             '<div><span>القيمة الكاملة (تضاف لقيمة الوكالة)</span><strong>' + money(t.total) + "</strong></div>" +
             (t.pleadingStamp ? '<div><span>طابع مرافعة</span><strong>' + money(t.stampPrice) + "</strong></div>" : "") +
@@ -6555,11 +7795,15 @@ function renderGuide() {
 
     /* ٥) حصص اللجان */
     html += guideCard("heart-handshake", "حصص لجنتي الإسعاف والتعاون",
-        '<p class="guide-text">لكل وكالة غير ملغاة حصة ثابتة لكل لجنة حسب نوعها. تُعدَّل من قسم الأسعار، وتُحسب بالأسعار الحالية حتى للسجلات القديمة.</p>' +
-        '<div class="table-wrapper"><table class="doc-table"><thead><tr><th>نوع الوكالة</th><th class="num">لجنة الإسعاف</th><th class="num">لجنة التعاون</th><th class="num">المجموع</th></tr></thead><tbody>' +
+        '<p class="guide-text">لكل وكالة غير ملغاة حصة لكل لجنة = <b>سعر الوكالة في السجل × نسبة نوعها</b>. النسب تُعدَّل من قسم الأسعار ← أسعار اللجان، وإذا تغيّر سعر الوكالة تتغير الحصة معه تلقائياً.</p>' +
+        '<div class="guide-formula">مثال: ' + money(prices.general ? prices.general.agency : 0) + " × " + formatRate(committeeRates.general ? committeeRates.general.ambulance : 0) +
+            " = " + money(committeeAmount(prices.general ? prices.general.agency : 0, committeeRates.general ? committeeRates.general.ambulance : 0)) + " لجنة الإسعاف</div>" +
+        '<div class="table-wrapper"><table class="doc-table"><thead><tr><th>نوع الوكالة</th><th class="num">لجنة الإسعاف</th><th class="num">لجنة التعاون</th><th class="num">المجموع بالسعر الحالي</th></tr></thead><tbody>' +
         Object.keys(AGENCY_NAMES).map(function (type) {
-            const c = committeeShares[type] || { ambulance: 0, cooperation: 0 };
-            return "<tr><td>" + agencyTypeDot(type) + AGENCY_NAMES[type] + '</td><td class="num">' + money(c.ambulance) + '</td><td class="num">' + money(c.cooperation) + '</td><td class="num">' + money(number(c.ambulance) + number(c.cooperation)) + "</td></tr>";
+            const price = number(prices[type] && prices[type].agency);
+            const rate = committeeRates[type] || { ambulance: 0, cooperation: 0 };
+            return "<tr><td>" + agencyTypeDot(type) + AGENCY_NAMES[type] + '</td><td class="num">' + committeeRateHTML(type, "ambulance") + '</td><td class="num">' + committeeRateHTML(type, "cooperation") +
+                '</td><td class="num">' + money(committeeAmount(price, rate.ambulance) + committeeAmount(price, rate.cooperation)) + "</td></tr>";
         }).join("") +
         "</tbody></table></div>"
     );
@@ -7012,6 +8256,8 @@ Object.keys(
 
             <tr
                 class="clickable-row"
+                tabindex="0"
+                role="button"
                 title="اضغط لعرض وكالات هذا النوع فقط"
                 onclick="setReportTypeFilter('${type}')"
             >
@@ -7663,7 +8909,7 @@ container.innerHTML =
                     </label>
 
                     <input
-                        type="number"
+                        type="text" inputmode="numeric" data-num="int" autocomplete="off"
                         min="0"
                         data-price-key="${key}"
                         data-price-type="agency"
@@ -7681,7 +8927,7 @@ container.innerHTML =
                     </label>
 
                     <input
-                        type="number"
+                        type="text" inputmode="numeric" data-num="int" autocomplete="off"
                         min="0"
                         data-price-key="${key}"
                         data-price-type="representative"
@@ -7749,7 +8995,7 @@ container.innerHTML =
                     </label>
 
                     <input
-                        type="number"
+                        type="text" inputmode="numeric" data-num="int" autocomplete="off"
                         min="0"
                         data-addition-price-key="${key}"
                         value="${additionPrices[key]}"
@@ -7810,7 +9056,7 @@ container.innerHTML = `
         </label>
 
         <input
-            type="number"
+            type="text" inputmode="numeric" data-num="int" autocomplete="off"
             min="0"
             data-stamp-price-key="pleading"
             value="${stampPrices.pleading}"
@@ -7826,7 +9072,7 @@ container.innerHTML = `
         </label>
 
         <input
-            type="number"
+            type="text" inputmode="numeric" data-num="int" autocomplete="off"
             min="0"
             data-stamp-price-key="ambulance"
             value="${stampPrices.ambulance}"
@@ -7842,7 +9088,7 @@ container.innerHTML = `
         </label>
 
         <input
-            type="number"
+            type="text" inputmode="numeric" data-num="int" autocomplete="off"
             min="0"
             data-stamp-price-key="aid"
             value="${stampPrices.aid}"
@@ -7880,7 +9126,7 @@ container.innerHTML = `
         </label>
 
         <input
-            type="number"
+            type="text" inputmode="numeric" data-num="int" autocomplete="off"
             min="0"
             id="globalTransportTotal"
             value="${number(transportSettings.total)}"
@@ -7915,7 +9161,7 @@ container.innerHTML = `
         </label>
 
         <input
-            type="number"
+            type="text" inputmode="numeric" data-num="int" autocomplete="off"
             min="0"
             id="globalTransportShare"
             value="${transportSettings.representativeShare}"
@@ -7966,6 +9212,12 @@ renderCommitteePrices();
 أسعار حصص اللجان
 ========================================================= */
 
+/*
+    لكل نوع وكالة ولكل لجنة: مبلغ بالليرة ونسبة من سعر الوكالة، مترابطان.
+    تعديل المبلغ يحسب النسبة، وتعديل النسبة يحسب المبلغ، وتغيير سعر
+    الوكالة في الأعلى يحدّث المبالغ مع بقاء النسبة.
+    المحفوظ هو النسبة (data-rate بدقة كاملة).
+*/
 function renderCommitteePrices() {
 
     const container = document.getElementById("committeePricesContainer");
@@ -7974,18 +9226,71 @@ function renderCommitteePrices() {
         return;
     }
 
+    const cell = function (type, field, label) {
+        const rate = number((committeeRates[type] || {})[field]);
+        const price = number(prices[type] && prices[type].agency);
+        return '<td><div class="rate-pair" data-committee-type="' + type + '" data-committee-field="' + field + '" data-rate="' + rate + '">' +
+            '<label class="rate-input"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" class="committee-amount" aria-label="' + label + " — " + AGENCY_NAMES[type] + ' بالليرة" value="' + committeeAmount(price, rate) + '"><span>ل.س</span></label>' +
+            '<label class="rate-input"><input type="text" inputmode="decimal" data-num="dec" autocomplete="off" class="committee-rate" aria-label="' + label + " — " + AGENCY_NAMES[type] + ' نسبة مئوية" value="' + Number(rate.toFixed(3)) + '"><span>%</span></label>' +
+            "</div></td>";
+    };
+
     container.innerHTML =
+        '<p class="field-hint">حصة كل لجنة = سعر الوكالة × النسبة. اكتب المبلغ أو النسبة وسيُحسب الآخر تلقائياً. النسبة هي المعتمدة، فإذا تغيّر سعر الوكالة تتغير الحصة معه.</p>' +
         '<div class="table-wrapper"><table class="committee-price-table"><thead><tr>' +
-        "<th>نوع الوكالة</th><th>حصة لجنة الإسعاف</th><th>حصة لجنة التعاون</th>" +
+        '<th>نوع الوكالة</th><th class="num">سعر الوكالة</th><th>لجنة الإسعاف</th><th>لجنة التعاون</th>' +
         "</tr></thead><tbody>" +
         Object.keys(AGENCY_NAMES).map(function (type) {
-            const share = committeeShares[type] || { ambulance: 0, cooperation: 0 };
-            return "<tr><td>" + AGENCY_NAMES[type] + "</td>" +
-                '<td><input type="number" min="0" data-committee-type="' + type + '" data-committee-field="ambulance" value="' + number(share.ambulance) + '"></td>' +
-                '<td><input type="number" min="0" data-committee-type="' + type + '" data-committee-field="cooperation" value="' + number(share.cooperation) + '"></td>' +
+            return '<tr data-committee-row="' + type + '"><td>' + agencyTypeDot(type) + AGENCY_NAMES[type] + "</td>" +
+                '<td class="num committee-price-cell">' + money(prices[type] ? prices[type].agency : 0) + "</td>" +
+                cell(type, "ambulance", "لجنة الإسعاف") +
+                cell(type, "cooperation", "لجنة التعاون") +
                 "</tr>";
         }).join("") +
         "</tbody></table></div>";
+
+    /* سعر الوكالة كما هو مكتوب الآن في جدول أسعار الوكالات */
+    const livePrice = function (type) {
+        const input = document.querySelector('[data-price-key="' + type + '"][data-price-type="agency"]');
+        return input ? number(input.value) : number(prices[type] && prices[type].agency);
+    };
+
+    if (!container.dataset.bound) container.addEventListener("input", function (event) {
+
+        const pair = event.target.closest(".rate-pair");
+
+        if (!pair) {
+            return;
+        }
+
+        const price = livePrice(pair.dataset.committeeType);
+        const amountInput = pair.querySelector(".committee-amount");
+        const rateInput = pair.querySelector(".committee-rate");
+
+        if (event.target === amountInput) {
+            const rate = price > 0 ? (number(amountInput.value) / price) * 100 : 0;
+            pair.dataset.rate = rate;
+            rateInput.value = Number(rate.toFixed(3));
+        } else if (event.target === rateInput) {
+            pair.dataset.rate = number(rateInput.value);
+            amountInput.value = committeeAmount(price, rateInput.value);
+        }
+    });
+
+    container.dataset.bound = "1";
+
+    /* تغيير سعر الوكالة يحدّث مبالغ اللجان مع بقاء النسب */
+    document.querySelectorAll('[data-price-type="agency"]').forEach(function (input) {
+        input.addEventListener("input", function () {
+            const type = input.dataset.priceKey;
+            const row = container.querySelector('[data-committee-row="' + type + '"]');
+            if (!row) return;
+            row.querySelector(".committee-price-cell").textContent = money(number(input.value));
+            row.querySelectorAll(".rate-pair").forEach(function (pair) {
+                pair.querySelector(".committee-amount").value = committeeAmount(number(input.value), pair.dataset.rate);
+            });
+        });
+    });
 }
 
 /* =========================================================
@@ -8009,9 +9314,7 @@ savePricesBtn.addEventListener(
             "manager"
         ) {
 
-            alert(
-                "هذه العملية للمدير فقط."
-            );
+            notify("هذه العملية للمدير فقط.", "error");
 
             return;
 
@@ -8223,22 +9526,30 @@ savePricesBtn.addEventListener(
 
         document
             .querySelectorAll(
-                "[data-committee-type]"
+                ".rate-pair[data-committee-type]"
             )
             .forEach(
-                function (input) {
+                function (pair) {
 
-                    const type = input.dataset.committeeType;
-                    const field = input.dataset.committeeField;
+                    const type = pair.dataset.committeeType;
+                    const field = pair.dataset.committeeField;
 
-                    if (!committeeShares[type]) {
-                        committeeShares[type] = { ambulance: 0, cooperation: 0 };
+                    if (!committeeRates[type]) {
+                        committeeRates[type] = { ambulance: 0, cooperation: 0 };
                     }
 
-                    committeeShares[type][field] = number(input.value);
+                    committeeRates[type][field] = number(pair.dataset.rate);
 
                 }
             );
+
+        /* المبالغ الثابتة المقابلة تبقى محدّثة للتوافق */
+        syncCommitteeSharesFromRates();
+
+        saveData(
+            COMMITTEE_RATES_KEY,
+            committeeRates
+        );
 
         saveData(
             "audit_committee_shares",
@@ -8293,9 +9604,7 @@ savePricesBtn.addEventListener(
         localStorage.setItem("activeSection", "pricesSection");
         sessionStorage.setItem("activeSection", "pricesSection");
 
-        alert(
-            "تم حفظ جميع الأسعار والإعدادات بنجاح. سيتم إعادة تحميل الصفحة الآن."
-        );
+        flashNotify("تم حفظ جميع الأسعار والإعدادات بنجاح.", "success");
 
         window.location.reload();
 
@@ -8439,9 +9748,7 @@ addUserBtn.addEventListener(
             !password
         ) {
 
-            alert(
-                "يرجى إدخال اسم المستخدم وكلمة المرور."
-            );
+            notify("يرجى إدخال اسم المستخدم وكلمة المرور.", "error");
 
             return;
 
@@ -8465,9 +9772,7 @@ addUserBtn.addEventListener(
 
         if (exists) {
 
-            alert(
-                "اسم المستخدم موجود مسبقًا."
-            );
+            notify("اسم المستخدم موجود مسبقًا.", "error");
 
             return;
 
@@ -8510,9 +9815,7 @@ addUserBtn.addEventListener(
         renderUsers();
 
 
-        alert(
-            "تمت إضافة المستخدم."
-        );
+        notify("تمت إضافة المستخدم.", "success");
 
     }
 );
@@ -8559,46 +9862,48 @@ if (
     "admin"
 ) {
 
-    alert(
-        "لا يمكن حذف المدير الأساسي."
-    );
+    notify("لا يمكن حذف المدير الأساسي.", "error");
 
     return;
 
 }
 
 
-if (
-    !confirm(
-        "هل تريد حذف هذا المستخدم؟"
-    )
-) {
+appConfirm({
+    title: "حذف المستخدم",
+    message: "هل تريد حذف المستخدم «" + user.username + "»؟ لن يتمكن من الدخول بعد ذلك.",
+    confirmText: "حذف المستخدم",
+    cancelText: "إلغاء",
+    danger: true
+}).then(function (ok) {
 
-    return;
+    if (!ok) {
+        return;
+    }
 
-}
+    users =
+        users.filter(
+            function (item) {
+
+                return (
+                    item.id !==
+                    id
+                );
+
+            }
+        );
 
 
-users =
-    users.filter(
-        function (item) {
-
-            return (
-                item.id !==
-                id
-            );
-
-        }
+    saveData(
+        "audit_users",
+        users
     );
 
 
-saveData(
-    "audit_users",
-    users
-);
+    renderUsers();
 
-
-renderUsers();
+    notify("تم حذف المستخدم.", "info");
+});
 
 }
 
@@ -8680,7 +9985,291 @@ cancelEditBtn.addEventListener(
 Dashboard
 ========================================================= */
 
+/* =========================================================
+نشاط الفترة (لوحة التحكم)
+إحصائيات حسب «تاريخ السجل» لفترة مختارة، مع المقارنة بالفترة
+السابقة المساوية لها، ومخطط أعمدة للوكالات المدخلة.
+========================================================= */
+
+let activityPeriod = "month";
+let activityAsTable = false;
+
+try {
+    activityPeriod = localStorage.getItem("audit_ui_activity_period") || "month";
+} catch (e) {}
+
+function dayStr(d) {
+    return toDayString(d);
+}
+
+/* «YYYY-MM-DD» إلى تاريخ محلي (بدون انزياح المنطقة الزمنية) */
+function parseDay(s) {
+    const p = String(s).split("-").map(Number);
+    return new Date(p[0], p[1] - 1, p[2]);
+}
+
+/* حدود الفترة الحالية والسابقة المساوية لها (أيام بصيغة YYYY-MM-DD) */
+function activityRanges(period) {
+
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    let from, to, prevFrom, prevTo, bucket;
+
+    if (period === "lastMonth") {
+        from = new Date(y, m - 1, 1); to = new Date(y, m, 0);
+        prevFrom = new Date(y, m - 2, 1); prevTo = new Date(y, m - 1, 0);
+        bucket = "day";
+    } else if (period === "quarter") {
+        from = new Date(y, m - 2, 1); to = now;
+        prevFrom = new Date(y, m - 5, 1); prevTo = new Date(y, m - 2, 0);
+        bucket = "month";
+    } else if (period === "year") {
+        from = new Date(y, 0, 1); to = now;
+        prevFrom = new Date(y - 1, 0, 1); prevTo = new Date(y - 1, m, now.getDate());
+        bucket = "month";
+    } else if (period === "all") {
+        const days = records.map(getRecordDay).filter(Boolean).sort();
+        from = days.length ? parseDay(days[0]) : now; to = now;
+        prevFrom = null; prevTo = null;
+        bucket = "month";
+    } else {
+        from = new Date(y, m, 1); to = now;
+        prevFrom = new Date(y, m - 1, 1); prevTo = new Date(y, m - 1, Math.min(now.getDate(), new Date(y, m, 0).getDate()));
+        bucket = "day";
+    }
+
+    return {
+        from: dayStr(from), to: dayStr(to),
+        prevFrom: prevFrom ? dayStr(prevFrom) : null, prevTo: prevTo ? dayStr(prevTo) : null,
+        bucket: bucket
+    };
+}
+
+function activityTotals(from, to) {
+
+    const t = { records: 0, agencies: 0, grand: 0, due: 0, transport: 0 };
+
+    records.forEach(function (record) {
+        const day = getRecordDay(record);
+        if (!day || day < from || day > to) return;
+        t.records += 1;
+        (record.agencies || []).forEach(function (a) {
+            if (a.status === "cancelled") return;
+            t.agencies += 1;
+            t.grand += getAgencyGrandTotal(a);
+            t.due += number(a.representativeAmount);
+            t.transport += getAgencyTransport(a).count;
+        });
+    });
+
+    return t;
+}
+
+function deltaHTML(current, previous) {
+    if (previous === null || previous === undefined) return "";
+    if (!previous) {
+        return current ? '<span class="delta delta-up">جديد مقارنة بالفترة السابقة</span>' : '<span class="delta">لا تغيير</span>';
+    }
+    const pct = ((current - previous) / previous) * 100;
+    const sign = pct > 0 ? "+" : pct < 0 ? "−" : "";
+    const cls = pct > 0 ? "delta-up" : pct < 0 ? "delta-down" : "";
+    const icon = pct > 0 ? "ti-trending-up" : pct < 0 ? "ti-trending-down" : "ti-minus";
+    return '<span class="delta ' + cls + '"><i class="ti ' + icon + '" aria-hidden="true"></i>' +
+        sign + new Intl.NumberFormat(NUMBER_LOCALE, { maximumFractionDigits: 1 }).format(Math.abs(pct)) + "% عن الفترة السابقة</span>";
+}
+
+/* سلاسل الأعمدة: يوم بيوم للشهر، أو شهر بشهر للفترات الأطول */
+function activitySeries(range) {
+
+    const buckets = [];
+    const index = {};
+    const start = parseDay(range.from);
+    const end = parseDay(range.to);
+
+    if (range.bucket === "day") {
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            const key = dayStr(d);
+            index[key] = buckets.length;
+            buckets.push({ key: key, label: String(d.getDate()), full: formatDay(key), value: 0 });
+        }
+    } else {
+        for (let d = new Date(start.getFullYear(), start.getMonth(), 1); d <= end; d.setMonth(d.getMonth() + 1)) {
+            const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+            index[key] = buckets.length;
+            const name = d.toLocaleDateString(NUMBER_LOCALE, { month: "short" });
+            buckets.push({ key: key, label: name, full: d.toLocaleDateString(NUMBER_LOCALE, { month: "long", year: "numeric" }), value: 0 });
+        }
+    }
+
+    records.forEach(function (record) {
+        const day = getRecordDay(record);
+        if (!day || day < range.from || day > range.to) return;
+        const key = range.bucket === "day" ? day : day.slice(0, 7);
+        if (index[key] === undefined) return;
+        buckets[index[key]].value += (record.agencies || []).filter(function (a) { return a.status !== "cancelled"; }).length;
+    });
+
+    return buckets;
+}
+
+/* تقريب أعلى المحور إلى رقم نظيف */
+function niceMax(v) {
+    if (v <= 4) return 4;
+    const pow = Math.pow(10, Math.floor(Math.log10(v)));
+    const n = v / pow;
+    const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+    return step * pow;
+}
+
+function activityChartHTML(series) {
+
+    if (!series.length || series.every(function (b) { return b.value === 0; })) {
+        return '<p class="empty-hint activity-empty">لا توجد وكالات مدخلة في هذه الفترة. أنشئ سجلاً بتاريخ ضمنها ليظهر هنا.</p>';
+    }
+
+    if (activityAsTable) {
+        return '<div class="table-wrapper"><table class="ledger-table"><thead><tr><th>الفترة</th><th class="num">الوكالات</th></tr></thead><tbody>' +
+            series.filter(function (b) { return b.value > 0; }).map(function (b) {
+                return "<tr><td>" + escapeHTML(b.full) + '</td><td class="num">' + b.value + "</td></tr>";
+            }).join("") + "</tbody></table></div>";
+    }
+
+    const max = niceMax(Math.max.apply(null, series.map(function (b) { return b.value; })));
+    const W = 760, H = 220, padL = 8, padR = 34, padT = 12, padB = 26;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const slot = plotW / series.length;
+    const barW = Math.min(24, Math.max(4, slot - 4));
+    const ticks = [0, max / 2, max];
+    const labelEvery = series.length > 16 ? Math.ceil(series.length / 10) : 1;
+
+    let svg = '<svg viewBox="0 0 ' + W + " " + H + '" class="activity-svg" direction="ltr" role="img" aria-label="الوكالات المدخلة في الفترة">';
+
+    ticks.forEach(function (t) {
+        const y = padT + plotH - (t / max) * plotH;
+        svg += '<line class="grid" x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '"/>' +
+            '<text class="tick" x="' + (W - padR + 8) + '" y="' + (y + 4) + '" text-anchor="start">' + Math.round(t) + "</text>";
+    });
+
+    /* الأعمدة من اليمين إلى اليسار مع اتجاه القراءة العربي */
+    series.forEach(function (b, i) {
+        const cx = W - padR - slot * (i + 0.5);
+        const h = (b.value / max) * plotH;
+        const x = cx - barW / 2;
+        const y = padT + plotH - h;
+        const r = Math.min(4, barW / 2, h);
+        if (b.value > 0) {
+            svg += '<path class="bar" d="M' + x + " " + (padT + plotH) + " V" + (y + r) + " Q" + x + " " + y + " " + (x + r) + " " + y +
+                " H" + (x + barW - r) + " Q" + (x + barW) + " " + y + " " + (x + barW) + " " + (y + r) + " V" + (padT + plotH) + ' Z"/>';
+        }
+        /* منطقة لمس أكبر من العمود */
+        svg += '<rect class="hit" x="' + (cx - slot / 2) + '" y="' + padT + '" width="' + slot + '" height="' + plotH + '" tabindex="0" data-i="' + i + '"/>';
+        if (i % labelEvery === 0) {
+            svg += '<text class="xlabel" x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle">' + escapeHTML(b.label) + "</text>";
+        }
+    });
+
+    svg += '<line class="baseline" x1="' + padL + '" x2="' + (W - padR) + '" y1="' + (padT + plotH) + '" y2="' + (padT + plotH) + '"/>';
+    svg += "</svg>";
+
+    return '<div class="activity-plot">' + svg + '<div class="chart-tip" role="status" aria-live="polite"></div></div>';
+}
+
+function renderActivity() {
+
+    const tiles = document.getElementById("activityTiles");
+    const chart = document.getElementById("activityChart");
+
+    if (!tiles || !chart) {
+        return;
+    }
+
+    const range = activityRanges(activityPeriod);
+    const cur = activityTotals(range.from, range.to);
+    const prev = range.prevFrom ? activityTotals(range.prevFrom, range.prevTo) : null;
+
+    document.querySelectorAll("#activityPeriods [data-period]").forEach(function (b) {
+        const on = b.dataset.period === activityPeriod;
+        b.classList.toggle("is-on", on);
+        b.setAttribute("aria-checked", on ? "true" : "false");
+    });
+
+    const rangeEl = document.getElementById("activityRange");
+    if (rangeEl) {
+        rangeEl.textContent = "من " + formatDay(range.from) + " إلى " + formatDay(range.to) + " (حسب تاريخ السجل)";
+    }
+
+    const tile = function (label, value, previous, isMoney) {
+        return '<div class="a-tile"><span>' + label + "</span><strong>" + (isMoney ? money(value) : value) + "</strong>" +
+            deltaHTML(value, previous) + "</div>";
+    };
+
+    tiles.innerHTML =
+        tile("السجلات", cur.records, prev && prev.records) +
+        tile("الوكالات غير الملغاة", cur.agencies, prev && prev.agencies) +
+        tile("بدلات الانتقال", cur.transport, prev && prev.transport) +
+        tile("إجمالي مبالغ السجلات", cur.grand, prev && prev.grand, true) +
+        tile("المطلوب من المندوبين", cur.due, prev && prev.due, true);
+
+    const series = activitySeries(range);
+    chart.innerHTML = activityChartHTML(series);
+
+    const title = document.getElementById("activityChartTitle");
+    if (title) {
+        title.textContent = range.bucket === "day" ? "الوكالات المدخلة يوماً بيوم" : "الوكالات المدخلة شهراً بشهر";
+    }
+
+    /* تلميح الأعمدة بالمرور أو بلوحة المفاتيح */
+    const plot = chart.querySelector(".activity-plot");
+    if (plot) {
+        const tip = plot.querySelector(".chart-tip");
+        const show = function (el) {
+            const b = series[number(el.dataset.i)];
+            if (!b) return;
+            tip.textContent = "";
+            const v = document.createElement("strong");
+            v.textContent = b.value + " وكالة";
+            const l = document.createElement("span");
+            l.textContent = b.full;
+            tip.appendChild(v);
+            tip.appendChild(l);
+            const pr = plot.getBoundingClientRect();
+            const er = el.getBoundingClientRect();
+            tip.style.left = Math.min(Math.max(0, er.left - pr.left + er.width / 2 - 60), pr.width - 120) + "px";
+            tip.classList.add("show");
+            plot.querySelectorAll(".hit").forEach(function (h) { h.classList.toggle("is-hover", h === el); });
+        };
+        const hide = function () {
+            tip.classList.remove("show");
+            plot.querySelectorAll(".hit").forEach(function (h) { h.classList.remove("is-hover"); });
+        };
+        plot.querySelectorAll(".hit").forEach(function (h) {
+            h.addEventListener("pointerenter", function () { show(h); });
+            h.addEventListener("focus", function () { show(h); });
+            h.addEventListener("blur", hide);
+        });
+        plot.addEventListener("pointerleave", hide);
+    }
+}
+
+document.getElementById("activityPeriods")?.addEventListener("click", function (event) {
+    const b = event.target.closest("[data-period]");
+    if (!b) return;
+    activityPeriod = b.dataset.period;
+    try { localStorage.setItem("audit_ui_activity_period", activityPeriod); } catch (e) {}
+    renderActivity();
+});
+
+document.getElementById("activityTableToggle")?.addEventListener("click", function () {
+    activityAsTable = !activityAsTable;
+    this.textContent = activityAsTable ? "عرض كمخطط" : "عرض كجدول";
+    this.setAttribute("aria-pressed", activityAsTable ? "true" : "false");
+    renderActivity();
+});
+
 function updateDashboard() {
+
+    renderActivity();
 
     const agencies = [];
 
@@ -8719,7 +10308,7 @@ function updateDashboard() {
     try {
         setText(
             "dashDate",
-            new Date().toLocaleDateString("ar-SY", { weekday: "long", year: "numeric", month: "long", day: "numeric" })
+            new Date().toLocaleDateString(NUMBER_LOCALE, { weekday: "long", year: "numeric", month: "long", day: "numeric" })
         );
     } catch (e) {}
 
@@ -9069,6 +10658,7 @@ function downloadBackup() {
         transportSettings: transportSettings,
         stampPrices: stampPrices,
         committeeShares: committeeShares,
+        committeeRates: committeeRates,
         councilSaved: councilSaved,
         records: records
     };
@@ -9105,22 +10695,35 @@ function restoreBackupFromFile(file) {
         try {
             data = JSON.parse(event.target.result);
         } catch (error) {
-            alert("تعذر قراءة الملف. تأكد أنه ملف نسخة احتياطية صحيح.");
+            notify("تعذر قراءة الملف. تأكد أنه ملف نسخة احتياطية صحيح.", "error");
             return;
         }
 
         if (!data || !Array.isArray(data.records)) {
-            alert("ملف النسخة الاحتياطية غير صالح.");
+            notify("ملف النسخة الاحتياطية غير صالح.", "error");
             return;
         }
 
-        if (
-            !confirm(
-                "سيتم استبدال كل البيانات الحالية (السجلات، الأسعار، المستخدمين) بالبيانات الموجودة في هذا الملف. هل أنت متأكد من المتابعة؟"
-            )
-        ) {
-            return;
-        }
+        appConfirm({
+            title: "استعادة نسخة احتياطية",
+            message: "سيتم استبدال كل البيانات الحالية (" + records.length + " سجل، الأسعار، المستخدمين) بالبيانات الموجودة في هذا الملف (" +
+                data.records.length + " سجل). ننصح بتحميل نسخة احتياطية من البيانات الحالية أولاً. هل تريد المتابعة؟",
+            confirmText: "استبدال البيانات",
+            cancelText: "إلغاء",
+            danger: true
+        }).then(function (ok) {
+            if (ok) {
+                applyBackupData(data);
+            }
+        });
+
+    };
+
+    reader.readAsText(file, "UTF-8");
+
+}
+
+function applyBackupData(data) {
 
         records = data.records || [];
         users = data.users || users;
@@ -9141,6 +10744,17 @@ function restoreBackupFromFile(file) {
             saveData(COUNCIL_SAVED_KEY, data.councilSaved);
         }
 
+        /*
+            نسب اللجان: من الملف إن وُجدت، وإلا تُشتق عند إعادة التحميل
+            من المبالغ الثابتة والأسعار المستعادة (النسخ الأقدم).
+        */
+        if (data.committeeRates && typeof data.committeeRates === "object") {
+            saveData(COMMITTEE_RATES_KEY, data.committeeRates);
+        } else {
+            /* null = تُشتق بعد ترحيل الأسعار عند إعادة التحميل */
+            saveData(COMMITTEE_RATES_KEY, null);
+        }
+
         saveData("audit_committee_shares", committeeShares);
         saveData("audit_records", records);
         saveData("audit_users", users);
@@ -9150,13 +10764,9 @@ function restoreBackupFromFile(file) {
         saveData("audit_transport_settings", transportSettings);
         saveData("audit_stamp_prices", stampPrices);
 
-        alert("تم استيراد النسخة الاحتياطية بنجاح. سيتم إعادة تحميل الصفحة الآن.");
+        flashNotify("تم استيراد النسخة الاحتياطية بنجاح (" + records.length + " سجل).", "success");
 
         location.reload();
-
-    };
-
-    reader.readAsText(file, "UTF-8");
 
 }
 
@@ -9479,7 +11089,7 @@ function xlWorkbook() {
 function exportRecordToExcel(id) {
 
     if (typeof XLSX === "undefined") {
-        alert("تعذر تحميل مكتبة الإكسل. تأكد من الاتصال بالإنترنت ثم حدّث الصفحة.");
+        notify("تعذر تحميل مكتبة الإكسل. تأكد من الاتصال بالإنترنت ثم حدّث الصفحة.", "error");
         return;
     }
 
@@ -9502,6 +11112,8 @@ function exportRecordToExcel(id) {
         { label: "إجمالي سعر الوكالات", value: baseTotal, money: true },
         { label: "عدد الإضافات", value: stats.additionsCount },
         { label: "الإضافات النقدية", value: stats.additionsTotal, money: true },
+        { label: "قيمة طوابع الإضافات", value: stats.stampAdditionsValue, money: true },
+        { label: "إجمالي مبلغ السجل", value: stats.grandTotal, money: true },
         { label: "عدد الطوابع الناقصة", value: stats.missing.pleading + stats.missing.ambulance + stats.missing.aid },
         { label: "قيمة الطوابع الناقصة", value: stats.missingValue, money: true },
         { gap: true },
@@ -9528,7 +11140,7 @@ function exportRecordToExcel(id) {
         if (cancelled) muted.push(i);
         const transport = getAgencyTransport(agency);
         const base = cancelled ? 0 : number(agency.basePrice);
-        const add = cancelled ? 0 : Math.max(0, number(agency.additionsTotal) - transport.cash);
+        const add = cancelled ? 0 : Math.max(0, number(agency.additionsTotal) - transport.cash) + getAgencyStampAdditionsValue(agency);
         const miss = cancelled ? 0 : number(agency.missingStampsValue);
         const rep = cancelled ? 0 : number(agency.representativeAmount);
         const grand = getAgencyGrandTotal(agency);
@@ -9554,7 +11166,7 @@ function exportRecordToExcel(id) {
     const agenciesSheet = buildStyledTableSheet({
         title: "تفاصيل وكالات السجل " + record.recordNumber,
         subtitle: subtitle,
-        headers: ["رقم الوكالة", "النوع", "الحالة", "السعر", "بدل الانتقال", "الإضافات", "قيمة الإضافات", "نقص مرافعة", "نقص إسعاف", "نقص معونة", "قيمة الطوابع الناقصة", "المطلوب من المندوب", "الإجمالي (السعر + الانتقال + الإضافات)", "ملاحظات"],
+        headers: ["رقم الوكالة", "النوع", "الحالة", "السعر", "بدل الانتقال", "الإضافات", "قيمة الإضافات (طوابع ونقدية)", "نقص مرافعة", "نقص إسعاف", "نقص معونة", "قيمة الطوابع الناقصة", "المطلوب من المندوب", "الإجمالي (السعر + الإضافات + الانتقال)", "ملاحظات"],
         rows: rows,
         moneyCols: [3, 4, 6, 10, 11, 12],
         mutedRows: muted,
@@ -9596,7 +11208,7 @@ window.exportRecordToExcel = exportRecordToExcel;
 function exportAllRecordsToExcel() {
 
     if (typeof XLSX === "undefined") {
-        alert("تعذر تحميل مكتبة الإكسل. تأكد من الاتصال بالإنترنت ثم حدّث الصفحة.");
+        notify("تعذر تحميل مكتبة الإكسل. تأكد من الاتصال بالإنترنت ثم حدّث الصفحة.", "error");
         return;
     }
 
@@ -9770,7 +11382,7 @@ function saveRecordDraft() {
             status.textContent =
                 isEmpty
                     ? ""
-                    : "تم الحفظ التلقائي " + new Date().toLocaleTimeString("ar");
+                    : "تم الحفظ التلقائي " + new Date().toLocaleTimeString(NUMBER_LOCALE);
         }
 
     } catch (error) {
