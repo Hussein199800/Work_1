@@ -3825,7 +3825,14 @@ recordForm.addEventListener(
             !representativeName
         ) {
 
-            notify("يرجى تعبئة بيانات السجل.", "error");
+            const missingField = !recordNumber ? "recordNumber" : !officeName ? "officeName" : "representativeName";
+            const missingName = { recordNumber: "رقم السجل", officeName: "اسم المكتب", representativeName: "اسم المندوب" }[missingField];
+
+            notify("يرجى تعبئة «" + missingName + "» في بيانات السجل أعلى الصفحة.", "error");
+
+            const field = document.getElementById(missingField);
+            field?.scrollIntoView({ behavior: "smooth", block: "center" });
+            field?.focus({ preventScroll: true });
 
             return;
 
@@ -3895,10 +3902,12 @@ recordForm.addEventListener(
         };
 
 
-        if (editingId) {
+        /* نسخة من السجلات قبل التغيير: إن فشل الحفظ نرجع إليها */
+        const recordsBefore = records.slice();
 
-            const index =
-                records.findIndex(
+        const index =
+            editingId
+                ? records.findIndex(
                     function (item) {
 
                         return (
@@ -3907,15 +3916,17 @@ recordForm.addEventListener(
                         );
 
                     }
-                );
+                )
+                : -1;
 
+        /*
+            سجل قيد التعديل لم يعد موجوداً (مسودة قديمة، أو استعادة نسخة
+            احتياطية): يُحفظ كسجل جديد بدل أن يضيع بصمت.
+        */
+        if (index !== -1) {
 
-            if (index !== -1) {
-
-                records[index] =
-                    record;
-
-            }
+            records[index] =
+                record;
 
         } else {
 
@@ -3925,24 +3936,45 @@ recordForm.addEventListener(
 
         }
 
+        try {
 
-        saveData(
-            "audit_records",
-            records
-        );
+            saveData(
+                "audit_records",
+                records
+            );
 
+        } catch (error) {
 
-        resetRecordForm();
+            records = recordsBefore;
 
-        renderRecords();
+            console.error("Save record failed:", error);
 
-        updateDashboard();
+            notify(
+                "<strong>لم يُحفظ السجل</strong><span>" +
+                (error && error.name === "QuotaExceededError"
+                    ? "مساحة التخزين في المتصفح ممتلئة. حمّل نسخة احتياطية من قسم المستخدمين ثم أخبر المسؤول."
+                    : "حدث خطأ أثناء الحفظ: " + escapeHTML(error && error.message || error)) +
+                " بيانات السجل ما زالت في النموذج ولم تُمسح.</span>",
+                "error",
+                12000,
+                true
+            );
 
-        renderReports();
+            return;
+        }
+
+        /* الحفظ تمّ: أي خطأ في تحديث العرض بعده لا يُلغي الحفظ */
+        [resetRecordForm, renderRecords, updateDashboard, renderReports].forEach(function (step) {
+            try {
+                step();
+            } catch (error) {
+                console.error("After-save step failed:", step.name, error);
+            }
+        });
 
 
         notify(
-            "<strong>" + (editingId ? "تم تعديل السجل بنجاح" : "تم حفظ السجل بنجاح") + "</strong>" +
+            "<strong>" + (index !== -1 ? "تم تعديل السجل بنجاح" : "تم حفظ السجل بنجاح") + "</strong>" +
             "<span>سجل " + escapeHTML(record.recordNumber) + " — " + record.agencies.length + " وكالة</span>",
             "success",
             4000,
@@ -5587,6 +5619,35 @@ function showToast(html, ms, variant) {
 function notify(message, variant, ms, rich) {
     showToast(rich ? message : "<strong>" + message + "</strong>", ms, variant || "info");
 }
+
+/*
+    أي خطأ غير متوقع يظهر للمستخدم برسالة بدل أن يفشل الإجراء بصمت،
+    حتى يمكن معرفة سببه وإصلاحه (نص الخطأ يُنقل كما هو).
+*/
+let lastErrorNoticeAt = 0;
+
+function reportUnexpectedError(message) {
+    const now = Date.now();
+    if (now - lastErrorNoticeAt < 4000) return;
+    lastErrorNoticeAt = now;
+    notify(
+        "<strong>حدث خطأ غير متوقع</strong><span>لم يكتمل الإجراء الأخير. صوّر هذه الرسالة وأرسلها للمسؤول: " +
+        escapeHTML(String(message || "").slice(0, 200)) + "</span>",
+        "error",
+        15000,
+        true
+    );
+}
+
+window.addEventListener("error", function (event) {
+    /* أخطاء تحميل الملفات الخارجية (مثل مكتبة Excel) لا تخص المستخدم */
+    if (!event.message) return;
+    reportUnexpectedError(event.message + (event.lineno ? " (سطر " + event.lineno + ")" : ""));
+});
+
+window.addEventListener("unhandledrejection", function (event) {
+    reportUnexpectedError(event.reason && event.reason.message || event.reason);
+});
 
 /* رسالة تظهر بعد إعادة تحميل الصفحة (حفظ الأسعار، الاستعادة...) */
 const FLASH_KEY = "audit_flash_message";
