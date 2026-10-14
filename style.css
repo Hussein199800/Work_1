@@ -4817,3 +4817,44 @@ body {
         width: 100%;
     }
 }
+
+/* ================= مكان حفظ السجلات واستيراد سجل غير محفوظ ================= */
+
+.storage-info {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 4px 0 14px;
+    padding: 12px 14px;
+    border-radius: var(--r-md);
+    background: var(--seal-50);
+    color: var(--seal-800);
+    font-size: var(--fs-sm);
+    line-height: 1.8;
+}
+
+.storage-info:empty {
+    display: none;
+}
+
+.storage-info .ti {
+    font-size: var(--fs-xl);
+    flex-shrink: 0;
+}
+
+.storage-info.is-warning {
+    background: var(--warning-bg);
+    color: var(--warning);
+}
+
+.import-draft-row {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line-strong);
+}
+
+.import-draft-row .link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}

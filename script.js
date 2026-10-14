@@ -336,11 +336,218 @@ loadData(
 DEFAULT_STAMP_PRICES
 );
 
-let records =
-loadData(
-"audit_records",
-[]
-);
+/* =========================================================
+مكان حفظ السجلات
+مساحة localStorage في المتصفح محدودة (~5 ملايين حرف). عندما تكبر
+السجلات تُنقل إلى IndexedDB (مخزن أكبر بكثير في نفس المتصفح).
+- audit_records_store = "idb" يعني أن السجلات في IndexedDB.
+- index.html يقرأها قبل تشغيل هذا الملف ويضعها في __AUDIT_IDB_RECORDS.
+- إن تعذرت قراءتها لا نبدأ بسجلات فارغة ونحفظ فوقها: الحفظ يتوقف
+  وتظهر رسالة، حمايةً للبيانات.
+========================================================= */
+
+const RECORDS_STORE_KEY = "audit_records_store";
+const IDB_NAME = "audit_db";
+const IDB_STORE = "kv";
+
+/* الانتقال تلقائياً عندما تتجاوز السجلات هذا الحجم (نصف المساحة تقريباً) */
+const RECORDS_MOVE_THRESHOLD = 2500000;
+
+/* تشغيل بعد جاهزية الصفحة وبعد انتهاء تنفيذ هذا الملف كاملاً */
+function onReady(fn) {
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", fn);
+    } else {
+        setTimeout(fn, 0);
+    }
+}
+
+let recordsInIDB = false;
+
+try {
+    recordsInIDB = localStorage.getItem(RECORDS_STORE_KEY) === "idb";
+} catch (e) {}
+
+let recordsLoadFailed = false;
+
+let records;
+
+if (recordsInIDB) {
+    if (window.__AUDIT_IDB_ERROR || !Array.isArray(window.__AUDIT_IDB_RECORDS)) {
+        console.error("Records could not be read from IndexedDB:", window.__AUDIT_IDB_ERROR);
+        records = [];
+        recordsLoadFailed = true;
+    } else {
+        records = window.__AUDIT_IDB_RECORDS;
+    }
+} else {
+    records = loadData(
+        "audit_records",
+        []
+    );
+}
+
+function idbOpen() {
+    return new Promise(function (resolve, reject) {
+        if (!window.indexedDB) {
+            reject(new Error("IndexedDB غير متاح في هذا المتصفح"));
+            return;
+        }
+        const req = indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = function () { req.result.createObjectStore(IDB_STORE); };
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+    });
+}
+
+function idbPut(key, value) {
+    return idbOpen().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            const tx = db.transaction(IDB_STORE, "readwrite");
+            tx.objectStore(IDB_STORE).put(value, key);
+            tx.oncomplete = function () { db.close(); resolve(); };
+            tx.onerror = function () { db.close(); reject(tx.error); };
+            tx.onabort = function () { db.close(); reject(tx.error || new Error("IndexedDB abort")); };
+        });
+    });
+}
+
+function idbGet(key) {
+    return idbOpen().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            const req = db.transaction(IDB_STORE, "readonly").objectStore(IDB_STORE).get(key);
+            req.onsuccess = function () { db.close(); resolve(req.result); };
+            req.onerror = function () { db.close(); reject(req.error); };
+        });
+    });
+}
+
+function isQuotaError(error) {
+    return !!error && (error.name === "QuotaExceededError" || error.code === 22 || error.code === 1014);
+}
+
+/*
+    نقل السجلات إلى IndexedDB مع التحقق:
+    ١) كتابة السجلات ٢) قراءتها ومطابقتها حرفاً بحرف
+    ٣) وضع علامة المكان ٤) عندها فقط تُحذف النسخة من localStorage.
+*/
+/* نقل واحد فقط في نفس الوقت؛ الحفظ ينتظر انتهاءه (لا تداخل بين عمليتين) */
+let recordsMoving = null;
+
+function moveRecordsToIDB() {
+
+    if (recordsMoving) {
+        return recordsMoving;
+    }
+
+    recordsMoving = moveRecordsToIDBNow().then(function (result) {
+        recordsMoving = null;
+        return result;
+    }, function (error) {
+        recordsMoving = null;
+        throw error;
+    });
+
+    return recordsMoving;
+}
+
+function moveRecordsToIDBNow() {
+
+    const snapshot = JSON.stringify(records);
+
+    return idbPut("audit_records", JSON.parse(snapshot))
+        .then(function () { return idbGet("audit_records"); })
+        .then(function (saved) {
+
+            if (!Array.isArray(saved) || JSON.stringify(saved) !== snapshot) {
+                throw new Error("فشل التحقق من نسخ السجلات إلى المخزن الكبير، لم يُحذف شيء.");
+            }
+
+            try {
+                localStorage.setItem(RECORDS_STORE_KEY, "idb");
+            } catch (error) {
+                /* لا مكان حتى لعلامة صغيرة: المسودة نسخة مؤقتة من بيانات موجودة في الصفحة */
+                localStorage.removeItem("audit_record_draft");
+                localStorage.setItem(RECORDS_STORE_KEY, "idb");
+            }
+
+            recordsInIDB = true;
+
+            try {
+                localStorage.removeItem("audit_records");
+            } catch (e) {}
+        });
+}
+
+/* حفظ السجلات أينما كانت. يُرجع Promise، والفشل يُعرض للمستخدم عند الاستدعاء */
+function persistRecords() {
+
+    /* نقل جارٍ: ننتظره ثم نحفظ آخر نسخة من السجلات في مكانها الجديد */
+    if (recordsMoving) {
+        return recordsMoving.catch(function () {}).then(persistRecords);
+    }
+
+    if (recordsLoadFailed) {
+        return Promise.reject(new Error("تعذر قراءة السجلات من المخزن عند فتح الصفحة، لذلك أُوقف الحفظ حمايةً للبيانات. حدّث الصفحة (Ctrl + F5)."));
+    }
+
+    if (recordsInIDB) {
+        return idbPut("audit_records", records);
+    }
+
+    try {
+        saveData("audit_records", records);
+        return Promise.resolve();
+    } catch (error) {
+        if (!isQuotaError(error) || !window.indexedDB) {
+            return Promise.reject(error);
+        }
+        /* المساحة ممتلئة: ننقل السجلات إلى المخزن الكبير ونحفظ هناك */
+        return moveRecordsToIDB().then(function () {
+            /* إن كان نقلٌ استباقي قد بدأ قبل هذا الحفظ فلقطته لا تحوي السجل الجديد */
+            return idbPut("audit_records", records);
+        }).then(function () {
+            notify("<strong>نُقلت السجلات إلى مخزن أكبر</strong><span>امتلأت مساحة المتصفح، فنُقلت كل السجلات إلى مخزن أكبر في نفس المتصفح وحُفظ السجل.</span>", "info", 8000, true);
+        });
+    }
+}
+
+/*
+    نقل استباقي: إذا كبرت السجلات في localStorage تُنقل قبل أن تمتلئ
+    المساحة، بعد تنزيل نسخة احتياطية تلقائياً.
+*/
+let recordsMoveChecked = false;
+
+function maybeMoveRecordsStore() {
+
+    if (recordsMoveChecked || recordsInIDB || recordsLoadFailed || !window.indexedDB || !currentUser) {
+        return;
+    }
+
+    recordsMoveChecked = true;
+
+    let size = 0;
+    try {
+        size = (localStorage.getItem("audit_records") || "").length;
+    } catch (e) {}
+
+    if (size < RECORDS_MOVE_THRESHOLD) {
+        return;
+    }
+
+    try {
+        downloadBackup();
+    } catch (e) {
+        console.error("Backup before move failed:", e);
+    }
+
+    moveRecordsToIDB().then(function () {
+        notify("<strong>نُقلت السجلات إلى مخزن أكبر</strong><span>كانت مساحة المتصفح تقارب الامتلاء، فنُقلت كل السجلات (" + records.length + " سجل) إلى مخزن أكبر بعد التحقق منها، ونُزّلت نسخة احتياطية احتياطاً.</span>", "success", 9000, true);
+    }).catch(function (error) {
+        console.error("Move records to IndexedDB failed:", error);
+        notify("<strong>تعذر نقل السجلات إلى المخزن الأكبر</strong><span>" + escapeHTML(error && error.message || error) + " — السجلات لم تتغير.</span>", "warning", 10000, true);
+    });
+}
 
 let committeeShares =
 loadData(
@@ -396,7 +603,9 @@ DEFAULT_COMMITTEE_SHARES
     });
 
     if (changed) {
-        saveData("audit_records", records);
+        persistRecords().catch(function (error) {
+            console.error("Saving migrated records failed:", error);
+        });
     }
 
 })();
@@ -2565,7 +2774,7 @@ function syncChoiceChips() {
 
 document.getElementById("agencyStatus")?.addEventListener("change", syncChoiceChips);
 
-window.addEventListener("DOMContentLoaded", function () {
+onReady(function () {
     buildChoiceChips("agencyType", "agencyTypeChips", AGENCY_TYPE_COLORS);
     buildChoiceChips("agencyStatus", "agencyStatusChips", AGENCY_STATUS_COLORS);
 });
@@ -3936,14 +4145,34 @@ recordForm.addEventListener(
 
         }
 
-        try {
+        /* زر الحفظ يتوقف حتى ينتهي الحفظ (لا حفظ مزدوج) */
+        const submitButtons = recordForm.querySelectorAll('button[type="submit"]');
+        submitButtons.forEach(function (b) { b.disabled = true; });
 
-            saveData(
-                "audit_records",
-                records
+        persistRecords().then(function () {
+
+            /* الحفظ تمّ: أي خطأ في تحديث العرض بعده لا يُلغي الحفظ */
+            [resetRecordForm, renderRecords, updateDashboard, renderReports].forEach(function (step) {
+                try {
+                    step();
+                } catch (error) {
+                    console.error("After-save step failed:", step.name, error);
+                }
+            });
+
+            notify(
+                "<strong>" + (index !== -1 ? "تم تعديل السجل بنجاح" : "تم حفظ السجل بنجاح") + "</strong>" +
+                "<span>سجل " + escapeHTML(record.recordNumber) + " — " + record.agencies.length + " وكالة</span>",
+                "success",
+                4000,
+                true
             );
 
-        } catch (error) {
+            switchSection(
+                "recordsSection"
+            );
+
+        }).catch(function (error) {
 
             records = recordsBefore;
 
@@ -3951,7 +4180,7 @@ recordForm.addEventListener(
 
             notify(
                 "<strong>لم يُحفظ السجل</strong><span>" +
-                (error && error.name === "QuotaExceededError"
+                (isQuotaError(error)
                     ? "مساحة التخزين في المتصفح ممتلئة. حمّل نسخة احتياطية من قسم المستخدمين ثم أخبر المسؤول."
                     : "حدث خطأ أثناء الحفظ: " + escapeHTML(error && error.message || error)) +
                 " بيانات السجل ما زالت في النموذج ولم تُمسح.</span>",
@@ -3960,31 +4189,9 @@ recordForm.addEventListener(
                 true
             );
 
-            return;
-        }
-
-        /* الحفظ تمّ: أي خطأ في تحديث العرض بعده لا يُلغي الحفظ */
-        [resetRecordForm, renderRecords, updateDashboard, renderReports].forEach(function (step) {
-            try {
-                step();
-            } catch (error) {
-                console.error("After-save step failed:", step.name, error);
-            }
+        }).then(function () {
+            submitButtons.forEach(function (b) { b.disabled = false; });
         });
-
-
-        notify(
-            "<strong>" + (index !== -1 ? "تم تعديل السجل بنجاح" : "تم حفظ السجل بنجاح") + "</strong>" +
-            "<span>سجل " + escapeHTML(record.recordNumber) + " — " + record.agencies.length + " وكالة</span>",
-            "success",
-            4000,
-            true
-        );
-
-
-        switchSection(
-            "recordsSection"
-        );
 
     }
 );
@@ -4164,6 +4371,12 @@ function globalSearchResults(query) {
 
 function openGlobalSearch() {
 
+    /* نافذة بحث قديمة مغلقة لم تُحذف: تُحذف ثم تُفتح من جديد */
+    const stale = document.getElementById("globalSearch");
+    if (stale && !stale.open) {
+        stale.remove();
+    }
+
     if (!currentUser || document.getElementById("globalSearch")) {
         return;
     }
@@ -4185,13 +4398,24 @@ function openGlobalSearch() {
 
     document.body.appendChild(dialog);
 
+    /* الإغلاق والحذف مباشرة دون الاعتماد على حدث «close» */
+    const closeSearch = function () {
+        try { if (dialog.open) dialog.close(); } catch (e) {}
+        dialog.remove();
+    };
+
+    dialog.addEventListener("cancel", function (event) {
+        event.preventDefault();
+        closeSearch();
+    });
+
     const input = dialog.querySelector("input");
     const list = dialog.querySelector(".search-list");
     let results = [];
     let active = 0;
 
     const open = function (item, edit) {
-        dialog.close();
+        closeSearch();
         if (item.kind === "record") {
             showFinalRecordReport(item.record.id, "summary");
         } else if (edit) {
@@ -4268,7 +4492,7 @@ function openGlobalSearch() {
     });
 
     dialog.addEventListener("click", function (event) {
-        if (event.target === dialog) dialog.close();
+        if (event.target === dialog) closeSearch();
     });
 
     dialog.addEventListener("close", function () {
@@ -4595,6 +4819,8 @@ appConfirm({
         return;
     }
 
+    const recordsBefore = records;
+
     records =
         records.filter(
             function (record) {
@@ -4608,19 +4834,22 @@ appConfirm({
         );
 
 
-    saveData(
-        "audit_records",
-        records
-    );
+    persistRecords().then(function () {
 
+        renderRecords();
 
-    renderRecords();
+        updateDashboard();
 
-    updateDashboard();
+        renderReports();
 
-    renderReports();
+        notify("تم حذف السجل رقم " + escapeHTML(target.recordNumber) + ".", "info");
 
-    notify("تم حذف السجل رقم " + escapeHTML(target.recordNumber) + ".", "info");
+    }).catch(function (error) {
+
+        records = recordsBefore;
+        console.error("Delete record failed:", error);
+        notify("<strong>لم يُحذف السجل</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+    });
 });
 
 }
@@ -5658,7 +5887,7 @@ function flashNotify(message, variant) {
     } catch (e) {}
 }
 
-window.addEventListener("DOMContentLoaded", function () {
+onReady(function () {
     let flash = null;
     try {
         flash = JSON.parse(sessionStorage.getItem(FLASH_KEY) || "null");
@@ -5684,15 +5913,15 @@ function appConfirm(options) {
         dialog.setAttribute("aria-labelledby", "appDialogTitle");
 
         dialog.innerHTML =
-            '<form method="dialog" class="app-dialog-card">' +
+            '<div class="app-dialog-card">' +
                 '<div class="app-dialog-icon" aria-hidden="true"><i class="ti ' + (options.danger ? "ti-alert-triangle" : "ti-help-circle") + '"></i></div>' +
                 '<h3 id="appDialogTitle"></h3>' +
                 '<p class="app-dialog-message"></p>' +
                 '<div class="app-dialog-actions">' +
-                    '<button type="submit" value="ok" class="' + (options.danger ? "danger-btn" : "primary-btn") + ' app-dialog-ok"></button>' +
-                    '<button type="submit" value="cancel" class="secondary-btn app-dialog-cancel"></button>' +
+                    '<button type="button" class="' + (options.danger ? "danger-btn" : "primary-btn") + ' app-dialog-ok"></button>' +
+                    '<button type="button" class="secondary-btn app-dialog-cancel"></button>' +
                 "</div>" +
-            "</form>";
+            "</div>";
 
         dialog.querySelector("h3").textContent = options.title || "تأكيد";
         dialog.querySelector(".app-dialog-message").textContent = options.message || "";
@@ -5701,16 +5930,40 @@ function appConfirm(options) {
 
         document.body.appendChild(dialog);
 
-        dialog.addEventListener("close", function () {
-            const ok = dialog.returnValue === "ok";
+        /*
+            النتيجة تُعاد مباشرة عند الضغط، ولا نعتمد على حدث «close»
+            الذي قد يتأخر في بعض المتصفحات. finish تعمل مرة واحدة فقط.
+        */
+        let done = false;
+
+        const finish = function (ok) {
+            if (done) return;
+            done = true;
+            try { if (dialog.open) dialog.close(); } catch (e) {}
             dialog.remove();
             resolve(ok);
+        };
+
+        dialog.querySelector(".app-dialog-ok").addEventListener("click", function () { finish(true); });
+        dialog.querySelector(".app-dialog-cancel").addEventListener("click", function () { finish(false); });
+
+        /* Esc أو الإغلاق بأي طريقة أخرى = إلغاء */
+        dialog.addEventListener("cancel", function (event) {
+            event.preventDefault();
+            finish(false);
+        });
+        dialog.addEventListener("close", function () { finish(false); });
+        dialog.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                finish(false);
+            }
         });
 
         /* الضغط خارج البطاقة = إلغاء */
         dialog.addEventListener("click", function (event) {
             if (event.target === dialog) {
-                dialog.close("cancel");
+                finish(false);
             }
         });
 
@@ -10572,14 +10825,51 @@ if (
 
 }
 
+renderStorageInfo();
+
+/* السجلات الكبيرة تُنقل إلى المخزن الأكبر قبل أن تمتلئ المساحة */
+maybeMoveRecordsStore();
+
 }
+
+/* مكان حفظ السجلات وحجمها (قسم النسخ الاحتياطي) */
+function renderStorageInfo() {
+
+    const box = document.getElementById("storageInfo");
+
+    if (!box) {
+        return;
+    }
+
+    let used = 0;
+    try {
+        Object.keys(localStorage).forEach(function (k) {
+            used += (k.length + (localStorage.getItem(k) || "").length);
+        });
+    } catch (e) {}
+
+    const pct = Math.min(100, Math.round((used / 5000000) * 100));
+
+    box.innerHTML = recordsInIDB
+        ? '<i class="ti ti-database-check" aria-hidden="true"></i><span>السجلات محفوظة في <b>المخزن الكبير</b> داخل هذا المتصفح (' + records.length +
+          " سجل). المساحة كافية لسنوات من العمل. استمر بتحميل نسخة احتياطية بانتظام.</span>"
+        : '<i class="ti ti-database" aria-hidden="true"></i><span>السجلات محفوظة في المساحة العادية للمتصفح: مستخدم <b>' + pct +
+          "%</b> منها. عند امتلائها تُنقل السجلات تلقائياً إلى مخزن أكبر.</span>";
+
+    box.classList.toggle("is-warning", !recordsInIDB && pct >= 60);
+}
+
+onReady(function () {
+    if (recordsLoadFailed) {
+        notify("<strong>تعذر قراءة السجلات</strong><span>لم يتمكن المتصفح من قراءة السجلات من المخزن الكبير. لا تُدخل سجلات الآن؛ حدّث الصفحة (Ctrl + F5)، وإن استمرت المشكلة استعد آخر نسخة احتياطية.</span>", "error", 30000, true);
+    }
+});
 
 /* =========================================================
 DOMContentLoaded
 ========================================================= */
 
-window.addEventListener(
-"DOMContentLoaded",
+onReady(
 function () {
 
     ensureAgencyPriceControls();
@@ -10786,7 +11076,25 @@ function restoreBackupFromFile(file) {
 
 function applyBackupData(data) {
 
+        /*
+            السجلات تُحفظ أولاً (أكبر جزء، وقد تكون في المخزن الكبير)،
+            وبقية الإعدادات لا تُكتب إلا بعد نجاحها.
+            الاستعادة مقصودة لاستبدال السجلات، فهي تعمل حتى لو تعذرت قراءتها.
+        */
+        recordsLoadFailed = false;
         records = data.records || [];
+
+        persistRecords().then(function () {
+            applyBackupSettings(data);
+        }).catch(function (error) {
+            console.error("Restore records failed:", error);
+            notify("<strong>لم تكتمل الاستعادة</strong><span>تعذر حفظ السجلات: " + escapeHTML(error && error.message || error) +
+                " — لم يتغير شيء. حدّث الصفحة.</span>", "error", 15000, true);
+        });
+}
+
+function applyBackupSettings(data) {
+
         users = data.users || users;
         prices = data.prices || prices;
         additionPrices = data.additionPrices || additionPrices;
@@ -10817,7 +11125,6 @@ function applyBackupData(data) {
         }
 
         saveData("audit_committee_shares", committeeShares);
-        saveData("audit_records", records);
         saveData("audit_users", users);
         saveData("audit_prices", prices);
         saveData("audit_addition_prices", additionPrices);
@@ -11457,6 +11764,96 @@ function clearRecordDraft() {
         localStorage.removeItem(DRAFT_KEY);
     } catch (error) {}
 }
+
+/*
+    استيراد سجل غير محفوظ من ملف JSON (بنفس شكل المسودة):
+    { recordNumber, officeName, representativeName, representativeType,
+      recordDate, editingRecordId?, pendingAgencies: [...] }
+    يملأ النموذج بالوكالات، ثم يراجعها المستخدم ويضغط «حفظ السجل».
+*/
+function importRecordDraftFromFile(file) {
+
+    const reader = new FileReader();
+
+    reader.onload = function (event) {
+
+        let data;
+
+        try {
+            data = JSON.parse(event.target.result);
+        } catch (error) {
+            notify("تعذر قراءة الملف. تأكد أنه ملف السجل غير المحفوظ (.json).", "error");
+            return;
+        }
+
+        const list = data && Array.isArray(data.pendingAgencies) ? data.pendingAgencies : null;
+
+        if (!list || !list.length || !list.every(function (a) { return a && a.type && a.number !== undefined; })) {
+            notify("هذا الملف لا يحتوي وكالات سجل صالحة.", "error");
+            return;
+        }
+
+        const apply = function () {
+
+            const setValue = function (id, value) {
+                const el = document.getElementById(id);
+                if (el) el.value = value || "";
+            };
+
+            /* رقم «قيد التعديل» يُحتفظ به فقط إذا كان السجل موجوداً فعلاً */
+            const editingExists = data.editingRecordId && records.some(function (r) { return r.id === data.editingRecordId; });
+
+            setValue("editingRecordId", editingExists ? data.editingRecordId : "");
+            setValue("recordNumber", data.recordNumber);
+            setValue("officeName", data.officeName);
+            setValue("representativeName", data.representativeName);
+            setValue("representativeType", data.representativeType === "external" ? "external" : "internal");
+            setValue("recordDate", data.recordDate || todayDay());
+            updateRepresentativeTypeHint();
+
+            pendingAgencies = list;
+
+            const title = document.getElementById("recordFormTitle");
+            if (title) {
+                title.textContent = editingExists ? "تعديل السجل رقم " + (data.recordNumber || "") : "إنشاء سجل جديد";
+            }
+
+            renderPendingAgencies();
+            clearAgencyForm();
+            switchSection("newRecordSection");
+
+            notify("<strong>تم استيراد " + list.length + " وكالة</strong><span>راجع بيانات السجل والوكالات ثم اضغط «حفظ السجل».</span>", "success", 7000, true);
+        };
+
+        if (pendingAgencies.length) {
+            appConfirm({
+                title: "استبدال الوكالات الحالية",
+                message: "في النموذج الآن " + pendingAgencies.length + " وكالة غير محفوظة. هل تريد استبدالها بالوكالات الموجودة في الملف (" + list.length + " وكالة)؟",
+                confirmText: "استبدالها",
+                cancelText: "إلغاء",
+                danger: true
+            }).then(function (ok) {
+                if (ok) apply();
+            });
+        } else {
+            apply();
+        }
+    };
+
+    reader.readAsText(file, "UTF-8");
+}
+
+document.getElementById("importDraftBtn")?.addEventListener("click", function () {
+    document.getElementById("importDraftInput")?.click();
+});
+
+document.getElementById("importDraftInput")?.addEventListener("change", function () {
+    const file = this.files && this.files[0];
+    if (file) {
+        importRecordDraftFromFile(file);
+    }
+    this.value = "";
+});
 
 function restoreRecordDraft() {
 
