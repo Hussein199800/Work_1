@@ -12625,29 +12625,55 @@ function detectTelegramChat() {
         telegramSettings.botName = bot.username || bot.first_name || "";
         return telegramApi("getUpdates", null, form.token);
     }).then(function (updates) {
-        let chat = null;
-        (updates || []).forEach(function (u) {
+        /* كل المحادثات التي راسلت البوت (الأحدث أولاً): قد يكون بينها غريب عرف اسم البوت */
+        const chats = [];
+        (updates || []).slice().reverse().forEach(function (u) {
             const m = u.message || u.channel_post || u.my_chat_member || u.edited_message || u.edited_channel_post;
-            if (m && m.chat) chat = m.chat;
+            if (m && m.chat && !chats.some(function (c) { return c.id === m.chat.id; })) chats.push(m.chat);
         });
-        if (!chat) {
+        if (!chats.length) {
             saveTelegramSettings();
             notify("<strong>البوت @" + escapeHTML(telegramSettings.botName) + " يعمل، لكن لم تصله رسالة بعد</strong>" +
                 "<span>افتح البوت في تليجرام واضغط Start (أو انشر أي رسالة في القناة بعد إضافته مشرفاً)، ثم اضغط «اكتشاف المحادثة» مرة أخرى.</span>",
                 "warning", 12000, true);
             return false;
         }
-        telegramSettings.chatId = String(chat.id);
-        telegramSettings.chatTitle = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" ") || chat.username || "";
         saveTelegramSettings();
-        fillTelegramForm();
-        notify("<strong>تم العثور على المحادثة: " + escapeHTML(telegramSettings.chatTitle || telegramSettings.chatId) + "</strong>" +
-            "<span>اضغط «حفظ وإرسال تجربة» لرفع نسخة الآن.</span>", "success", 7000, true);
-        return true;
+        /* تأكيد صريح: لا يُحفظ معرّف محادثة قبل أن يختار المستخدم أنها محادثته */
+        return appChoose({
+            title: "إلى من تُرسل النسخ الاحتياطية؟",
+            message: chats.length === 1
+                ? "وُجدت محادثة واحدة مع البوت \u2066@" + telegramSettings.botName + "\u2069. تأكد أنها حسابك أو قناتك قبل الحفظ — النسخ تحوي كل السجلات وكلمات المرور."
+                : "راسل البوت \u2066@" + telegramSettings.botName + "\u2069 أكثر من حساب. اختر حسابك أو قناتك فقط — لا تختر اسماً لا تعرفه.",
+            /* أكثر من حساب: لا يُبرز أي اختيار حتى لا يُضغط اسم الغريب بالخطأ */
+            choices: chats.slice(0, 5).map(function (chat) {
+                return { value: chat, label: (chats.length === 1 ? "نعم، هذا أنا: " : "") + telegramChatLabel(chat), kind: chats.length === 1 ? "primary" : "secondary" };
+            })
+        }).then(function (chat) {
+            if (!chat) {
+                notify("لم يُحفظ أي معرّف محادثة.", "info", 4000);
+                return false;
+            }
+            telegramSettings.chatId = String(chat.id);
+            telegramSettings.chatTitle = telegramChatName(chat);
+            saveTelegramSettings();
+            notify("<strong>المحادثة: " + escapeHTML(telegramSettings.chatTitle || telegramSettings.chatId) + "</strong>" +
+                "<span>اضغط «حفظ وإرسال تجربة» لرفع نسخة الآن.</span>", "success", 7000, true);
+            return true;
+        });
     }).catch(function (error) {
         notify("تعذّر الاتصال بالبوت: " + escapeHTML(error && error.message || error), "error");
         return false;
     });
+}
+
+function telegramChatName(chat) {
+    return chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" ") || chat.username || String(chat.id);
+}
+
+function telegramChatLabel(chat) {
+    const kind = chat.type === "channel" ? "قناة: " : (chat.type === "group" || chat.type === "supergroup") ? "مجموعة: " : "";
+    return kind + telegramChatName(chat) + (chat.username ? " (\u2066@" + chat.username + "\u2069)" : "") + " — " + chat.id;
 }
 
 function saveTelegramFromForm() {
