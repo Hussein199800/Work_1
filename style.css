@@ -5996,3 +5996,317 @@ html.theme-switching *::after {
 .toast-actions .act-btn {
     pointer-events: auto;
 }
+
+/* ================= بطاقة الوكالة مضغوطة: كل شيء في شاشة واحدة =================
+   الرقم والحالة في سطر، النوع تحتهما، الملاحظات سطر واحد،
+   والمعاينة شبكة من صفين، حتى تظهر البطاقة كاملة على زوم 100%. */
+
+.agency-main > .form-grid {
+    grid-template-columns: 170px minmax(0, 1fr);
+    gap: 12px 18px;
+}
+
+.agency-main .type-group {
+    grid-column: 1 / -1;
+    order: 3;
+}
+
+.agency-main .status-group {
+    order: 2;
+}
+
+.agency-main .input-group {
+    gap: 5px;
+}
+
+.agency-main #agencyNumber {
+    height: 40px;
+}
+
+.agency-main .checkbox-row {
+    font-size: var(--fs-xs);
+}
+
+.agency-main .choice-chip {
+    min-height: 36px;
+    padding: 0 14px;
+    font-size: var(--fs-sm);
+}
+
+.agency-main .chip-row-minor .choice-chip {
+    min-height: 30px;
+}
+
+/* الملاحظات: العنوان والخياران في سطر، والحقل سطر واحد يكبر عند الحاجة */
+.agency-main .notes-group {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 6px 14px;
+}
+
+.agency-main .notes-group > label {
+    margin: 0;
+}
+
+.agency-main .notes-group .quick-notes-row {
+    margin: 0;
+    gap: 4px 14px;
+}
+
+.agency-main .notes-group textarea {
+    grid-column: 1 / -1;
+    min-height: 40px;
+    height: 40px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    resize: vertical;
+}
+
+.agency-main .agency-recap {
+    margin: 10px 0 0;
+    padding: 6px 10px;
+}
+
+.agency-main .button-row {
+    margin-top: 10px;
+}
+
+/* عمود البنود أقصر قليلاً */
+.agency-items {
+    gap: 6px;
+    padding: 10px 12px;
+}
+
+.item-group {
+    gap: 2px;
+}
+
+.agency-items .number-control {
+    height: 30px;
+}
+
+.input-group.item-row {
+    padding: 1px 6px;
+}
+
+@media screen and (max-width: 640px) {
+    .agency-main > .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .agency-main .notes-group {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ================= بطاقة الوكالة: ثلاثة أعمدة =================
+   [الرقم والحالة والنوع والملاحظات والأزرار] | [ملخص الوكالة] | [البنود] */
+
+.agency-layout {
+    grid-template-columns: minmax(0, 1fr) 240px 300px;
+    gap: 20px;
+}
+
+.agency-summary {
+    position: sticky;
+    top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+}
+
+/* المعاينة طولياً: كل خانة سطر (الاسم يميناً والقيمة يساراً)، والمطلوب من المندوب أسفلها */
+.agency-summary .preview-box {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+.agency-summary .preview-box > div {
+    padding: 7px 10px;
+    font-size: var(--fs-xs);
+    line-height: 1.35;
+}
+
+.agency-summary .preview-box strong {
+    font-size: var(--fs-md);
+}
+
+.agency-summary .preview-box .preview-total {
+    margin-top: 4px;
+    padding: 10px 12px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    font-size: var(--fs-sm);
+}
+
+.agency-summary .preview-box .preview-total strong {
+    font-size: var(--fs-xl);
+}
+
+/* الملاحظات طولياً: العنوان، ثم الخياران تحت بعض، ثم الحقل */
+.agency-main .notes-group {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.agency-main .notes-group .quick-notes-row {
+    flex-direction: column;
+    gap: 4px;
+}
+
+.agency-main .notes-group textarea {
+    height: 64px;
+    min-height: 40px;
+}
+
+@media screen and (max-width: 1280px) {
+    .agency-layout {
+        grid-template-columns: minmax(0, 1fr) 300px;
+    }
+
+    .agency-summary {
+        position: static;
+        grid-column: 1;
+    }
+
+    .agency-items {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+    }
+
+    .agency-summary .preview-box {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .agency-summary .preview-box .preview-total {
+        grid-column: 1 / -1;
+    }
+}
+
+@media screen and (max-width: 1024px) {
+    .agency-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .agency-summary,
+    .agency-items {
+        grid-column: auto;
+        grid-row: auto;
+    }
+}
+
+/* ================= خلفية ملوّنة لكل مجموعة في بطاقة الوكالة =================
+   نقص الطوابع عنابي، الإضافات ذهبي، البدل أزرق، الملخص زمردي، الملاحظات بنفسجي.
+   البند المضاف (قيمته > 0) يمتلئ بلون مجموعته كاملاً ليُرى من نظرة. */
+
+:root {
+    --grp-add: #8a6008;
+    --grp-summary: #1f7a5a;
+    --grp-notes: #6b3fa0;
+    --on-grp: #ffffff;
+    --grp-summary-bg: color-mix(in srgb, var(--grp-summary) 9%, var(--surface));
+    --grp-notes-bg: color-mix(in srgb, var(--grp-notes) 8%, var(--surface));
+}
+
+[data-theme="dark"] {
+    --grp-add: #e8c063;
+    --grp-summary: #6fd3a8;
+    --grp-notes: #c4a3f0;
+    --on-grp: #1a1221;
+    --grp-summary-bg: color-mix(in srgb, var(--grp-summary) 12%, var(--surface));
+    --grp-notes-bg: color-mix(in srgb, var(--grp-notes) 12%, var(--surface));
+}
+
+.grp-summary { --grp: var(--grp-summary); --grp-bg: var(--grp-summary-bg); }
+.grp-notes { --grp: var(--grp-notes); --grp-bg: var(--grp-notes-bg); }
+
+/* عمود البنود: المجموعات الثلاث كل واحدة بلوحة بلونها */
+.agency-items {
+    background: var(--surface);
+}
+
+.item-group {
+    padding: 8px 8px 8px 8px;
+    border: 1px solid color-mix(in srgb, var(--grp) 35%, transparent);
+    border-inline-start: 4px solid var(--grp);
+    border-radius: var(--r-md);
+    background: var(--grp-bg);
+}
+
+.item-group .number-control {
+    background: var(--surface);
+}
+
+/* البند المضاف: يمتلئ بلون مجموعته */
+.input-group.item-row.has-value {
+    background: var(--grp);
+}
+
+.input-group.item-row.has-value > label {
+    color: var(--on-grp);
+    font-weight: 700;
+}
+
+.input-group.item-row.has-value .qi-key {
+    color: var(--on-grp);
+    border-color: color-mix(in srgb, var(--on-grp) 55%, transparent);
+}
+
+.input-group.item-row.has-value .number-control {
+    border-color: var(--surface);
+    box-shadow: none;
+    background: var(--surface);
+}
+
+.input-group.item-row.has-value .number-control input:not([type="checkbox"]) {
+    color: var(--grp);
+    font-weight: 800;
+}
+
+/* ملخص الوكالة: لوحة زمردية */
+.agency-summary.grp-summary {
+    background: var(--grp-bg);
+    border: 1px solid color-mix(in srgb, var(--grp) 35%, transparent);
+    border-inline-start: 4px solid var(--grp);
+}
+
+.agency-summary .items-title,
+.agency-summary .items-title .ti {
+    color: var(--grp);
+}
+
+.agency-summary .preview-box > div:not(.preview-total) {
+    background: var(--surface);
+    border-color: color-mix(in srgb, var(--grp) 22%, var(--line));
+}
+
+/* الملاحظات: لوحة بنفسجية */
+.agency-main .notes-group.grp-notes {
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--grp) 30%, transparent);
+    border-inline-start: 4px solid var(--grp);
+    border-radius: var(--r-md);
+    background: var(--grp-bg);
+}
+
+.agency-main .notes-group.grp-notes > label,
+.agency-main .notes-group.grp-notes > label .ti {
+    color: var(--grp);
+}
+
+.agency-main .notes-group.grp-notes textarea {
+    background: var(--surface);
+}

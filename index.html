@@ -821,7 +821,7 @@
 
                         <!-- NOTES -->
 
-                        <div class="input-group">
+                        <div class="input-group notes-group grp-notes">
 
                             <label for="agencyNotes">
                                 <i class="ti ti-notes"></i> ملاحظات الوكالة
@@ -849,13 +849,60 @@
 
                             <textarea
                                 id="agencyNotes"
-                                rows="3"
+                                rows="1"
                                 placeholder="مثال: لا يوجد رقم إيصال…"
                             ></textarea>
 
                         </div>
 
-                        <!-- PREVIEW -->
+                        <!-- ملخص «هذه الوكالة» للمطابقة مع الورقة قبل الإضافة -->
+                        <div class="agency-recap" id="agencyRecap" aria-live="polite"></div>
+
+                        <!-- AGENCY BUTTONS -->
+
+                        <div class="button-row">
+
+                            <button
+                                type="button"
+                                id="addAgencyBtn"
+                                class="primary-btn"
+                                aria-keyshortcuts="Control+S Control+Enter"
+                            >
+                                <i class="ti ti-plus"></i> إضافة الوكالة
+                                <kbd class="kbd-hint">Ctrl + S</kbd>
+                            </button>
+
+                            <button
+                                type="button"
+                                id="similarAgencyBtn"
+                                class="secondary-btn"
+                                onclick="addSimilarAgency()"
+                                title="نفس نوع وحالة وإضافات آخر وكالة، بالرقم التالي"
+                            >
+                                <i class="ti ti-copy"></i> وكالة مماثلة للأخيرة
+                            </button>
+
+                            <button
+                                type="button"
+                                id="clearAgencyBtn"
+                                class="secondary-btn"
+                            >
+                                <i class="ti ti-eraser"></i> مسح بيانات الوكالة
+                            </button>
+
+                        </div>
+
+                        </div>
+
+                        <!-- ================= ملخص الوكالة: عمود طولي بجانب البنود ================= -->
+
+                        <aside class="agency-summary grp-summary" aria-label="ملخص حساب الوكالة">
+
+                        <div class="items-head">
+                            <h3 class="items-title"><i class="ti ti-calculator" aria-hidden="true"></i> ملخص الوكالة</h3>
+                        </div>
+
+                        <!-- PREVIEW (نفس المعرّفات) -->
 
                         <div class="preview-box">
 
@@ -910,44 +957,8 @@
 
                         </div>
 
-                        <!-- ملخص «هذه الوكالة» للمطابقة مع الورقة قبل الإضافة -->
-                        <div class="agency-recap" id="agencyRecap" aria-live="polite"></div>
 
-                        <!-- AGENCY BUTTONS -->
-
-                        <div class="button-row">
-
-                            <button
-                                type="button"
-                                id="addAgencyBtn"
-                                class="primary-btn"
-                                aria-keyshortcuts="Control+S Control+Enter"
-                            >
-                                <i class="ti ti-plus"></i> إضافة الوكالة
-                                <kbd class="kbd-hint">Ctrl + S</kbd>
-                            </button>
-
-                            <button
-                                type="button"
-                                id="similarAgencyBtn"
-                                class="secondary-btn"
-                                onclick="addSimilarAgency()"
-                                title="نفس نوع وحالة وإضافات آخر وكالة، بالرقم التالي"
-                            >
-                                <i class="ti ti-copy"></i> وكالة مماثلة للأخيرة
-                            </button>
-
-                            <button
-                                type="button"
-                                id="clearAgencyBtn"
-                                class="secondary-btn"
-                            >
-                                <i class="ti ti-eraser"></i> مسح بيانات الوكالة
-                            </button>
-
-                        </div>
-
-                        </div>
+                        </aside>
 
                         <!-- ================= البنود: عمود طولي واحد =================
                              نقص الطوابع (عنابي)، الإضافات (ذهبي)، البدل (أزرق).
