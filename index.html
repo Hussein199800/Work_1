@@ -3,6 +3,18 @@
 
 <head>
     <meta charset="UTF-8">
+
+    <!-- الوضع النهاري/الليلي قبل رسم الصفحة (بلا وميض): اختيار المستخدم، وإلا إعداد الجهاز -->
+    <script>
+        (function () {
+            var t = null;
+            try { t = localStorage.getItem("audit_ui_theme"); } catch (e) {}
+            if (t !== "dark" && t !== "light") {
+                t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+            }
+            document.documentElement.setAttribute("data-theme", t);
+        })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>نظام تدقيق السجلات والوكالات</title>
@@ -113,6 +125,10 @@
                 <span id="mobileSectionName">الرئيسية</span>
             </div>
 
+            <button type="button" class="menu-toggle mobile-theme" onclick="toggleTheme()" aria-label="تبديل الوضع النهاري والليلي">
+                <i class="ti ti-moon theme-when-light"></i><i class="ti ti-sun theme-when-dark"></i>
+            </button>
+
             <button type="button" class="menu-toggle mobile-search" onclick="openGlobalSearch()" aria-label="بحث عن سجل أو وكالة">
                 <i class="ti ti-search"></i>
             </button>
@@ -149,6 +165,13 @@
                 <i class="ti ti-search" aria-hidden="true"></i>
                 <span>ابحث عن سجل أو وكالة…</span>
                 <kbd>Ctrl K</kbd>
+            </button>
+
+            <!-- التبديل بين الوضع النهاري والليلي -->
+            <button type="button" class="theme-toggle" onclick="toggleTheme()" aria-label="تبديل الوضع النهاري والليلي">
+                <span class="theme-icon" aria-hidden="true"><i class="ti ti-sun"></i><i class="ti ti-moon"></i></span>
+                <span class="theme-label">الوضع الليلي</span>
+                <span class="theme-switch" aria-hidden="true"></span>
             </button>
 
             <!-- بطاقة المستخدم -->
@@ -218,6 +241,11 @@
                 <button type="button" class="tab-btn" data-section="guideSection">
                     <i class="ti ti-book-2 nav-icon"></i>
                     <span class="nav-text"><b>دليل النظام</b><small>الألوان والشرح والإرشادات</small></span>
+                </button>
+
+                <button type="button" class="tab-btn" data-section="devlogSection">
+                    <i class="ti ti-timeline-event nav-icon"></i>
+                    <span class="nav-text"><b>تطوير الموقع</b><small>مراحل العمل وما تغيّر</small></span>
                 </button>
 
                 <button type="button" class="tab-btn manager-only" data-section="pricesSection">
@@ -400,6 +428,69 @@
                     >
                         <i class="ti ti-plus"></i> إنشاء سجل جديد
                     </button>
+
+                </div>
+
+                <!-- فلترة وترتيب السجلات (العرض فقط؛ ترتيب السجلات المحفوظة لا يتغير) -->
+                <div class="records-filters" id="recordsFilters">
+
+                    <label class="filter-field">
+                        <span>الفترة</span>
+                        <select id="rfPeriod">
+                            <option value="all">كل الفترات</option>
+                            <option value="this-month">هذا الشهر</option>
+                            <option value="last-month">الشهر الماضي</option>
+                            <option value="3-months">آخر 3 أشهر</option>
+                            <option value="this-year">هذه السنة</option>
+                            <option value="custom">من تاريخ إلى تاريخ…</option>
+                        </select>
+                    </label>
+
+                    <label class="filter-field rf-custom" hidden>
+                        <span>من</span>
+                        <input type="date" id="rfFrom" lang="en-GB" dir="ltr">
+                    </label>
+
+                    <label class="filter-field rf-custom" hidden>
+                        <span>إلى</span>
+                        <input type="date" id="rfTo" lang="en-GB" dir="ltr">
+                    </label>
+
+                    <label class="filter-field">
+                        <span>المندوب</span>
+                        <select id="rfRep">
+                            <option value="all">الكل</option>
+                            <option value="internal">داخلي</option>
+                            <option value="external">خارجي</option>
+                        </select>
+                    </label>
+
+                    <label class="filter-field">
+                        <span>المكتب</span>
+                        <select id="rfOffice">
+                            <option value="all">كل المكاتب</option>
+                        </select>
+                    </label>
+
+                    <label class="filter-field">
+                        <span>الترتيب</span>
+                        <select id="rfSort">
+                            <option value="date-desc">التاريخ: الأحدث أولاً</option>
+                            <option value="date-asc">التاريخ: الأقدم أولاً</option>
+                            <option value="number-desc">رقم السجل: تنازلي</option>
+                            <option value="number-asc">رقم السجل: تصاعدي</option>
+                            <option value="total-desc">إجمالي السجل: الأعلى</option>
+                            <option value="total-asc">إجمالي السجل: الأقل</option>
+                            <option value="agencies-desc">عدد الوكالات: الأكثر</option>
+                            <option value="office-asc">المكتب: أبجدياً</option>
+                            <option value="saved">ترتيب الحفظ</option>
+                        </select>
+                    </label>
+
+                    <div class="filter-summary">
+                        <span id="rfCount" aria-live="polite"></span>
+                        <button type="button" class="act-btn" id="rfReset"><i class="ti ti-filter-off" aria-hidden="true"></i> إعادة الضبط</button>
+                    </div>
 
                 </div>
 
@@ -1018,10 +1109,20 @@
                                 type="button"
                                 id="addAgencyBtn"
                                 class="primary-btn"
-                                aria-keyshortcuts="Control+Enter"
+                                aria-keyshortcuts="Control+S Control+Enter"
                             >
                                 <i class="ti ti-plus"></i> إضافة الوكالة
-                                <kbd class="kbd-hint">Ctrl + Enter</kbd>
+                                <kbd class="kbd-hint">Ctrl + S</kbd>
+                            </button>
+
+                            <button
+                                type="button"
+                                id="similarAgencyBtn"
+                                class="secondary-btn"
+                                onclick="addSimilarAgency()"
+                                title="نفس نوع وحالة وإضافات آخر وكالة، بالرقم التالي"
+                            >
+                                <i class="ti ti-copy"></i> وكالة مماثلة للأخيرة
                             </button>
 
                             <button
@@ -1071,6 +1172,7 @@
                     <div class="record-dock" id="recordDock">
 
                         <dl class="dock-stats" aria-live="polite">
+                            <div class="dock-last is-empty" id="dockLast"><dt>آخر وكالة</dt><dd>—</dd></div>
                             <div><dt>الوكالات</dt><dd id="dockCount">0</dd></div>
                             <div><dt>إجمالي السجل</dt><dd id="dockGrand">0 ل.س</dd></div>
                             <div class="dock-due"><dt>المطلوب من المندوب</dt><dd id="dockRep">0 ل.س</dd></div>
@@ -1321,6 +1423,137 @@
 
             </section>
 
+            <!-- ================= DEVLOG: تطوير الموقع ================= -->
+
+            <section
+                id="devlogSection"
+                class="section"
+            >
+
+                <div class="page-title">
+                    <span class="page-icon"><i class="ti ti-timeline-event"></i></span>
+                    <div class="page-title-text">
+                        <h2>تطوير الموقع</h2>
+                        <p>كيف بدأنا، وما الذي طوّرناه مرحلة بعد مرحلة</p>
+                    </div>
+                </div>
+
+                <div class="devlog-team">
+                    <div class="devlog-person">
+                        <span class="devlog-avatar" aria-hidden="true">ح</span>
+                        <div>
+                            <b>حسين الطويل</b>
+                            <small>صاحب المشروع — الفكرة وقواعد الحساب، مراجعة كل مرحلة واختبارها على السجلات الحقيقية</small>
+                        </div>
+                    </div>
+                    <div class="devlog-person">
+                        <span class="devlog-avatar is-claude" aria-hidden="true">C</span>
+                        <div>
+                            <b>Claude</b>
+                            <small>مساعد الذكاء الاصطناعي من Anthropic (عبر Claude Code) — البرمجة والتصميم والاختبار</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="devlog-stats">
+                    <div><b>5</b><span>مراحل</span></div>
+                    <div><b>30 أيلول</b><span>البداية</span></div>
+                    <div><b>16 تشرين الأول</b><span>آخر تحديث</span></div>
+                    <div><b>0</b><span>بيانات مفقودة</span></div>
+                </div>
+
+                <ol class="devlog-timeline">
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-seeding"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">30 أيلول 2026 · البداية</p>
+                            <h3>النسخة الأولى على GitHub</h3>
+                            <ul class="devlog-list">
+                                <li>رفع حسين النسخة الأولى من النظام (الصفحة والتنسيق والبرمجة) إلى GitHub.</li>
+                                <li>نشر الموقع على GitHub Pages، وبدأ إدخال السجلات الحقيقية فيه.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-shield-lock"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">14 تشرين الأول 2026 · الجلسة الأولى مع Claude</p>
+                            <h3>الأساس: ربط المشروع وحماية البيانات</h3>
+                            <ul class="devlog-list">
+                                <li>ربط المستودع بـ Claude Code وكتابة ملف تعريف المشروع (CLAUDE.md).</li>
+                                <li>«القاعدة رقم 1» بطلب من حسين: البيانات لا تُفقد أبداً — لا تغيير لأسماء التخزين، وكل تعديل متوافق مع البيانات القديمة، ونسخة احتياطية قبل كل نشر.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-calculator"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">14 تشرين الأول 2026</p>
+                            <h3>تصميم «السجلّ الرسمي» وقواعد الحساب</h3>
+                            <ul class="devlog-list">
+                                <li>الوكالة الخاصة هي النوع الافتراضي عند الإضافة.</li>
+                                <li>بدل الانتقال للمندوب الخارجي يُضاف للعامة والخاصة والشرعية فقط، ولا يُحسب على الملغاة.</li>
+                                <li>حصص لجنة الإسعاف ولجنة التعاون صارت نسبة من سعر الوكالة (مثل 300 ÷ 1700 = 17.647%) مع عرض المبلغ.</li>
+                                <li>إجمالي السجل = سعر الوكالة + الإضافات + بدل الانتقال، والأرقام بالأرقام الغربية.</li>
+                                <li>رسالة واضحة «تمت الإضافة» بعد كل وكالة، وحماية من الإضافة المكررة بنقرتين.</li>
+                                <li>إدخال أسرع (Ctrl + Enter)، شريط ملخص ثابت، وقائمة ⋮ لإجراءات السجل.</li>
+                                <li>التدقيق السريع: الضغط على بدل الانتقال أو نقص الطوابع أو أي إضافة في التقرير يعرض الوكالات التي فيها فقط.</li>
+                                <li>شعار جديد: سجل مفتوح بعلامة تدقيق ✓ بدل الختم الدائري.</li>
+                                <li>لوحة «نشاط الفترة» بالإحصاءات والرسم البياني، والبحث الشامل (Ctrl + K) برقم السجل أو الوكالة.</li>
+                                <li>إصلاح مشكلة عدم حفظ السجل دون ظهور أي رسالة.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-database"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">15 تشرين الأول 2026</p>
+                            <h3>مساحة تخزين أكبر للسجلات</h3>
+                            <ul class="devlog-list">
+                                <li>امتلأت ذاكرة المتصفح (نحو 9.3 ميغابايت، قرابة 4000 وكالة) وظهر خطأ عند الحفظ.</li>
+                                <li>نقل السجلات إلى IndexedDB (مساحة أكبر بكثير): تُكتب ثم تُقرأ وتُقارن قبل حذف النسخة القديمة، مع نسخة احتياطية تلقائية أولاً.</li>
+                                <li>إذا تعذّرت قراءة السجلات يُمنع أي حفظ حتى لا تُكتب بيانات ناقصة فوق الحقيقية.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-diamond"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">16 تشرين الأول 2026</p>
+                            <h3>هوية «الجواهر» وأدوات الإدخال الذكية</h3>
+                            <ul class="devlog-list">
+                                <li>ألوان جديدة بتدرجات الزمردي والبنفسجي والعنابي والذهبي، مع وضع فاتح ووضع داكن يُحفظ اختيارهما.</li>
+                                <li>«وكالة مماثلة»: نسخ آخر وكالة برقم جديد بضغطة واحدة، و Ctrl + S لإضافة الوكالة.</li>
+                                <li>الوكالة المنسية: إدراجها برقمها مع إزاحة أرقام ما بعدها +1، أو إضافتها كمكررة.</li>
+                                <li>تغيير نوع الوكالة من سطرها مباشرة، وعرض آخر وكالة مضافة في الشريط السفلي.</li>
+                                <li>تنبيه عند حفظ سجل برقم موجود مسبقاً.</li>
+                                <li>جدول أسعار 2026 حسب الفترات (1–4 آذار، 5 آذار، نيسان، أيار، 14 حزيران، 3 آب، أيلول)، وكل وكالة تأخذ أسعار تاريخ سجلها.</li>
+                                <li>فلترة السجلات (الفترة، المندوب، المكتب) وترتيبها، وهذه الصفحة.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage is-next">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-hourglass"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">لاحقاً</p>
+                            <h3>مؤجَّل بطلب من حسين</h3>
+                            <ul class="devlog-list">
+                                <li>مزامنة البيانات مع Firebase (نسخة على الإنترنت).</li>
+                                <li>إرسال نسخ احتياطية تلقائية إلى Telegram.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                </ol>
+
+            </section>
+
             <!-- ================= PRICES ================= -->
 
             <section
@@ -1349,7 +1582,36 @@
                         <i class="ti ti-file-certificate"></i> أسعار الوكالات
                     </h3>
 
+                    <p class="field-hint base-prices-note" id="basePricesNote"></p>
+
                     <div id="pricesContainer"></div>
+
+                </div>
+
+                <!-- أسعار حسب الفترات: جدول أسعار يبدأ من تاريخ معيّن -->
+                <div class="content-card" id="priceScheduleCard">
+
+                    <h3>
+                        <i class="ti ti-calendar-dollar"></i> أسعار حسب الفترات
+                    </h3>
+
+                    <p class="field-hint">
+                        كل جدول يبدأ من تاريخ معيّن ويُطبَّق تلقائياً على كل سجل يقع «تاريخ السجل» فيه في ذلك اليوم أو بعده (حتى الجدول التالي). سعر المكاتب الخارجية = سعر المكاتب الرئيسية + بدل الانتقال (يُضاف تلقائياً للعامة والخاصة والقضائية). السجلات المحفوظة لا تتغير.
+                    </p>
+
+                    <div class="schedule-add">
+                        <label class="input-group">
+                            <span>يبدأ من تاريخ</span>
+                            <input type="date" id="scheduleMonth" lang="en-GB" dir="ltr">
+                        </label>
+                        <button type="button" class="secondary-btn" id="addScheduleBtn"><i class="ti ti-plus"></i> إضافة جدول من هذا التاريخ</button>
+                    </div>
+
+                    <div id="priceScheduleList"></div>
+
+                    <div class="button-row">
+                        <button type="button" class="primary-btn" id="saveScheduleBtn"><i class="ti ti-device-floppy"></i> حفظ أسعار الفترات</button>
+                    </div>
 
                 </div>
 

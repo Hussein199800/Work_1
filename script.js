@@ -1883,14 +1883,146 @@ function getCurrentAgencyPricing() {
     return getPricingForType(
         document.getElementById(
             "agencyType"
-        )?.value || DEFAULT_AGENCY_TYPE
+        )?.value || DEFAULT_AGENCY_TYPE,
+        getFormRecordDay()
     );
 }
 
-/* أسعار نوع وكالة معيّن (تستخدمها الحاسبة أيضاً) */
-function getPricingForType(type) {
+/* =========================================================
+الأسعار حسب الأشهر
+جدول أسعار يبدأ من شهر معيّن (مثلاً من 2026-11: الخاصة 1900).
+كل وكالة جديدة تأخذ أسعار شهر «تاريخ السجل»؛ الشهر الذي ليس له
+جدول يأخذ أحدث جدول قبله، وإلا الأسعار الأساسية.
+الوكالات المحفوظة تحتفظ بأسعارها (appliedPrices) ولا تتغير.
+========================================================= */
+
+const PRICE_SCHEDULE_KEY = "audit_price_schedule";
+
+/*
+    جدول الأسعار الذي زوّدنا به المكتب لسنة 2026 (أسعار المكاتب الرئيسية).
+    «البدائية» = العامة والخاصة، و«المصدقة البدائية» = صورة مصدقة عامة/خاصة،
+    و«حصة الفرع» = المبلغ المطلوب من المندوب.
+    أسعار المندوبين الخارجيين = هذه الأسعار + بدل الانتقال (يُضاف تلقائياً
+    للعامة والخاصة والشرعية فقط)، لذلك لا تُدخل كجدول منفصل.
+    يُضاف مرة واحدة فقط إذا لم يكن للمستخدم جدول محفوظ.
+*/
+function priceRow(primary, primaryRep, legal, legalRep, certPrimary, certPrimaryRep, certLegal, certLegalRep, exec, execRep) {
+    return {
+        general: { agency: primary, representative: primaryRep },
+        special: { agency: primary, representative: primaryRep },
+        legal: { agency: legal, representative: legalRep },
+        certified_general_special: { agency: certPrimary, representative: certPrimaryRep },
+        certified_legal: { agency: certLegal, representative: certLegalRep },
+        executive: { agency: exec, representative: execRep }
+    };
+}
+
+const DEFAULT_PRICE_SCHEDULE = [
+    { from: "2026-03-01", prices: priceRow(1050, 580, 1050, 580, 1050, 580, 1050, 580, 520, 350) },
+    { from: "2026-03-05", prices: priceRow(1070, 600, 720, 250, 990, 550, 640, 200, 520, 350) },
+    { from: "2026-04-01", prices: priceRow(1700, 300, 1350, 125, 1550, 300, 1200, 125, 900, 50) },
+    { from: "2026-05-01", prices: priceRow(1900, 350, 1550, 175, 1550, 300, 1200, 125, 900, 50) },
+    { from: "2026-06-14", prices: priceRow(1900, 350, 1550, 175, 1650, 400, 1300, 225, 900, 50) },
+    { from: "2026-08-03", prices: priceRow(1700, 300, 1350, 125, 1650, 400, 1300, 225, 900, 50) },
+    { from: "2026-09-01", prices: priceRow(1700, 300, 1350, 125, 1550, 300, 1200, 125, 900, 50) }
+];
+
+let priceSchedule = loadData(PRICE_SCHEDULE_KEY, null);
+
+if (!Array.isArray(priceSchedule)) {
+    let stored = null;
+    try { stored = localStorage.getItem(PRICE_SCHEDULE_KEY); } catch (e) {}
+    priceSchedule = JSON.parse(JSON.stringify(DEFAULT_PRICE_SCHEDULE)).map(function (e) {
+        e.id = "default-" + e.from;
+        return e;
+    });
+    /* لا نكتب فوق جدول موجود (حتى لو كان تالفاً) */
+    if (stored === null) {
+        try { saveData(PRICE_SCHEDULE_KEY, priceSchedule); } catch (e) {}
+    }
+}
+
+/* بداية الجدول: يوم كامل YYYY-MM-DD (الجداول القديمة بالشهر تُعامل كأول يوم فيه) */
+function scheduleStart(from) {
+    return /^\d{4}-\d{2}$/.test(from || "") ? from + "-01" : String(from || "");
+}
+
+function getFormRecordDay() {
+    return document.getElementById("recordDate")?.value || todayDay();
+}
+
+/* جدول الأسعار الساري ليوم معيّن: أحدث جدول بدأ في هذا اليوم أو قبله */
+function priceTableForDay(day) {
+    const d = String(day || todayDay()).slice(0, 10);
+    const entry = priceSchedule
+        .filter(function (e) { return e && /^\d{4}-\d{2}(-\d{2})?$/.test(e.from) && scheduleStart(e.from) <= d; })
+        .sort(function (a, b) { return scheduleStart(a.from).localeCompare(scheduleStart(b.from)); })
+        .pop();
+    return entry ? { prices: entry.prices || {}, month: scheduleStart(entry.from) } : { prices: prices, month: null };
+}
+
+/*
+    تغيّر تاريخ السجل إلى شهر بأسعار مختلفة: نعرض إعادة تسعير
+    الوكالات المضافة بأسعار الشهر الجديد (بموافقة المستخدم فقط).
+*/
+function pendingAgenciesNeedingReprice(day) {
+    return pendingAgencies.filter(function (agency) {
+        if (agency.status === "cancelled") return false;
+        const p = getPricingForType(agency.type, day);
+        const applied = agency.appliedPrices || {};
+        return number(applied.agency !== undefined ? applied.agency : agency.basePrice) !== number(p.agency) ||
+            number(applied.representative !== undefined ? applied.representative : agency.representativeBase) !== number(p.representative);
+    });
+}
+
+function repricePendingAgencies(day) {
+    pendingAgencies = pendingAgencies.map(function (agency) {
+        return buildAgency(agencyInputsOf(agency), getPricingForType(agency.type, day), agency.id);
+    });
+    renderPendingAgencies();
+    updatePreview();
+}
+
+document.getElementById("recordDate")?.addEventListener("change", function () {
+
+    const day = this.value;
+
+    if (!day || !pendingAgencies.length) {
+        updatePreview();
+        return;
+    }
+
+    const changed = pendingAgenciesNeedingReprice(day);
+
+    if (!changed.length) {
+        updatePreview();
+        return;
+    }
+
+    const table = priceTableForDay(day);
+
+    appConfirm({
+        title: "أسعار شهر مختلفة",
+        message: "تاريخ السجل الجديد يقع في فترة لها أسعار " + (table.month ? "خاصة (من " + formatDay(table.month) + ")" : "أساسية") +
+            " مختلفة عن أسعار " + changed.length + " وكالة مضافة. هل تريد إعادة تسعير الوكالات المضافة حسب أسعار هذا الشهر؟",
+        confirmText: "إعادة التسعير",
+        cancelText: "إبقاء الأسعار كما هي"
+    }).then(function (ok) {
+        if (ok) {
+            repricePendingAgencies(day);
+            notify("أُعيد تسعير " + pendingAgencies.length + " وكالة حسب أسعار الشهر.", "success");
+        }
+        updatePreview();
+    });
+});
+
+/* أسعار نوع وكالة معيّن في يوم معيّن (تستخدمها الحاسبة أيضاً) */
+function getPricingForType(type, day) {
+
+    const table = priceTableForDay(day);
 
     const globalPrice =
+        (table.prices && table.prices[type]) ||
         prices[type] ||
         DEFAULT_PRICES[type] ||
         {
@@ -1922,6 +2054,7 @@ function getPricingForType(type) {
             number(globalPrice.agency),
         representative:
             number(globalPrice.representative),
+        priceMonth: table.month,
         additions: additions,
         transport: getTransportPricing()
     };
@@ -2305,142 +2438,78 @@ return total;
 قراءة بيانات الوكالة
 ========================================================= */
 
-function getAgencyFromForm() {
+/*
+    مدخلات الوكالة كما هي في النموذج (بدون أي حساب).
+*/
+function readAgencyInputs() {
 
-const status =
-    document.getElementById(
-        "agencyStatus"
-    )?.value ||
-    "active";
+    const val = function (id) {
+        return document.getElementById(id)?.value;
+    };
 
+    return {
+        number: (val("agencyNumber") || "").trim(),
+        type: val("agencyType") || DEFAULT_AGENCY_TYPE,
+        status: val("agencyStatus") || "active",
+        duplicate: !!document.getElementById("agencyDuplicate")?.checked,
+        notes: (val("agencyNotes") || "").trim(),
+        additions: {
+            save: number(val("saveCount")),
+            signature: number(val("signatureCount")),
+            inheritance: number(val("inheritanceCount")),
+            children: number(val("childrenCount")),
+            agents: number(val("agentsCount")),
+            originality: number(val("originalityCount")),
+            transport: number(val("transportCount"))
+        },
+        missing: {
+            pleading: number(val("missingPleading")),
+            ambulance: number(val("missingAmbulance")),
+            aid: number(val("missingAid"))
+        }
+    };
+}
 
-const cancelled =
-    status ===
-    "cancelled";
+/* مدخلات وكالة محفوظة (لإعادة تسعيرها) */
+function agencyInputsOf(agency) {
+    const ms = agency.stamps || agency.missingStamps || {};
+    const ad = agency.additions || {};
+    return {
+        number: String(agency.number),
+        type: agency.type || DEFAULT_AGENCY_TYPE,
+        status: agency.status || "active",
+        duplicate: !!agency.duplicate,
+        notes: agency.notes || "",
+        additions: {
+            save: number(ad.save), signature: number(ad.signature), inheritance: number(ad.inheritance),
+            children: number(ad.children), agents: number(ad.agents), originality: number(ad.originality),
+            transport: number(ad.transport)
+        },
+        missing: { pleading: number(ms.pleading), ambulance: number(ms.ambulance), aid: number(ms.aid) }
+    };
+}
 
+/*
+    حساب الوكالة كاملة من مدخلاتها وأسعار معيّنة (نفس قواعد الحساب
+    السابقة تماماً). تُستخدم للنموذج ولإعادة التسعير حسب الشهر.
+*/
+function buildAgency(inputs, pricing, keepId) {
 
-const isDuplicate =
-    !!document.getElementById(
-        "agencyDuplicate"
-    )?.checked;
+    const status = inputs.status || "active";
+    const cancelled = status === "cancelled";
+    const type = inputs.type || DEFAULT_AGENCY_TYPE;
 
-
-const additions = {
-
-    save:
-        number(
-            document.getElementById(
-                "saveCount"
-            )?.value
-        ),
-
-    signature:
-        number(
-            document.getElementById(
-                "signatureCount"
-            )?.value
-        ),
-
-    inheritance:
-        number(
-            document.getElementById(
-                "inheritanceCount"
-            )?.value
-        ),
-
-    children:
-        number(
-            document.getElementById(
-                "childrenCount"
-            )?.value
-        ),
-
-    agents:
-        number(
-            document.getElementById(
-                "agentsCount"
-            )?.value
-        ),
-
-    originality:
-        number(
-            document.getElementById(
-                "originalityCount"
-            )?.value
-        ),
+    const additions = Object.assign({}, inputs.additions);
 
     /* الوكالة الملغاة، والأنواع التي لا يُضاف لها البدل، لا يُحسب عليها بدل انتقال */
-    transport:
-        cancelled ||
-        !isTransportEligible(
-            document.getElementById("agencyType")?.value || DEFAULT_AGENCY_TYPE
-        )
-            ? 0
-            : number(
-                document.getElementById(
-                    "transportCount"
-                )?.value
-            )
+    additions.transport = cancelled || !isTransportEligible(type) ? 0 : number(additions.transport);
 
-};
+    const missing = inputs.missing;
 
+    const additionResult = calculateAdditions(additions, pricing);
+    const stampResult = calculateStamps(additionResult, missing, cancelled);
 
-const missing = {
-
-    pleading:
-        number(
-            document.getElementById(
-                "missingPleading"
-            )?.value
-        ),
-
-    ambulance:
-        number(
-            document.getElementById(
-                "missingAmbulance"
-            )?.value
-        ),
-
-    aid:
-        number(
-            document.getElementById(
-                "missingAid"
-            )?.value
-        )
-
-};
-
-
-const pricing =
-    getCurrentAgencyPricing();
-
-
-const additionResult =
-    calculateAdditions(
-        additions,
-        pricing
-    );
-
-
-const stampResult =
-    calculateStamps(
-        additionResult,
-        missing,
-        cancelled
-    );
-
-
-const transportCash =
-    additions.transport *
-    number(
-        pricing
-            .transport
-            .cashRemainder
-    );
-
-
-const representativeAmount =
-    calculateRepresentativeAmount(
+    const representativeAmount = calculateRepresentativeAmount(
         pricing.representative,
         additionResult.total,
         stampResult.missingValue,
@@ -2448,130 +2517,42 @@ const representativeAmount =
         cancelled
     );
 
+    const basePrice = cancelled ? 0 : number(pricing.agency);
 
-const type =
-    document.getElementById(
-        "agencyType"
-    )?.value ||
-    DEFAULT_AGENCY_TYPE;
+    return {
+        id: keepId || generateId(),
+        number: inputs.number || String(getNextAgencyNumber()),
+        type: type,
+        typeName: AGENCY_NAMES[type],
+        status: status,
+        duplicate: !!inputs.duplicate,
+        transportInAdditions: true,
+        basePrice: basePrice,
+        representativeBase: cancelled ? 0 : number(pricing.representative),
+        additions: additions,
+        additionValues: additionResult.values,
+        additionsTotal: additionResult.total,
+        pleadingAdditions: additionResult.pleadingStamps,
+        stamps: missing,
+        missingStampsValue: stampResult.missingValue,
+        pleadingRequired: stampResult.requiredPleading,
+        representativeAmount: representativeAmount,
+        notes: inputs.notes || "",
+        transportSettings: JSON.parse(JSON.stringify(pricing.transport)),
+        appliedPrices: {
+            agency: basePrice,
+            representative: pricing.representative,
+            priceMonth: pricing.priceMonth || null,
+            additions: JSON.parse(JSON.stringify(pricing.additions)),
+            transport: JSON.parse(JSON.stringify(pricing.transport)),
+            stamps: JSON.parse(JSON.stringify(stampPrices))
+        }
+    };
+}
 
-
-const basePrice =
-    cancelled
-        ? 0
-        : number(
-            pricing.agency
-        );
-
-
-return {
-
-    id:
-        generateId(),
-
-    number:
-        document.getElementById(
-            "agencyNumber"
-        )?.value.trim() ||
-        String(
-            getNextAgencyNumber()
-        ),
-
-    type:
-        type,
-
-    typeName:
-        AGENCY_NAMES[type],
-
-    status:
-        status,
-
-    duplicate:
-        isDuplicate,
-
-    transportInAdditions:
-        true,
-
-    basePrice:
-        basePrice,
-
-    representativeBase:
-        cancelled
-            ? 0
-            : number(
-                pricing.representative
-            ),
-
-    additions:
-        additions,
-
-    additionValues:
-        additionResult.values,
-
-    additionsTotal:
-        additionResult.total,
-
-    pleadingAdditions:
-        additionResult.pleadingStamps,
-
-    stamps:
-        missing,
-
-    missingStampsValue:
-        stampResult.missingValue,
-
-    pleadingRequired:
-        stampResult.requiredPleading,
-
-    representativeAmount:
-        representativeAmount,
-
-    notes:
-        document.getElementById(
-            "agencyNotes"
-        )?.value.trim() ||
-        "",
-
-    transportSettings:
-        JSON.parse(
-            JSON.stringify(
-                pricing.transport
-            )
-        ),
-
-    appliedPrices: {
-
-        agency:
-            basePrice,
-
-        representative:
-            pricing.representative,
-
-        additions:
-            JSON.parse(
-                JSON.stringify(
-                    pricing.additions
-                )
-            ),
-
-        transport:
-            JSON.parse(
-                JSON.stringify(
-                    pricing.transport
-                )
-            ),
-
-        stamps:
-            JSON.parse(
-                JSON.stringify(
-                    stampPrices
-                )
-            )
-
-    }
-
-};
-
+function getAgencyFromForm() {
+    const inputs = readAgencyInputs();
+    return buildAgency(inputs, getPricingForType(inputs.type, getFormRecordDay()));
 }
 
 /* =========================================================
@@ -2635,6 +2616,40 @@ function setAgencyTransportCount(agency, newCount) {
     agency.representativeAmount = number(agency.representativeAmount) + cashDiff;
     agency.transportInAdditions = true;
 }
+
+/*
+    تغيير نوع وكالة مضافة من سطرها: تُعاد حسابها بأسعار النوع الجديد
+    (حسب شهر تاريخ السجل) مع بقاء رقمها وإضافاتها وطوابعها وملاحظاتها.
+*/
+function changePendingType(index, type) {
+
+    const agency = pendingAgencies[index];
+
+    if (!agency || !AGENCY_NAMES[type] || agency.type === type) {
+        return;
+    }
+
+    const inputs = agencyInputsOf(agency);
+    const wasEligible = isTransportEligible(agency.type);
+
+    inputs.type = type;
+
+    /* صار النوع مشمولاً ببدل الانتقال والمندوب خارجي: بدل واحد كبقية الوكالات */
+    if (!wasEligible && isTransportEligible(type) && isExternalRepresentative() && inputs.status !== "cancelled") {
+        inputs.additions.transport = 1;
+    }
+
+    const updated = buildAgency(inputs, getPricingForType(type, getFormRecordDay()), agency.id);
+
+    pendingAgencies[index] = updated;
+    lastAddedAgencyId = updated.id;
+    renderPendingAgencies();
+
+    notify("<strong>تغيّر نوع الوكالة رقم " + escapeHTML(updated.number) + "</strong><span>" + AGENCY_NAMES[type] +
+        " — السعر " + money(updated.basePrice) + "</span>", "success", 3500, true);
+}
+
+window.changePendingType = changePendingType;
 
 function changePendingTransport(index, value) {
     const agency = pendingAgencies[index];
@@ -2802,17 +2817,92 @@ function updateRecordDock() {
     count.textContent = pendingAgencies.length;
     document.getElementById("dockGrand").textContent = money(grand);
     document.getElementById("dockRep").textContent = money(rep);
+
+    /* آخر وكالة أُضيفت: رقمها ونوعها بلونه */
+    const lastBox = document.getElementById("dockLast");
+
+    if (lastBox) {
+        const last =
+            pendingAgencies.find(function (a) { return a.id === lastAddedAgencyId; }) ||
+            pendingAgencies[pendingAgencies.length - 1];
+
+        lastBox.classList.toggle("is-empty", !last);
+        lastBox.innerHTML = last
+            ? '<dt>آخر وكالة</dt><dd><span class="dock-last-no" style="--c:' + (AGENCY_TYPE_COLORS[last.type] || "#888") + '">' + escapeHTML(last.number) + "</span>" +
+              escapeHTML(AGENCY_NAMES[last.type] || "") + (last.status !== "active" ? " · " + getAgencyStatusName(last.status) : "") + "</dd>"
+            : "<dt>آخر وكالة</dt><dd>—</dd>";
+    }
 }
 
 /*
-    Ctrl + Enter يضيف الوكالة من أي حقل في صفحة الإنشاء.
+    «وكالة مماثلة»: نفس نوع وحالة وإضافات وطوابع آخر وكالة أُضيفت،
+    بالرقم التالي، بضغطة واحدة. الحساب يتم بنفس طريقة الإضافة العادية.
+*/
+function addSimilarAgency() {
+
+    const last =
+        pendingAgencies.find(function (a) { return a.id === lastAddedAgencyId; }) ||
+        pendingAgencies[pendingAgencies.length - 1];
+
+    if (!last) {
+        notify("أضف وكالة أولاً، ثم استخدم «وكالة مماثلة» لتكرارها برقم جديد.", "warning");
+        return;
+    }
+
+    const set = function (id, value) {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    };
+
+    const ad = last.additions || {};
+    const ms = last.stamps || last.missingStamps || {};
+
+    set("agencyNumber", getNextAgencyNumber());
+    set("agencyType", last.type);
+    set("agencyStatus", last.status || "active");
+    set("saveCount", number(ad.save));
+    set("signatureCount", number(ad.signature));
+    set("inheritanceCount", number(ad.inheritance));
+    set("childrenCount", number(ad.children));
+    set("agentsCount", number(ad.agents));
+    set("originalityCount", number(ad.originality));
+    set("missingPleading", number(ms.pleading));
+    set("missingAmbulance", number(ms.ambulance));
+    set("missingAid", number(ms.aid));
+    set("agencyNotes", "");
+
+    const dup = document.getElementById("agencyDuplicate");
+    if (dup) dup.checked = false;
+
+    const transport = document.getElementById("transportCount");
+    if (transport) {
+        transport.value = number(ad.transport);
+        if (number(ad.transport) === 0) transport.dataset.userZero = "1"; else delete transport.dataset.userZero;
+    }
+
+    syncTransportField();
+    updatePreview();
+
+    document.getElementById("addAgencyBtn")?.click();
+}
+
+window.addSimilarAgency = addSimilarAgency;
+
+/*
+    Ctrl + S (أو Ctrl + Enter) يضيف الوكالة من أي حقل في صفحة الإنشاء.
+    في هذه الصفحة يُمنع حفظ المتصفح للصفحة (Ctrl + S) حتى لا يتعارض،
+    وفي بقية الصفحات يبقى سلوك المتصفح كما هو.
     لا نستخدم Enter وحده حتى لا تُضاف وكالة إضافية بضغطة غير مقصودة.
 */
 document.addEventListener("keydown", function (event) {
 
+    const isAddShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.shiftKey && !event.altKey &&
+        (event.key === "Enter" || event.code === "KeyS" || event.key === "s" || event.key === "S" || event.key === "س");
+
     if (
-        event.key !== "Enter" ||
-        !(event.ctrlKey || event.metaKey) ||
+        !isAddShortcut ||
         document.querySelector("dialog[open]") ||
         !document.getElementById("newRecordSection")?.classList.contains("active-section")
     ) {
@@ -3001,14 +3091,62 @@ addAgencyBtn.addEventListener(
         });
 
         if (sameNumber && !agency.duplicate) {
-            appConfirm({
-                title: "رقم الوكالة مضاف مسبقاً",
-                message: "الوكالة رقم " + agency.number + " موجودة في هذا السجل. هل تريد إضافتها مرة أخرى؟",
-                confirmText: "إضافتها مرة أخرى",
-                cancelText: "إلغاء",
-                danger: true
-            }).then(function (ok) {
-                if (ok) {
+
+            const n = parseInt(agency.number, 10);
+            const numeric = String(n) === String(agency.number).trim();
+            const following = numeric ? pendingAgencies.filter(function (item) {
+                const v = parseInt(item.number, 10);
+                return Number.isFinite(v) && v >= n;
+            }).length : 0;
+
+            const choices = [];
+
+            /*
+                وكالة منسية: تُدرج بهذا الرقم، وكل وكالة رقمها مساوٍ له أو
+                أكبر يزداد رقمها 1 (بياناتها كما هي)، فيصبح التسلسل مطابقاً للدفتر.
+            */
+            if (numeric) {
+                choices.push({ value: "insert", label: "إدراجها وإزاحة " + following + " وكالة +1", kind: "primary" });
+            }
+            choices.push({ value: "duplicate", label: "إضافتها كمكررة", kind: "secondary" });
+
+            appChoose({
+                title: "رقم الوكالة " + agency.number + " مستخدم في هذا السجل",
+                message: numeric
+                    ? "إن كانت هذه وكالة منسية: «إدراجها» يضعها بالرقم " + agency.number + " ويزيد أرقام الوكالات من " + agency.number + " فما بعد بواحد (" + following + " وكالة)، مع بقاء بيانات كل وكالة كما هي. أو أضفها كمكررة بنفس الرقم."
+                    : "الوكالة رقم " + agency.number + " موجودة في هذا السجل. هل تريد إضافتها كمكررة؟",
+                choices: choices
+            }).then(function (choice) {
+
+                if (choice === "insert") {
+
+                    pendingAgencies.forEach(function (item) {
+                        const v = parseInt(item.number, 10);
+                        if (Number.isFinite(v) && String(v) === String(item.number).trim() && v >= n) {
+                            item.number = String(v + 1);
+                        }
+                    });
+
+                    /* إدراجها في مكانها حسب الترتيب */
+                    const at = pendingAgencies.findIndex(function (item) {
+                        const v = parseInt(item.number, 10);
+                        return Number.isFinite(v) && v > n;
+                    });
+
+                    if (at === -1) {
+                        pendingAgencies.push(agency);
+                    } else {
+                        pendingAgencies.splice(at, 0, agency);
+                    }
+
+                    lastAddedAgencyId = agency.id;
+                    renderPendingAgencies();
+                    clearAgencyForm();
+                    announceAgencyAdded(agency);
+                    notify("<strong>أُدرجت الوكالة رقم " + escapeHTML(agency.number) + "</strong><span>وزادت أرقام " + following +
+                        " وكالة بعدها بواحد. راجع التسلسل ثم احفظ السجل.</span>", "success", 6000, true);
+
+                } else if (choice === "duplicate") {
                     agency.duplicate = true;
                     commit();
                 }
@@ -3237,6 +3375,15 @@ container.innerHTML =
 
 
                         <div class="button-row">
+
+                            <label class="type-select" title="تغيير نوع الوكالة من سطرها">
+                                النوع
+                                <select onchange="changePendingType(${index}, this.value)" aria-label="نوع الوكالة رقم ${escapeHTML(agency.number)}">
+                                    ${Object.keys(AGENCY_NAMES).map(function (t) {
+                                        return '<option value="' + t + '"' + (t === agency.type ? " selected" : "") + ">" + AGENCY_NAMES[t] + "</option>";
+                                    }).join("")}
+                                </select>
+                            </label>
 
                             ${transportControl}
 
@@ -4111,87 +4258,117 @@ recordForm.addEventListener(
         };
 
 
-        /* نسخة من السجلات قبل التغيير: إن فشل الحفظ نرجع إليها */
-        const recordsBefore = records.slice();
-
-        const index =
-            editingId
-                ? records.findIndex(
-                    function (item) {
-
-                        return (
-                            item.id ===
-                            editingId
-                        );
-
-                    }
-                )
-                : -1;
-
         /*
-            سجل قيد التعديل لم يعد موجوداً (مسودة قديمة، أو استعادة نسخة
-            احتياطية): يُحفظ كسجل جديد بدل أن يضيع بصمت.
+            منع تكرار السجلات: رقم سجل موجود مسبقاً (لسجل آخر) يحتاج تأكيداً،
+            حتى لا يُحفظ نفس السجل مرتين دون انتباه.
         */
-        if (index !== -1) {
+        const sameRecord = records.find(function (r) {
+            return r.id !== record.id && String(r.recordNumber).trim() === recordNumber;
+        });
 
-            records[index] =
-                record;
+        const proceed = function () {
 
-        } else {
+            /* نسخة من السجلات قبل التغيير: إن فشل الحفظ نرجع إليها */
+            const recordsBefore = records.slice();
 
-            records.push(
-                record
-            );
+            const index =
+                editingId
+                    ? records.findIndex(
+                        function (item) {
 
+                            return (
+                                item.id ===
+                                editingId
+                            );
+
+                        }
+                    )
+                    : -1;
+
+            /*
+                سجل قيد التعديل لم يعد موجوداً (مسودة قديمة، أو استعادة نسخة
+                احتياطية): يُحفظ كسجل جديد بدل أن يضيع بصمت.
+            */
+            if (index !== -1) {
+
+                records[index] =
+                    record;
+
+            } else {
+
+                records.push(
+                    record
+                );
+
+            }
+
+            /* زر الحفظ يتوقف حتى ينتهي الحفظ (لا حفظ مزدوج) */
+            const submitButtons = recordForm.querySelectorAll('button[type="submit"]');
+            submitButtons.forEach(function (b) { b.disabled = true; });
+
+            persistRecords().then(function () {
+
+                /* الحفظ تمّ: أي خطأ في تحديث العرض بعده لا يُلغي الحفظ */
+                [resetRecordForm, renderRecords, updateDashboard, renderReports].forEach(function (step) {
+                    try {
+                        step();
+                    } catch (error) {
+                        console.error("After-save step failed:", step.name, error);
+                    }
+                });
+
+                notify(
+                    "<strong>" + (index !== -1 ? "تم تعديل السجل بنجاح" : "تم حفظ السجل بنجاح") + "</strong>" +
+                    "<span>سجل " + escapeHTML(record.recordNumber) + " — " + record.agencies.length + " وكالة</span>",
+                    "success",
+                    4000,
+                    true
+                );
+
+                switchSection(
+                    "recordsSection"
+                );
+
+            }).catch(function (error) {
+
+                records = recordsBefore;
+
+                console.error("Save record failed:", error);
+
+                notify(
+                    "<strong>لم يُحفظ السجل</strong><span>" +
+                    (isQuotaError(error)
+                        ? "مساحة التخزين في المتصفح ممتلئة. حمّل نسخة احتياطية من قسم المستخدمين ثم أخبر المسؤول."
+                        : "حدث خطأ أثناء الحفظ: " + escapeHTML(error && error.message || error)) +
+                    " بيانات السجل ما زالت في النموذج ولم تُمسح.</span>",
+                    "error",
+                    12000,
+                    true
+                );
+
+            }).then(function () {
+                submitButtons.forEach(function (b) { b.disabled = false; });
+            });
+        };
+
+        if (sameRecord) {
+            appChoose({
+                title: "رقم السجل " + recordNumber + " موجود مسبقاً",
+                message: "يوجد سجل محفوظ بنفس الرقم (" + (sameRecord.officeName || "") + " — " + (sameRecord.representativeName || "") + " — " +
+                    formatDay(getRecordDay(sameRecord)) + " — " + (sameRecord.agencies || []).length + " وكالة). هل هذا سجل مختلف فعلاً؟",
+                choices: [
+                    { value: "save", label: "نعم، احفظه كسجل منفصل", kind: "primary" },
+                    { value: "open", label: "افتح السجل الموجود", kind: "secondary" }
+                ]
+            }).then(function (choice) {
+                if (choice === "save") proceed();
+                if (choice === "open") showFinalRecordReport(sameRecord.id, "summary");
+            });
+            return;
         }
 
-        /* زر الحفظ يتوقف حتى ينتهي الحفظ (لا حفظ مزدوج) */
-        const submitButtons = recordForm.querySelectorAll('button[type="submit"]');
-        submitButtons.forEach(function (b) { b.disabled = true; });
+        proceed();
 
-        persistRecords().then(function () {
-
-            /* الحفظ تمّ: أي خطأ في تحديث العرض بعده لا يُلغي الحفظ */
-            [resetRecordForm, renderRecords, updateDashboard, renderReports].forEach(function (step) {
-                try {
-                    step();
-                } catch (error) {
-                    console.error("After-save step failed:", step.name, error);
-                }
-            });
-
-            notify(
-                "<strong>" + (index !== -1 ? "تم تعديل السجل بنجاح" : "تم حفظ السجل بنجاح") + "</strong>" +
-                "<span>سجل " + escapeHTML(record.recordNumber) + " — " + record.agencies.length + " وكالة</span>",
-                "success",
-                4000,
-                true
-            );
-
-            switchSection(
-                "recordsSection"
-            );
-
-        }).catch(function (error) {
-
-            records = recordsBefore;
-
-            console.error("Save record failed:", error);
-
-            notify(
-                "<strong>لم يُحفظ السجل</strong><span>" +
-                (isQuotaError(error)
-                    ? "مساحة التخزين في المتصفح ممتلئة. حمّل نسخة احتياطية من قسم المستخدمين ثم أخبر المسؤول."
-                    : "حدث خطأ أثناء الحفظ: " + escapeHTML(error && error.message || error)) +
-                " بيانات السجل ما زالت في النموذج ولم تُمسح.</span>",
-                "error",
-                12000,
-                true
-            );
-
-        }).then(function () {
-            submitButtons.forEach(function (b) { b.disabled = false; });
-        });
 
     }
 );
@@ -4275,11 +4452,165 @@ updatePreview();
 عرض السجلات
 ========================================================= */
 
+/* =========================================================
+فلترة وترتيب السجلات
+للعرض فقط: نرتّب نسخة من القائمة، وترتيب السجلات المحفوظة لا يتغير.
+آخر اختيار يُحفظ كتفضيل واجهة (audit_ui_records_view) وليس بيانات.
+========================================================= */
+
+const RECORDS_VIEW_KEY = "audit_ui_records_view";
+const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", office: "all", sort: "date-desc" };
+
+function loadRecordsView() {
+    try {
+        return Object.assign({}, RECORDS_VIEW_DEFAULT, JSON.parse(localStorage.getItem(RECORDS_VIEW_KEY) || "{}"));
+    } catch (e) {
+        return Object.assign({}, RECORDS_VIEW_DEFAULT);
+    }
+}
+
+let recordsView = loadRecordsView();
+
+function saveRecordsView() {
+    try { localStorage.setItem(RECORDS_VIEW_KEY, JSON.stringify(recordsView)); } catch (e) {}
+}
+
+/* حدود الفترة [من، إلى] بصيغة YYYY-MM-DD (فارغ = بلا حد) */
+function recordsPeriodRange(view) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    switch (view.period) {
+        case "this-month": return [toDayString(new Date(y, m, 1)), toDayString(new Date(y, m + 1, 0))];
+        case "last-month": return [toDayString(new Date(y, m - 1, 1)), toDayString(new Date(y, m, 0))];
+        case "3-months": return [toDayString(new Date(y, m - 2, 1)), toDayString(new Date(y, m + 1, 0))];
+        case "this-year": return [y + "-01-01", y + "-12-31"];
+        case "custom": return [view.from || "", view.to || ""];
+        default: return ["", ""];
+    }
+}
+
+function compareRecordNumbers(a, b) {
+    return String(a.recordNumber || "").localeCompare(String(b.recordNumber || ""), "en", { numeric: true });
+}
+
+function getVisibleRecords() {
+
+    const view = recordsView;
+    const q = normalizeDigits(document.getElementById("recordSearch")?.value || "").trim().toLowerCase();
+    const range = recordsPeriodRange(view);
+
+    const list = records.filter(function (record) {
+        const day = getRecordDay(record);
+        if (range[0] && (!day || day < range[0])) return false;
+        if (range[1] && (!day || day > range[1])) return false;
+        if (view.rep !== "all" && (record.representativeType === "external" ? "external" : "internal") !== view.rep) return false;
+        if (view.office !== "all" && String(record.officeName || "").trim() !== view.office) return false;
+        if (q) {
+            const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, formatDay(getRecordDay(record))].join(" ")).toLowerCase();
+            if (hay.indexOf(q) === -1) return false;
+        }
+        return true;
+    });
+
+    const byDay = function (a, b) { return getRecordDay(a).localeCompare(getRecordDay(b)) || compareRecordNumbers(a, b); };
+    const sorters = {
+        "date-desc": function (a, b) { return byDay(b, a); },
+        "date-asc": byDay,
+        "number-desc": function (a, b) { return compareRecordNumbers(b, a); },
+        "number-asc": compareRecordNumbers,
+        "total-desc": function (a, b) { return getRecordGrandTotal(b) - getRecordGrandTotal(a); },
+        "total-asc": function (a, b) { return getRecordGrandTotal(a) - getRecordGrandTotal(b); },
+        "agencies-desc": function (a, b) { return (b.agencies || []).length - (a.agencies || []).length; },
+        "office-asc": function (a, b) { return String(a.officeName || "").localeCompare(String(b.officeName || ""), "ar") || byDay(b, a); }
+    };
+
+    if (sorters[view.sort]) {
+        list.sort(sorters[view.sort]);
+    }
+
+    return list;
+}
+
+/* تعبئة أدوات الفلترة من الاختيار المحفوظ وأسماء المكاتب الحالية */
+function syncRecordsFilters() {
+
+    const office = document.getElementById("rfOffice");
+    if (office) {
+        const names = Array.from(new Set(records.map(function (r) { return String(r.officeName || "").trim(); }).filter(Boolean)))
+            .sort(function (a, b) { return a.localeCompare(b, "ar"); });
+        if (recordsView.office !== "all" && names.indexOf(recordsView.office) === -1) {
+            names.unshift(recordsView.office);
+        }
+        office.innerHTML = '<option value="all">كل المكاتب</option>' + names.map(function (n) {
+            return '<option value="' + escapeHTML(n) + '">' + escapeHTML(n) + "</option>";
+        }).join("");
+    }
+
+    const set = function (id, value) {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    };
+    set("rfPeriod", recordsView.period);
+    set("rfFrom", recordsView.from);
+    set("rfTo", recordsView.to);
+    set("rfRep", recordsView.rep);
+    set("rfOffice", recordsView.office);
+    set("rfSort", recordsView.sort);
+
+    document.querySelectorAll("#recordsFilters .rf-custom").forEach(function (el) {
+        el.hidden = recordsView.period !== "custom";
+    });
+}
+
+document.getElementById("recordsFilters")?.addEventListener("change", function (event) {
+    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfOffice: "office", rfSort: "sort" };
+    const key = map[event.target.id];
+    if (!key) return;
+    recordsView[key] = event.target.value;
+    saveRecordsView();
+    renderRecords();
+});
+
+function resetRecordsView() {
+    recordsView = Object.assign({}, RECORDS_VIEW_DEFAULT);
+    saveRecordsView();
+    const search = document.getElementById("recordSearch");
+    if (search) search.value = "";
+    renderRecords();
+}
+
+document.getElementById("rfReset")?.addEventListener("click", resetRecordsView);
+document.getElementById("recordsTableBody")?.addEventListener("click", function (event) {
+    if (event.target.closest("[data-rf-reset]")) resetRecordsView();
+});
+
 function renderRecords() {
 
     const tbody = document.getElementById("recordsTableBody");
 
     if (!tbody) {
+        return;
+    }
+
+    syncRecordsFilters();
+
+    const countEl = document.getElementById("rfCount");
+    const visible = getVisibleRecords();
+    const filtered = visible.length !== records.length;
+
+    if (countEl) {
+        countEl.innerHTML = records.length
+            ? (filtered ? "عرض <b>" + visible.length + "</b> من " + records.length + " سجل" : "<b>" + records.length + "</b> سجل") +
+              (visible.length ? " — الإجمالي " + money(visible.reduce(function (s, r) { return s + getRecordGrandTotal(r); }, 0)) : "")
+            : "";
+    }
+    document.getElementById("rfReset")?.toggleAttribute("hidden", !filtered && recordsView.sort === RECORDS_VIEW_DEFAULT.sort);
+
+    if (records.length && !visible.length) {
+        tbody.innerHTML =
+            '<tr><td colspan="9"><div class="empty-state"><p>لا توجد سجلات تطابق البحث أو الفلترة الحالية.</p>' +
+            '<button type="button" class="secondary-btn" data-rf-reset>عرض كل السجلات</button></div></td></tr>';
         return;
     }
 
@@ -4293,7 +4624,7 @@ function renderRecords() {
     const canEdit = currentUser && currentUser.role !== "viewer";
     const canDelete = currentUser && currentUser.role === "manager";
 
-    tbody.innerHTML = records.map(function (record) {
+    tbody.innerHTML = visible.map(function (record) {
 
         const stats = getRecordFinalStats(record);
         const total = (record.agencies || []).length || 1;
@@ -4505,6 +4836,38 @@ function openGlobalSearch() {
 }
 
 window.openGlobalSearch = openGlobalSearch;
+
+/* =========================================================
+الوضع النهاري / الليلي
+الاختيار يُحفظ في audit_ui_theme (تفضيل عرض، ليس بيانات) ويُطبَّق
+قبل رسم الصفحة من index.html حتى لا يومض.
+========================================================= */
+
+function currentTheme() {
+    return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+
+function applyThemeChrome() {
+    const dark = currentTheme() === "dark";
+    document.querySelectorAll(".theme-label").forEach(function (el) {
+        el.textContent = dark ? "الوضع النهاري" : "الوضع الليلي";
+    });
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#16121f" : "#efebe3");
+}
+
+function toggleTheme() {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    const root = document.documentElement;
+    root.classList.add("theme-switching");
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("audit_ui_theme", next); } catch (e) {}
+    applyThemeChrome();
+    setTimeout(function () { root.classList.remove("theme-switching"); }, 400);
+}
+
+window.toggleTheme = toggleTheme;
+
+onReady(applyThemeChrome);
 
 /* Ctrl + K (أو ⌘ + K) يفتح البحث من أي مكان */
 document.addEventListener("keydown", function (event) {
@@ -5897,6 +6260,72 @@ onReady(function () {
         notify(flash.message, flash.variant, 4500);
     }
 });
+
+/*
+    نافذة اختيار بين عدة أفعال. تُرجع Promise بقيمة الخيار، أو null عند الإلغاء.
+    options: { title, message, choices: [{ value, label, kind: primary|secondary|danger }] }
+*/
+function appChoose(options) {
+
+    options = options || {};
+
+    return new Promise(function (resolve) {
+
+        const dialog = document.createElement("dialog");
+        dialog.className = "app-dialog no-print";
+        dialog.setAttribute("aria-labelledby", "appChooseTitle");
+
+        dialog.innerHTML =
+            '<div class="app-dialog-card">' +
+                '<div class="app-dialog-icon" aria-hidden="true"><i class="ti ti-arrows-sort"></i></div>' +
+                '<h3 id="appChooseTitle"></h3>' +
+                '<p class="app-dialog-message"></p>' +
+                '<div class="app-dialog-actions app-choose-actions"></div>' +
+            "</div>";
+
+        dialog.querySelector("h3").textContent = options.title || "اختر";
+        dialog.querySelector(".app-dialog-message").textContent = options.message || "";
+
+        let done = false;
+
+        const finish = function (value) {
+            if (done) return;
+            done = true;
+            try { if (dialog.open) dialog.close(); } catch (e) {}
+            dialog.remove();
+            resolve(value);
+        };
+
+        const actions = dialog.querySelector(".app-choose-actions");
+
+        (options.choices || []).concat([{ value: null, label: "إلغاء", kind: "secondary" }]).forEach(function (choice) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = (choice.kind === "danger" ? "danger-btn" : choice.kind === "primary" ? "primary-btn" : "secondary-btn");
+            b.textContent = choice.label;
+            b.addEventListener("click", function () { finish(choice.value); });
+            actions.appendChild(b);
+        });
+
+        dialog.addEventListener("cancel", function (event) { event.preventDefault(); finish(null); });
+        dialog.addEventListener("close", function () { finish(null); });
+        dialog.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") { event.preventDefault(); finish(null); }
+        });
+        dialog.addEventListener("click", function (event) {
+            if (event.target === dialog) finish(null);
+        });
+
+        document.body.appendChild(dialog);
+
+        if (typeof dialog.showModal === "function") {
+            dialog.showModal();
+            actions.querySelector("button")?.focus();
+        } else {
+            finish(null);
+        }
+    });
+}
 
 /*
     نافذة تأكيد بتصميم النظام. تُرجع Promise بقيمة true عند التأكيد.
@@ -8137,6 +8566,11 @@ function renderGuide() {
         '<ul class="guide-list">' +
             "<li><b>عرض نوع واحد:</b> في التقرير المختصر أو المفصل اضغط على نوع الوكالة لعرض وكالاته فقط، ومنها زر «تعديل» لكل وكالة.</li>" +
             "<li><b>بعد تعديل وكالة:</b> اضغط «إضافة الوكالة» ثم «حفظ السجل» حتى يُحفظ التعديل.</li>" +
+            "<li><b>إضافة سريعة:</b> <b>Ctrl + S</b> يضيف الوكالة من أي حقل في صفحة إنشاء السجل، و«وكالة مماثلة للأخيرة» يكرر آخر وكالة (نوعها وحالتها وإضافاتها وطوابعها) بالرقم التالي. رقم ونوع آخر وكالة يظهران في الشريط السفلي.</li>" +
+            "<li><b>وكالة منسية:</b> اكتب رقمها الصحيح (مثلاً 116) ثم «إضافة الوكالة»، واختر «إدراجها وإزاحة الأرقام»: تأخذ رقمها، وكل وكالة بعدها يزداد رقمها 1 مع بقاء بياناتها.</li>" +
+            "<li><b>تغيير النوع:</b> من قائمة «النوع» في سطر الوكالة المضافة؛ تُعاد حسابها بسعر النوع الجديد ويبقى رقمها.</li>" +
+            "<li><b>أسعار حسب الفترات:</b> من قسم الأسعار ← «أسعار حسب الفترات». كل جدول يبدأ من تاريخ (يوم) محدد، وكل وكالة جديدة تأخذ أسعار فترة «تاريخ السجل»، والسجلات المحفوظة لا تتغير.</li>" +
+            "<li><b>الوضع الليلي:</b> زر «الوضع الليلي» في القائمة الجانبية (أو أيقونة القمر على الهاتف)، ويُحفظ اختيارك.</li>" +
             "<li><b>الحفظ التلقائي:</b> السجل غير المحفوظ يُستعاد تلقائياً إذا أُغلقت الصفحة أو انقطعت الكهرباء.</li>" +
             "<li><b>الحاسبة:</b> لحساب حصة أعضاء مجلس الفرع من بدل الانتقال لسجلات ومدى وكالات محددة، ولحساب وكالة دون إنشاء سجل، ولمطابقة ما سلّمه المندوب. كل ذلك منفصل ولا يغيّر أي رقم في السجلات.</li>" +
             "<li><b>حفظ PDF:</b> في نافذة الطباعة اختر «حفظ بتنسيق PDF» وفعّل «رسومات الخلفية» لتظهر الألوان.</li>" +
@@ -9259,11 +9693,163 @@ container.innerHTML =
 
 renderAdditionPrices();
 
+renderPriceSchedule();
+
 renderStampPrices();
 
 renderTransportPrices();
 
 }
+
+/* =========================================================
+بطاقة «أسعار حسب الفترات» في صفحة الأسعار
+========================================================= */
+
+/* نسخة عمل غير محفوظة حتى يُضغط «حفظ أسعار الفترات» */
+let scheduleDraft = null;
+
+function scheduleWorkingCopy() {
+    if (!scheduleDraft) {
+        scheduleDraft = JSON.parse(JSON.stringify(priceSchedule));
+    }
+    return scheduleDraft;
+}
+
+/* تاريخ بداية الجدول للعرض: 5 آذار 2026 */
+function monthLabel(from) {
+    const p = scheduleStart(from).split("-").map(Number);
+    try {
+        return new Date(p[0], p[1] - 1, p[2] || 1).toLocaleDateString(NUMBER_LOCALE, { day: "numeric", month: "long", year: "numeric" });
+    } catch (e) {
+        return from;
+    }
+}
+
+function renderPriceSchedule() {
+
+    const box = document.getElementById("priceScheduleList");
+
+    if (!box) {
+        return;
+    }
+
+    const list = scheduleWorkingCopy().slice().sort(function (a, b) { return scheduleStart(a.from).localeCompare(scheduleStart(b.from)); });
+
+    /* تنبيه في بطاقة الأسعار الأساسية: متى تُستخدم */
+    const note = document.getElementById("basePricesNote");
+    if (note) {
+        const saved = priceSchedule.slice().sort(function (a, b) { return scheduleStart(a.from).localeCompare(scheduleStart(b.from)); });
+        const activeNow = priceTableForDay(todayDay()).month;
+        note.innerHTML = saved.length
+            ? '<i class="ti ti-info-circle" aria-hidden="true"></i><span>هذه الأسعار تُستخدم فقط للسجلات قبل ' + escapeHTML(monthLabel(saved[0].from)) +
+              ". " + (activeNow ? "الأسعار السارية الآن هي جدول <b>" + escapeHTML(monthLabel(activeNow)) + "</b> في «أسعار حسب الفترات» أدناه؛ لتغيير الأسعار الحالية أضف جدولاً جديداً بتاريخ بدايته." : "") + "</span>"
+            : "";
+    }
+
+    if (!list.length) {
+        box.innerHTML = '<p class="empty-hint">لا توجد جداول أسعار خاصة بأشهر. كل السجلات تستخدم الأسعار الأساسية.</p>';
+        return;
+    }
+
+    const today = todayDay();
+    const active = priceTableForDay(today).month;
+
+    box.innerHTML = list.map(function (entry) {
+        return '<div class="schedule-entry' + (scheduleStart(entry.from) === active ? " is-current" : "") + '" data-from="' + entry.from + '">' +
+            '<div class="schedule-head"><strong><i class="ti ti-calendar-event" aria-hidden="true"></i> من ' + escapeHTML(monthLabel(entry.from)) + "</strong>" +
+            (scheduleStart(entry.from) === active ? '<span class="badge badge-success">السارية الآن</span>' : scheduleStart(entry.from) > today ? '<span class="badge badge-warning">قادمة</span>' : "") +
+            '<button type="button" class="act-btn act-danger" data-remove-schedule="' + entry.from + '" aria-label="حذف جدول ' + entry.from + '"><i class="ti ti-trash" aria-hidden="true"></i> حذف</button></div>' +
+            '<div class="table-wrapper"><table class="schedule-table"><thead><tr><th>نوع الوكالة</th><th class="num">سعر الوكالة</th><th class="num">المطلوب من المندوب</th></tr></thead><tbody>' +
+            Object.keys(AGENCY_NAMES).map(function (type) {
+                const p = (entry.prices && entry.prices[type]) || prices[type] || { agency: 0, representative: 0 };
+                return "<tr><td>" + agencyTypeDot(type) + AGENCY_NAMES[type] + "</td>" +
+                    '<td class="num"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" data-sch-type="' + type + '" data-sch-field="agency" value="' + number(p.agency) + '" aria-label="سعر ' + AGENCY_NAMES[type] + '"></td>' +
+                    '<td class="num"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" data-sch-type="' + type + '" data-sch-field="representative" value="' + number(p.representative) + '" aria-label="المطلوب من المندوب ' + AGENCY_NAMES[type] + '"></td></tr>';
+            }).join("") +
+            "</tbody></table></div></div>";
+    }).join("");
+}
+
+/* قيم الحقول تُنقل إلى نسخة العمل عند الكتابة */
+document.getElementById("priceScheduleList")?.addEventListener("input", function (event) {
+    const input = event.target.closest("[data-sch-type]");
+    if (!input) return;
+    const from = input.closest("[data-from]").dataset.from;
+    const entry = scheduleWorkingCopy().find(function (e) { return e.from === from; });
+    if (!entry) return;
+    entry.prices = entry.prices || {};
+    entry.prices[input.dataset.schType] = entry.prices[input.dataset.schType] || {};
+    entry.prices[input.dataset.schType][input.dataset.schField] = number(input.value);
+});
+
+document.getElementById("priceScheduleList")?.addEventListener("click", function (event) {
+    const btn = event.target.closest("[data-remove-schedule]");
+    if (!btn) return;
+    const from = btn.dataset.removeSchedule;
+    appConfirm({
+        title: "حذف جدول أسعار الشهر",
+        message: "سيُحذف جدول الأسعار الذي يبدأ من " + monthLabel(from) + ". السجلات المحفوظة لا تتأثر. (يُطبَّق الحذف بعد الضغط على «حفظ أسعار الفترات»)",
+        confirmText: "حذف الجدول",
+        cancelText: "إلغاء",
+        danger: true
+    }).then(function (ok) {
+        if (!ok) return;
+        scheduleDraft = scheduleWorkingCopy().filter(function (e) { return e.from !== from; });
+        renderPriceSchedule();
+    });
+});
+
+document.getElementById("addScheduleBtn")?.addEventListener("click", function () {
+
+    const monthInput = document.getElementById("scheduleMonth");
+    const from = monthInput?.value;
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "")) {
+        notify("اختر التاريخ الذي تبدأ منه الأسعار.", "error");
+        monthInput?.focus();
+        return;
+    }
+
+    if (scheduleWorkingCopy().some(function (e) { return scheduleStart(e.from) === from; })) {
+        notify("يوجد جدول أسعار يبدأ في هذا التاريخ. عدّل أسعاره مباشرة.", "warning");
+        return;
+    }
+
+    /* يبدأ بأسعار الفترة السارية قبله، ثم تعدّلها */
+    const base = priceTableForDay(from).prices;
+    const copy = {};
+    Object.keys(AGENCY_NAMES).forEach(function (type) {
+        const p = (base && base[type]) || prices[type] || { agency: 0, representative: 0 };
+        copy[type] = { agency: number(p.agency), representative: number(p.representative) };
+    });
+
+    scheduleWorkingCopy().push({ id: generateId(), from: from, prices: copy, createdAt: new Date().toISOString() });
+    renderPriceSchedule();
+    notify("أُضيف جدول أسعار يبدأ من " + escapeHTML(monthLabel(from)) + ". عدّل الأسعار ثم اضغط «حفظ أسعار الفترات».", "info", 6000);
+});
+
+document.getElementById("saveScheduleBtn")?.addEventListener("click", function () {
+
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("هذه العملية للمدير فقط.", "error");
+        return;
+    }
+
+    const next = scheduleWorkingCopy().slice().sort(function (a, b) { return scheduleStart(a.from).localeCompare(scheduleStart(b.from)); });
+
+    try {
+        saveData(PRICE_SCHEDULE_KEY, next);
+    } catch (error) {
+        notify("تعذر حفظ أسعار الفترات: " + escapeHTML(error && error.message || error), "error");
+        return;
+    }
+
+    priceSchedule = next;
+    scheduleDraft = null;
+    renderPriceSchedule();
+    updatePreview();
+    notify("<strong>حُفظت أسعار الفترات</strong><span>" + next.length + " جدول. الوكالات الجديدة تأخذ أسعار فترة «تاريخ السجل».</span>", "success", 5000, true);
+});
 
 /* =========================================================
 أسعار الإضافات
@@ -10235,35 +10821,11 @@ document.getElementById(
 
 if (recordSearch) {
 
+/* البحث يعمل مع الفلترة والترتيب (ويقبل الأرقام العربية) */
 recordSearch.addEventListener(
     "input",
     function () {
-
-        const value =
-            this.value
-                .trim()
-                .toLowerCase();
-
-
-        document
-            .querySelectorAll(
-                "#recordsTableBody tr"
-            )
-            .forEach(
-                function (row) {
-
-                    row.style.display =
-                        row.textContent
-                            .toLowerCase()
-                            .includes(
-                                value
-                            )
-                            ? ""
-                            : "none";
-
-                }
-            );
-
+        renderRecords();
     }
 );
 
@@ -11010,6 +11572,7 @@ function downloadBackup() {
         stampPrices: stampPrices,
         committeeShares: committeeShares,
         committeeRates: committeeRates,
+        priceSchedule: priceSchedule,
         councilSaved: councilSaved,
         records: records
     };
@@ -11111,6 +11674,11 @@ function applyBackupSettings(data) {
 
         if (Array.isArray(data.councilSaved)) {
             saveData(COUNCIL_SAVED_KEY, data.councilSaved);
+        }
+
+        /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+        if (Array.isArray(data.priceSchedule)) {
+            saveData(PRICE_SCHEDULE_KEY, data.priceSchedule);
         }
 
         /*
