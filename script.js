@@ -3356,6 +3356,21 @@ document.addEventListener("keydown", function (event) {
     }
 });
 
+/* التركيز على رقم الوكالة: بطاقة الإضافة كاملة تظهر في الشاشة (بدون تمرير يدوي) */
+document.getElementById("agencyNumber")?.addEventListener("focus", function () {
+    const card = this.closest(".content-card");
+    if (!card) return;
+    /* بعد تمرير المتصفح الخاص بالتركيز: نحاذي البطاقة لأعلى الشاشة إن لم تكن ظاهرة كلها */
+    setTimeout(function () {
+        const box = card.getBoundingClientRect();
+        const dock = document.getElementById("recordDock");
+        const bottomLimit = dock && dock.offsetParent ? dock.getBoundingClientRect().top : window.innerHeight;
+        if (box.top < 0 || box.bottom > bottomLimit) {
+            window.scrollTo({ top: window.scrollY + box.top - 12 });
+        }
+    }, 0);
+});
+
 /* بعد إضافة وكالة: المؤشر يعود لرقم الوكالة التالية جاهزاً للكتابة */
 function focusNextAgencyNumber() {
     const input = document.getElementById("agencyNumber");
