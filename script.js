@@ -4452,11 +4452,165 @@ updatePreview();
 عرض السجلات
 ========================================================= */
 
+/* =========================================================
+فلترة وترتيب السجلات
+للعرض فقط: نرتّب نسخة من القائمة، وترتيب السجلات المحفوظة لا يتغير.
+آخر اختيار يُحفظ كتفضيل واجهة (audit_ui_records_view) وليس بيانات.
+========================================================= */
+
+const RECORDS_VIEW_KEY = "audit_ui_records_view";
+const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", office: "all", sort: "date-desc" };
+
+function loadRecordsView() {
+    try {
+        return Object.assign({}, RECORDS_VIEW_DEFAULT, JSON.parse(localStorage.getItem(RECORDS_VIEW_KEY) || "{}"));
+    } catch (e) {
+        return Object.assign({}, RECORDS_VIEW_DEFAULT);
+    }
+}
+
+let recordsView = loadRecordsView();
+
+function saveRecordsView() {
+    try { localStorage.setItem(RECORDS_VIEW_KEY, JSON.stringify(recordsView)); } catch (e) {}
+}
+
+/* حدود الفترة [من، إلى] بصيغة YYYY-MM-DD (فارغ = بلا حد) */
+function recordsPeriodRange(view) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    switch (view.period) {
+        case "this-month": return [toDayString(new Date(y, m, 1)), toDayString(new Date(y, m + 1, 0))];
+        case "last-month": return [toDayString(new Date(y, m - 1, 1)), toDayString(new Date(y, m, 0))];
+        case "3-months": return [toDayString(new Date(y, m - 2, 1)), toDayString(new Date(y, m + 1, 0))];
+        case "this-year": return [y + "-01-01", y + "-12-31"];
+        case "custom": return [view.from || "", view.to || ""];
+        default: return ["", ""];
+    }
+}
+
+function compareRecordNumbers(a, b) {
+    return String(a.recordNumber || "").localeCompare(String(b.recordNumber || ""), "en", { numeric: true });
+}
+
+function getVisibleRecords() {
+
+    const view = recordsView;
+    const q = normalizeDigits(document.getElementById("recordSearch")?.value || "").trim().toLowerCase();
+    const range = recordsPeriodRange(view);
+
+    const list = records.filter(function (record) {
+        const day = getRecordDay(record);
+        if (range[0] && (!day || day < range[0])) return false;
+        if (range[1] && (!day || day > range[1])) return false;
+        if (view.rep !== "all" && (record.representativeType === "external" ? "external" : "internal") !== view.rep) return false;
+        if (view.office !== "all" && String(record.officeName || "").trim() !== view.office) return false;
+        if (q) {
+            const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, formatDay(getRecordDay(record))].join(" ")).toLowerCase();
+            if (hay.indexOf(q) === -1) return false;
+        }
+        return true;
+    });
+
+    const byDay = function (a, b) { return getRecordDay(a).localeCompare(getRecordDay(b)) || compareRecordNumbers(a, b); };
+    const sorters = {
+        "date-desc": function (a, b) { return byDay(b, a); },
+        "date-asc": byDay,
+        "number-desc": function (a, b) { return compareRecordNumbers(b, a); },
+        "number-asc": compareRecordNumbers,
+        "total-desc": function (a, b) { return getRecordGrandTotal(b) - getRecordGrandTotal(a); },
+        "total-asc": function (a, b) { return getRecordGrandTotal(a) - getRecordGrandTotal(b); },
+        "agencies-desc": function (a, b) { return (b.agencies || []).length - (a.agencies || []).length; },
+        "office-asc": function (a, b) { return String(a.officeName || "").localeCompare(String(b.officeName || ""), "ar") || byDay(b, a); }
+    };
+
+    if (sorters[view.sort]) {
+        list.sort(sorters[view.sort]);
+    }
+
+    return list;
+}
+
+/* تعبئة أدوات الفلترة من الاختيار المحفوظ وأسماء المكاتب الحالية */
+function syncRecordsFilters() {
+
+    const office = document.getElementById("rfOffice");
+    if (office) {
+        const names = Array.from(new Set(records.map(function (r) { return String(r.officeName || "").trim(); }).filter(Boolean)))
+            .sort(function (a, b) { return a.localeCompare(b, "ar"); });
+        if (recordsView.office !== "all" && names.indexOf(recordsView.office) === -1) {
+            names.unshift(recordsView.office);
+        }
+        office.innerHTML = '<option value="all">كل المكاتب</option>' + names.map(function (n) {
+            return '<option value="' + escapeHTML(n) + '">' + escapeHTML(n) + "</option>";
+        }).join("");
+    }
+
+    const set = function (id, value) {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    };
+    set("rfPeriod", recordsView.period);
+    set("rfFrom", recordsView.from);
+    set("rfTo", recordsView.to);
+    set("rfRep", recordsView.rep);
+    set("rfOffice", recordsView.office);
+    set("rfSort", recordsView.sort);
+
+    document.querySelectorAll("#recordsFilters .rf-custom").forEach(function (el) {
+        el.hidden = recordsView.period !== "custom";
+    });
+}
+
+document.getElementById("recordsFilters")?.addEventListener("change", function (event) {
+    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfOffice: "office", rfSort: "sort" };
+    const key = map[event.target.id];
+    if (!key) return;
+    recordsView[key] = event.target.value;
+    saveRecordsView();
+    renderRecords();
+});
+
+function resetRecordsView() {
+    recordsView = Object.assign({}, RECORDS_VIEW_DEFAULT);
+    saveRecordsView();
+    const search = document.getElementById("recordSearch");
+    if (search) search.value = "";
+    renderRecords();
+}
+
+document.getElementById("rfReset")?.addEventListener("click", resetRecordsView);
+document.getElementById("recordsTableBody")?.addEventListener("click", function (event) {
+    if (event.target.closest("[data-rf-reset]")) resetRecordsView();
+});
+
 function renderRecords() {
 
     const tbody = document.getElementById("recordsTableBody");
 
     if (!tbody) {
+        return;
+    }
+
+    syncRecordsFilters();
+
+    const countEl = document.getElementById("rfCount");
+    const visible = getVisibleRecords();
+    const filtered = visible.length !== records.length;
+
+    if (countEl) {
+        countEl.innerHTML = records.length
+            ? (filtered ? "عرض <b>" + visible.length + "</b> من " + records.length + " سجل" : "<b>" + records.length + "</b> سجل") +
+              (visible.length ? " — الإجمالي " + money(visible.reduce(function (s, r) { return s + getRecordGrandTotal(r); }, 0)) : "")
+            : "";
+    }
+    document.getElementById("rfReset")?.toggleAttribute("hidden", !filtered && recordsView.sort === RECORDS_VIEW_DEFAULT.sort);
+
+    if (records.length && !visible.length) {
+        tbody.innerHTML =
+            '<tr><td colspan="9"><div class="empty-state"><p>لا توجد سجلات تطابق البحث أو الفلترة الحالية.</p>' +
+            '<button type="button" class="secondary-btn" data-rf-reset>عرض كل السجلات</button></div></td></tr>';
         return;
     }
 
@@ -4470,7 +4624,7 @@ function renderRecords() {
     const canEdit = currentUser && currentUser.role !== "viewer";
     const canDelete = currentUser && currentUser.role === "manager";
 
-    tbody.innerHTML = records.map(function (record) {
+    tbody.innerHTML = visible.map(function (record) {
 
         const stats = getRecordFinalStats(record);
         const total = (record.agencies || []).length || 1;
@@ -10667,35 +10821,11 @@ document.getElementById(
 
 if (recordSearch) {
 
+/* البحث يعمل مع الفلترة والترتيب (ويقبل الأرقام العربية) */
 recordSearch.addEventListener(
     "input",
     function () {
-
-        const value =
-            this.value
-                .trim()
-                .toLowerCase();
-
-
-        document
-            .querySelectorAll(
-                "#recordsTableBody tr"
-            )
-            .forEach(
-                function (row) {
-
-                    row.style.display =
-                        row.textContent
-                            .toLowerCase()
-                            .includes(
-                                value
-                            )
-                            ? ""
-                            : "none";
-
-                }
-            );
-
+        renderRecords();
     }
 );
 

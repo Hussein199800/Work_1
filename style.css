@@ -1367,6 +1367,71 @@ input[type="number"] {
     height: 46px;
 }
 
+/* ================= فلترة وترتيب السجلات ================= */
+
+.records-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px 12px;
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-1);
+}
+
+.filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 140px;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+}
+
+.filter-field[hidden] {
+    display: none;
+}
+
+.filter-field select,
+.filter-field input {
+    height: 38px;
+    padding: 0 10px;
+    font-size: var(--fs-sm);
+}
+
+.filter-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-inline-start: auto;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+}
+
+.filter-summary b {
+    color: var(--heading);
+}
+
+.filter-summary [hidden] {
+    display: none;
+}
+
+@media (max-width: 640px) {
+    .filter-field {
+        flex: 1 1 calc(50% - 6px);
+        min-width: 0;
+    }
+
+    .filter-summary {
+        flex: 1 1 100%;
+        justify-content: space-between;
+        margin-inline-start: 0;
+    }
+}
+
 /* ================= الجداول ================= */
 
 .table-wrapper {
@@ -5292,4 +5357,175 @@ html.theme-switching *::after {
 
 .schedule-table td:first-child {
     white-space: nowrap;
+}
+
+/* ================= تطوير الموقع (سجل المراحل) ================= */
+
+.devlog-team {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.devlog-person {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-1);
+}
+
+.devlog-person b {
+    display: block;
+    color: var(--heading);
+    font-size: var(--fs-lg);
+}
+
+.devlog-person small {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    line-height: 1.6;
+}
+
+.devlog-avatar {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--grad-primary);
+    color: var(--on-accent);
+    font-family: var(--font-display);
+    font-size: var(--fs-xl);
+    font-weight: 700;
+}
+
+.devlog-avatar.is-claude {
+    background: var(--grad-money);
+}
+
+.devlog-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 22px;
+}
+
+.devlog-stats > div {
+    padding: 12px 14px;
+    text-align: center;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+}
+
+.devlog-stats b {
+    display: block;
+    color: var(--heading);
+    font-size: var(--fs-xl);
+}
+
+.devlog-stats span {
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+}
+
+.devlog-timeline {
+    position: relative;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* الخط العمودي على يمين المراحل (RTL) */
+.devlog-timeline::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    right: 19px;
+    width: 2px;
+    background: var(--line-strong);
+}
+
+.devlog-stage {
+    position: relative;
+    padding-right: 56px;
+    margin-bottom: 16px;
+}
+
+.devlog-stage .content-card {
+    margin: 0;
+}
+
+.devlog-dot {
+    position: absolute;
+    top: 14px;
+    right: 0;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--grad-primary);
+    color: var(--on-accent);
+    font-size: 20px;
+    box-shadow: 0 0 0 4px var(--bg);
+}
+
+.devlog-stage.is-next .devlog-dot {
+    background: var(--surface-3);
+    color: var(--text-2);
+}
+
+.devlog-stage.is-next .content-card {
+    border-style: dashed;
+}
+
+.devlog-date {
+    margin: 0 0 4px;
+    color: var(--accent-text);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+}
+
+.devlog-stage h3 {
+    margin: 0 0 10px;
+}
+
+.devlog-list {
+    margin: 0;
+    padding-right: 20px;
+    color: var(--text);
+    line-height: 1.9;
+}
+
+@media (max-width: 640px) {
+    .devlog-team,
+    .devlog-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .devlog-team {
+        grid-template-columns: 1fr;
+    }
+
+    .devlog-stage {
+        padding-right: 48px;
+    }
+
+    .devlog-dot {
+        width: 34px;
+        height: 34px;
+        font-size: 17px;
+    }
+
+    .devlog-timeline::before {
+        right: 16px;
+    }
 }
