@@ -5529,3 +5529,312 @@ html.theme-switching *::after {
         right: 16px;
     }
 }
+
+/* ================= ألوان مجموعات البنود =================
+   النقص عنابي، الإضافات ذهبي، البدل أزرق — نفس اللون في النموذج
+   والإضافة السريعة وسطر «هذه الوكالة» وقائمة الوكالات المضافة. */
+
+:root {
+    --grp-missing: #a02c48;
+    --grp-add: #9a6d10;
+    --grp-transport: #2266b0;
+    --grp-missing-bg: color-mix(in srgb, var(--grp-missing) 10%, var(--surface));
+    --grp-add-bg: color-mix(in srgb, var(--grp-add) 12%, var(--surface));
+    --grp-transport-bg: color-mix(in srgb, var(--grp-transport) 10%, var(--surface));
+}
+
+[data-theme="dark"] {
+    --grp-missing: #f08ba3;
+    --grp-add: #e8c063;
+    --grp-transport: #7cb6f2;
+    --grp-missing-bg: color-mix(in srgb, var(--grp-missing) 16%, var(--surface));
+    --grp-add-bg: color-mix(in srgb, var(--grp-add) 16%, var(--surface));
+    --grp-transport-bg: color-mix(in srgb, var(--grp-transport) 16%, var(--surface));
+}
+
+.grp-missing { --grp: var(--grp-missing); --grp-bg: var(--grp-missing-bg); }
+.grp-add { --grp: var(--grp-add); --grp-bg: var(--grp-add-bg); }
+.grp-transport { --grp: var(--grp-transport); --grp-bg: var(--grp-transport-bg); }
+
+/* عنوان المجموعة بخط لونها */
+.sub-title.grp-title {
+    color: var(--grp);
+    border-inline-start: 3px solid var(--grp);
+    padding-inline-start: 8px;
+}
+
+.sub-title.grp-title .ti {
+    color: var(--grp);
+}
+
+/* حقول المجموعة: إطار بلونها الخفيف، وتبرز عندما تكون القيمة أكبر من صفر */
+.grp-add .number-control,
+.grp-missing .number-control,
+.grp-transport .number-control {
+    border-color: color-mix(in srgb, var(--grp) 30%, var(--line-strong));
+}
+
+.grp-add .number-btn,
+.grp-missing .number-btn,
+.grp-transport .number-btn {
+    color: var(--grp);
+}
+
+.input-group.has-value > label {
+    color: var(--grp, var(--accent));
+    font-weight: 700;
+}
+
+.input-group.has-value .number-control {
+    border-color: var(--grp, var(--accent));
+    border-width: 2px;
+    background: var(--grp-bg, var(--accent-soft));
+}
+
+.input-group.has-value .number-control input:not([type="checkbox"]) {
+    color: var(--grp, var(--accent));
+    font-weight: 800;
+    font-size: var(--fs-lg);
+}
+
+/* الحقول بقيمة صفر أهدأ حتى لا تلفت النظر */
+.agency-layout .input-group:not(.has-value) .number-control input:not([type="checkbox"]) {
+    color: var(--text-3);
+}
+
+/* نموذج أخف: عدّادات أقصر داخل بطاقة الوكالة */
+.agency-layout .number-control {
+    height: 40px;
+}
+
+.agency-layout .number-btn {
+    width: 36px;
+}
+
+.agency-layout .grp-missing .input-group > small {
+    display: none;
+}
+
+/* ================= شريط الإضافة السريعة ================= */
+
+.quick-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 6px 0 14px;
+    padding: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+}
+
+.quick-items-hint {
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    line-height: 1.7;
+}
+
+.quick-items-hint kbd,
+.qi-key {
+    font-family: var(--font-body);
+}
+
+.qi-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.qi-group-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 92px;
+    color: var(--grp);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+}
+
+.qi-item {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid color-mix(in srgb, var(--grp) 35%, var(--line));
+    border-radius: 999px;
+    background: var(--surface);
+    overflow: hidden;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.qi-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-sm);
+    cursor: pointer;
+}
+
+.qi-chip:hover {
+    background: var(--grp-bg);
+}
+
+.qi-chip:focus-visible,
+.qi-minus:focus-visible {
+    outline: 2px solid var(--grp);
+    outline-offset: -2px;
+}
+
+.qi-count {
+    display: none;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--grp);
+    color: var(--surface);
+    font-size: var(--fs-xs);
+    line-height: 20px;
+    text-align: center;
+}
+
+.qi-key {
+    padding: 0 5px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    color: var(--text-3);
+    font-size: 11px;
+    line-height: 16px;
+}
+
+.qi-minus {
+    display: none;
+    width: 30px;
+    border: 0;
+    border-inline-start: 1px solid color-mix(in srgb, var(--grp) 35%, var(--line));
+    background: transparent;
+    color: var(--grp);
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.qi-minus:hover {
+    background: var(--grp-bg);
+}
+
+.qi-item.is-on {
+    border-color: var(--grp);
+    background: var(--grp-bg);
+    box-shadow: 0 0 0 1px var(--grp);
+}
+
+.qi-item.is-on .qi-chip {
+    color: var(--grp);
+    font-weight: 700;
+}
+
+.qi-item.is-on .qi-count,
+.qi-item.is-on .qi-minus {
+    display: inline-block;
+}
+
+.qi-item.is-disabled {
+    opacity: 0.45;
+}
+
+.qi-item.is-disabled .qi-chip {
+    cursor: not-allowed;
+}
+
+.qi-item.flash {
+    animation: qi-flash 0.35s ease-out;
+}
+
+@keyframes qi-flash {
+    from { box-shadow: 0 0 0 4px color-mix(in srgb, var(--grp) 45%, transparent); }
+    to { box-shadow: 0 0 0 1px var(--grp); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .qi-item.flash { animation: none; }
+}
+
+/* ================= سطر «هذه الوكالة» وشارات البنود ================= */
+
+.agency-recap {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 12px 0 4px;
+    padding: 10px 12px;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    font-size: var(--fs-sm);
+}
+
+.recap-title {
+    color: var(--text-2);
+    font-weight: 600;
+}
+
+.recap-title b {
+    color: var(--heading);
+}
+
+.recap-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 10px;
+    border: 1px solid color-mix(in srgb, var(--grp, var(--text-3)) 45%, transparent);
+    border-radius: 999px;
+    background: var(--grp-bg, var(--surface-2));
+    color: var(--grp, var(--text));
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.recap-type,
+.recap-status {
+    color: var(--heading);
+}
+
+.recap-status {
+    background: var(--warning-bg);
+    color: var(--warning);
+}
+
+.recap-empty {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+}
+
+.item-pills {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+@media (max-width: 640px) {
+    .qi-group-title {
+        min-width: 100%;
+    }
+
+    .qi-key {
+        display: none;
+    }
+}
+
+.qi-item.is-on .qi-key {
+    display: none;
+}

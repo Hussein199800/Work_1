@@ -3162,6 +3162,8 @@ addAgencyBtn.addEventListener(
 /* رسالة واضحة بعد كل إضافة، مع وميض عدّاد الوكالات */
 function announceAgencyAdded(agency) {
 
+    focusNextAgencyNumber();
+
     notify(
         "<strong>تمت إضافة الوكالة رقم " + escapeHTML(agency.number) + "</strong>" +
         "<span>" + escapeHTML(AGENCY_NAMES[agency.type] || agency.typeName || "") +
@@ -3182,6 +3184,218 @@ function announceAgencyAdded(agency) {
 }
 
 }
+
+/* =========================================================
+الإدخال السريع للبنود (نقص الطوابع، الإضافات، بدل الانتقال)
+كل مجموعة بلون ثابت في كل مكان: النقص عنابي، الإضافات ذهبي،
+البدل أزرق. الأزرار تعدّل نفس حقول النموذج (لا حساب جديد).
+ضغطة = +1، الزر الصغير «−» أو Alt+Shift+المفتاح = −1.
+========================================================= */
+
+const QUICK_ITEMS = [
+    { id: "missingPleading", group: "missing", label: "نقص مرافعة", key: "1", code: "Digit1" },
+    { id: "missingAmbulance", group: "missing", label: "نقص إسعاف", key: "2", code: "Digit2" },
+    { id: "missingAid", group: "missing", label: "نقص معونة", key: "3", code: "Digit3" },
+    { id: "signatureCount", group: "add", label: "توقيع إضافي", key: "G", code: "KeyG" },
+    { id: "saveCount", group: "add", label: "حفظ", key: "H", code: "KeyH" },
+    { id: "originalityCount", group: "add", label: "أصالة", key: "A", code: "KeyA" },
+    { id: "inheritanceCount", group: "add", label: "إضافة إلى التركة", key: "R", code: "KeyR" },
+    { id: "childrenCount", group: "add", label: "ولاية عن الأولاد", key: "W", code: "KeyW" },
+    { id: "agentsCount", group: "add", label: "وكيل عن", key: "K", code: "KeyK" },
+    { id: "transportCount", group: "transport", label: "بدل انتقال", key: "T", code: "KeyT" }
+];
+
+const QUICK_GROUPS = {
+    missing: { title: "نقص الطوابع", icon: "ti-receipt" },
+    add: { title: "الإضافات", icon: "ti-circle-plus" },
+    transport: { title: "البدل", icon: "ti-route" }
+};
+
+function buildQuickItems() {
+
+    const box = document.getElementById("quickItems");
+
+    if (!box || box.dataset.built) {
+        return;
+    }
+
+    box.dataset.built = "1";
+    box.innerHTML =
+        '<p class="quick-items-hint"><i class="ti ti-bolt" aria-hidden="true"></i> إضافة سريعة: اضغط البند لزيادته واحداً، و«−» لإنقاصه. أو من لوحة المفاتيح: <kbd>Alt</kbd> + المفتاح (مع <kbd>Shift</kbd> للإنقاص).</p>' +
+        Object.keys(QUICK_GROUPS).map(function (group) {
+            const g = QUICK_GROUPS[group];
+            return '<div class="qi-group grp-' + group + '" role="group" aria-label="' + g.title + '">' +
+                '<span class="qi-group-title"><i class="ti ' + g.icon + '" aria-hidden="true"></i> ' + g.title + "</span>" +
+                QUICK_ITEMS.filter(function (item) { return item.group === group; }).map(function (item) {
+                    return '<span class="qi-item" data-qi-item="' + item.id + '">' +
+                        '<button type="button" class="qi-chip" data-qi="' + item.id + '" aria-keyshortcuts="Alt+' + item.key + '" title="Alt + ' + item.key + '">' +
+                            '<span class="qi-label">' + item.label + "</span>" +
+                            '<b class="qi-count">0</b>' +
+                            '<kbd class="qi-key">Alt+' + item.key + "</kbd>" +
+                        "</button>" +
+                        '<button type="button" class="qi-minus" data-qi-minus="' + item.id + '" aria-label="إنقاص ' + item.label + '">−</button>' +
+                    "</span>";
+                }).join("") +
+            "</div>";
+        }).join("");
+}
+
+/* تغيير بند بمقدار +1 أو −1 عبر حقله الأصلي (نفس مسار أزرار + و −) */
+function stepQuickItem(id, delta) {
+
+    const input = document.getElementById(id);
+
+    if (!input) {
+        return;
+    }
+
+    if (input.disabled) {
+        notify(id === "transportCount" ? "بدل الانتقال لا يُضاف لهذا النوع من الوكالات." : "هذا البند غير متاح الآن.", "warning", 2500);
+        return;
+    }
+
+    const value = Math.max(0, number(input.value) + delta);
+
+    if (value === number(input.value)) {
+        return;
+    }
+
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/* تلوين الحقول غير الصفرية + أرقام الأزرار + سطر «هذه الوكالة» */
+function syncQuickItems() {
+
+    buildQuickItems();
+
+    QUICK_ITEMS.forEach(function (item) {
+        const input = document.getElementById(item.id);
+        if (!input) return;
+        const count = number(input.value);
+        input.closest(".input-group")?.classList.toggle("has-value", count > 0);
+        const wrap = document.querySelector('[data-qi-item="' + item.id + '"]');
+        if (wrap) {
+            wrap.classList.toggle("is-on", count > 0);
+            wrap.classList.toggle("is-disabled", !!input.disabled);
+            wrap.querySelector(".qi-count").textContent = count;
+            wrap.querySelector(".qi-chip").disabled = !!input.disabled;
+        }
+    });
+
+    renderAgencyRecap();
+}
+
+function renderAgencyRecap() {
+
+    const box = document.getElementById("agencyRecap");
+
+    if (!box) {
+        return;
+    }
+
+    const type = document.getElementById("agencyType")?.value || DEFAULT_AGENCY_TYPE;
+    const status = document.getElementById("agencyStatus")?.value || "active";
+    const num = (document.getElementById("agencyNumber")?.value || "").trim();
+
+    let html = '<span class="recap-title">هذه الوكالة' + (num ? " <b>" + escapeHTML(num) + "</b>" : "") + ":</span>" +
+        '<span class="recap-pill recap-type">' + agencyTypeDot(type) + escapeHTML(AGENCY_NAMES[type] || "") + "</span>";
+
+    if (status !== "active") {
+        html += '<span class="recap-pill recap-status">' + getAgencyStatusName(status) + "</span>";
+    }
+
+    const items = QUICK_ITEMS.filter(function (item) {
+        return number(document.getElementById(item.id)?.value) > 0;
+    });
+
+    html += items.length
+        ? items.map(function (item) {
+            const n = number(document.getElementById(item.id).value);
+            return '<span class="recap-pill grp-' + item.group + '">' + item.label + (n > 1 ? " × " + n : "") + "</span>";
+        }).join("")
+        : '<span class="recap-empty">بدون إضافات أو نقص</span>';
+
+    box.innerHTML = html;
+}
+
+/* شارات بنود وكالة محفوظة/مضافة بنفس ألوان المجموعات */
+function agencyItemPillsHTML(agency) {
+
+    const ad = agency.additions || {};
+    const ms = agency.stamps || agency.missingStamps || {};
+    const values = {
+        missingPleading: ms.pleading, missingAmbulance: ms.ambulance, missingAid: ms.aid,
+        signatureCount: ad.signature, saveCount: ad.save, originalityCount: ad.originality,
+        inheritanceCount: ad.inheritance, childrenCount: ad.children, agentsCount: ad.agents,
+        transportCount: ad.transport
+    };
+
+    const pills = QUICK_ITEMS.filter(function (item) { return number(values[item.id]) > 0; }).map(function (item) {
+        const n = number(values[item.id]);
+        return '<span class="recap-pill grp-' + item.group + '">' + item.label + (n > 1 ? " × " + n : "") + "</span>";
+    });
+
+    return pills.length ? '<span class="item-pills">' + pills.join("") + "</span>" : "";
+}
+
+document.getElementById("quickItems")?.addEventListener("click", function (event) {
+    const plus = event.target.closest("[data-qi]");
+    const minus = event.target.closest("[data-qi-minus]");
+    if (plus) stepQuickItem(plus.dataset.qi, 1);
+    if (minus) stepQuickItem(minus.dataset.qiMinus, -1);
+});
+
+/* الزر الأيمن على البند يُنقصه */
+document.getElementById("quickItems")?.addEventListener("contextmenu", function (event) {
+    const chip = event.target.closest("[data-qi]");
+    if (!chip) return;
+    event.preventDefault();
+    stepQuickItem(chip.dataset.qi, -1);
+});
+
+/* Alt + مفتاح البند (يعمل بأي لغة لوحة مفاتيح لأنه يعتمد على موضع المفتاح) */
+document.addEventListener("keydown", function (event) {
+
+    if (!event.altKey || event.ctrlKey || event.metaKey) {
+        return;
+    }
+
+    if (
+        document.querySelector("dialog[open]") ||
+        !document.getElementById("newRecordSection")?.classList.contains("active-section")
+    ) {
+        return;
+    }
+
+    const item = QUICK_ITEMS.find(function (i) { return i.code === event.code; });
+
+    if (!item) {
+        return;
+    }
+
+    event.preventDefault();
+    stepQuickItem(item.id, event.shiftKey ? -1 : 1);
+
+    const wrap = document.querySelector('[data-qi-item="' + item.id + '"]');
+    if (wrap) {
+        wrap.classList.remove("flash");
+        void wrap.offsetWidth;
+        wrap.classList.add("flash");
+    }
+});
+
+/* بعد إضافة وكالة: المؤشر يعود لرقم الوكالة التالية جاهزاً للكتابة */
+function focusNextAgencyNumber() {
+    const input = document.getElementById("agencyNumber");
+    if (!input || !document.getElementById("newRecordSection")?.classList.contains("active-section")) return;
+    try { input.focus({ preventScroll: true }); input.select(); } catch (e) {}
+}
+
+onReady(function () {
+    syncQuickItems();
+});
+
 
 /* =========================================================
 مسح بيانات الوكالة
@@ -3305,6 +3519,8 @@ container.innerHTML =
                             </strong>
 
                             ${agencyMarksHTML(agency)}
+
+                            ${agencyItemPillsHTML(agency)}
 
                             <span>
                                 ${escapeHTML(
@@ -3781,6 +3997,10 @@ updatePreview();
 ========================================================= */
 
 function updatePreview() {
+
+/* ألوان البنود وسطر «هذه الوكالة» (قد تُستدعى قبل تعريفها أثناء التحميل) */
+try { syncQuickItems(); } catch (e) {}
+
 
 const status =
     document.getElementById(
