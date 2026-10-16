@@ -789,13 +789,18 @@
 
                         </div>
 
+                        <!-- ================= QUICK ITEMS ================= -->
+                        <!-- إضافة سريعة: ضغطة = +1، الزر الصغير أو Alt+Shift = −1. تعدّل نفس الحقول أدناه -->
+
+                        <div class="quick-items" id="quickItems" aria-label="إضافة سريعة للبنود"></div>
+
                         <!-- ================= ADDITIONS ================= -->
 
-                        <h4 class="sub-title">
+                        <h4 class="sub-title grp-title grp-add">
                             <i class="ti ti-circle-plus"></i> الإضافات
                         </h4>
 
-                        <div class="form-grid six-columns">
+                        <div class="form-grid six-columns grp-add">
 
                             <!-- SAVE -->
                             <div class="input-group">
@@ -858,7 +863,7 @@
                             </div>
 
                             <!-- TRANSPORT -->
-                            <div class="input-group">
+                            <div class="input-group grp-transport">
                                 <label>بدل انتقال</label>
                                 <div class="number-control">
                                     <button type="button" class="number-btn minus-btn" data-target="transportCount">−</button>
@@ -875,11 +880,11 @@
 
                         <!-- ================= MISSING STAMPS ================= -->
 
-                        <h4 class="sub-title">
+                        <h4 class="sub-title grp-title grp-missing">
                             <i class="ti ti-receipt"></i> الطوابع الناقصة
                         </h4>
 
-                        <div class="form-grid three-columns">
+                        <div class="form-grid three-columns grp-missing">
 
                             <!-- PLEADING -->
 
@@ -1100,6 +1105,9 @@
                             </div>
 
                         </div>
+
+                        <!-- ملخص «هذه الوكالة» للمطابقة مع الورقة قبل الإضافة -->
+                        <div class="agency-recap" id="agencyRecap" aria-live="polite"></div>
 
                         <!-- AGENCY BUTTONS -->
 
@@ -1534,6 +1542,7 @@
                                 <li>تنبيه عند حفظ سجل برقم موجود مسبقاً.</li>
                                 <li>جدول أسعار 2026 حسب الفترات (1–4 آذار، 5 آذار، نيسان، أيار، 14 حزيران، 3 آب، أيلول)، وكل وكالة تأخذ أسعار تاريخ سجلها.</li>
                                 <li>فلترة السجلات (الفترة، المندوب، المكتب) وترتيبها، وهذه الصفحة.</li>
+                                <li>إدخال أسرع للبنود: شريط «إضافة سريعة» وألوان ثابتة لكل مجموعة (النقص عنابي، الإضافات ذهبي، البدل أزرق)، واختصارات Alt، وسطر «هذه الوكالة» للمطابقة مع الورقة، وشارات البنود في قائمة الوكالات.</li>
                             </ul>
                         </div>
                     </li>
