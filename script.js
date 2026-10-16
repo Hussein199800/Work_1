@@ -12111,6 +12111,8 @@ function downloadBackup() {
 
     try { markBackupDone(); } catch (e) {}
 
+    telegramAfterBackup("تحميل نسخة يدوي");
+
 }
 
 /* =========================================================
@@ -12331,9 +12333,23 @@ function autoBackupAfterSave() {
             : "لم يُختر مجلد للنسخ الاحتياطية بعد. آخر نسخة: " + escapeHTML(backupAgeText()) + ".");
     };
 
+    /* تليجرام (إن كان مُعدّاً) يعمل مع المجلد أو بدونه */
+    const telegram = telegramAfterBackup("حفظ سجل");
+
     if (!backupFolderHandle) {
-        fallback();
-        return Promise.resolve(false);
+        if (!telegramReady()) {
+            fallback();
+            return Promise.resolve(false);
+        }
+        /* بدون مجلد (الهاتف مثلاً): نسخة تليجرام تكفي، وإن فشلت نرجع للتنزيل اليومي */
+        return telegram.then(function (ok) {
+            if (ok) {
+                notify("<strong>حُفظ السجل ورُفعت نسخة احتياطية إلى تليجرام</strong><span>" + escapeHTML(telegramSettings.chatTitle || "") + "</span>", "success", 3500, true);
+            } else {
+                fallback();
+            }
+            return ok;
+        });
     }
 
     /* الضغط على «حفظ السجل» يسمح للمتصفح بسؤال الإذن إن لزم */
@@ -12349,6 +12365,7 @@ function autoBackupAfterSave() {
 
 /* زر «نسخ الآن» في القائمة الجانبية والتذكيرات */
 function backupNow() {
+    telegramAfterBackup("نسخ يدوي");
     if (BACKUP_FOLDER_SUPPORTED && !backupFolderHandle) {
         return chooseBackupFolder();
     }
@@ -12432,16 +12449,308 @@ onReady(function () {
 });
 
 
+/* =========================================================
+النسخ الاحتياطي إلى تليجرام
+- بعد كل نسخة احتياطية (حفظ سجل، «نسخ الآن»، «تحميل نسخة») يرفع المتصفح
+  نفس محتوى النسخة (version: 1) مضغوطاً ‎.json.gz إلى محادثة بوت أو قناة خاصة.
+- رسالة جديدة لكل نسخة (بدون صوت إشعار) فيبقى تاريخ كامل للنسخ.
+- الرمز (token) ومعرّف المحادثة تفضيل واجهة لكل جهاز (audit_ui_telegram)،
+  لا يدخلان في ملف النسخة ولا في المستودع.
+- إن فشل الرفع (لا إنترنت…) يُعاد تلقائياً عند عودة الاتصال أو فتح الموقع.
+========================================================= */
+
+const TELEGRAM_KEY = "audit_ui_telegram";
+const TELEGRAM_API = "https://api.telegram.org/bot";
+
+function loadTelegramSettings() {
+    const base = { enabled: false, token: "", chatId: "", chatTitle: "", botName: "", lastSentAt: "", lastError: "", pending: false };
+    try {
+        return Object.assign(base, JSON.parse(localStorage.getItem(TELEGRAM_KEY) || "{}"));
+    } catch (e) {
+        return base;
+    }
+}
+
+let telegramSettings = loadTelegramSettings();
+
+function saveTelegramSettings() {
+    try { localStorage.setItem(TELEGRAM_KEY, JSON.stringify(telegramSettings)); } catch (e) {}
+    fillTelegramForm();
+    renderTelegramStatus();
+}
+
+function telegramReady() {
+    return !!(telegramSettings.enabled && telegramSettings.token && telegramSettings.chatId);
+}
+
+function telegramApi(method, body, token) {
+    return fetch(TELEGRAM_API + (token || telegramSettings.token) + "/" + method, { method: "POST", body: body })
+        .then(function (response) {
+            return response.json().catch(function () { return { ok: false, description: "HTTP " + response.status }; });
+        })
+        .then(function (json) {
+            if (!json.ok) throw new Error(telegramErrorText(json));
+            return json.result;
+        }, function (error) {
+            if (error && error.name === "TypeError") throw new Error("لا يوجد اتصال بتليجرام (الإنترنت مقطوع أو تليجرام محجوب)");
+            throw error;
+        });
+}
+
+function telegramErrorText(json) {
+    const d = String(json.description || "");
+    if (json.error_code === 401 || /Unauthorized/i.test(d)) return "رمز البوت غير صحيح";
+    if (/chat not found/i.test(d)) return "المحادثة غير موجودة — أرسل /start للبوت أو أضفه مشرفاً في القناة";
+    if (/bot was blocked/i.test(d)) return "البوت محظور من حسابك — ألغِ الحظر وأرسل /start";
+    if (/not enough rights|need administrator/i.test(d)) return "البوت ليس مشرفاً في القناة أو لا يملك صلاحية النشر";
+    if (/too big/i.test(d)) return "الملف أكبر من حد تليجرام (50 ميغابايت)";
+    return d || "خطأ غير معروف";
+}
+
+function gzipText(text) {
+    if (typeof CompressionStream !== "function") return Promise.resolve(null);
+    return new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).blob()
+        .catch(function () { return null; });
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024)) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function telegramCaption(reason, size) {
+    const now = new Date();
+    const agencies = records.reduce(function (sum, r) { return sum + ((r && r.agencies) || []).length; }, 0);
+    return "📦 نسخة احتياطية — نظام تدقيق السجلات والوكالات\n" +
+        "🗓 " + todayDay() + " " + now.toLocaleTimeString(NUMBER_LOCALE, { hour: "2-digit", minute: "2-digit" }) + "\n" +
+        "📁 " + records.length.toLocaleString(NUMBER_LOCALE) + " سجل · " + agencies.toLocaleString(NUMBER_LOCALE) + " وكالة\n" +
+        "💾 " + formatFileSize(size) +
+        (reason ? "\n📝 " + reason : "") +
+        (currentUser && currentUser.username ? "\n👤 " + currentUser.username : "");
+}
+
+function sendTelegramNow(reason) {
+    const json = buildBackupJSON();
+    const startedAt = new Date().toISOString();
+    const stamp = todayDay() + "-" + new Date().toTimeString().slice(0, 5).replace(":", "-");
+    return gzipText(json).then(function (gz) {
+        const file = gz
+            ? new File([gz], "نسخة-احتياطية-" + stamp + ".json.gz", { type: "application/gzip" })
+            : new File([json], "نسخة-احتياطية-" + stamp + ".json", { type: "application/json" });
+        const form = new FormData();
+        form.append("chat_id", telegramSettings.chatId);
+        form.append("document", file);
+        form.append("caption", telegramCaption(reason, file.size));
+        form.append("disable_notification", "true");
+        return telegramApi("sendDocument", form);
+    }).then(function () {
+        Object.assign(telegramSettings, { lastSentAt: new Date().toISOString(), lastError: "", pending: false });
+        saveTelegramSettings();
+        /* نسخة خارج الجهاز: تُحسب نسخة احتياطية (إن لم تتغير البيانات أثناء الرفع) */
+        if (!backupState.lastChangeAt || backupState.lastChangeAt <= startedAt) markBackupDone({ lastTelegramAt: telegramSettings.lastSentAt });
+        return true;
+    }).catch(function (error) {
+        console.error("Telegram backup failed:", error);
+        Object.assign(telegramSettings, { lastError: String(error && error.message || error), pending: true });
+        saveTelegramSettings();
+        return false;
+    });
+}
+
+/* رفع واحد في كل مرة؛ ما يُطلب أثناء الرفع يُدمج في رفع واحد بعده (بأحدث البيانات) */
+let telegramInFlight = null;
+let telegramQueued = null;
+
+function startTelegramSend(reason) {
+    telegramInFlight = sendTelegramNow(reason).finally(function () { telegramInFlight = null; });
+    return telegramInFlight;
+}
+
+function sendBackupToTelegram(reason) {
+    if (!telegramReady() || recordsLoadFailed) return Promise.resolve(false);
+    if (telegramInFlight) {
+        if (!telegramQueued) {
+            telegramQueued = telegramInFlight.then(function () {
+                telegramQueued = null;
+                return startTelegramSend(reason);
+            });
+        }
+        return telegramQueued;
+    }
+    return startTelegramSend(reason);
+}
+
+/* بعد نسخة: رسالة فقط عند الفشل (النجاح يظهر في حالة النسخ) */
+function telegramAfterBackup(reason) {
+    if (!telegramReady()) return Promise.resolve(false);
+    return sendBackupToTelegram(reason).then(function (ok) {
+        if (!ok) notifyTelegramFailure();
+        return ok;
+    });
+}
+
+function notifyTelegramFailure() {
+    notify("<strong>تعذّر رفع النسخة إلى تليجرام</strong><span>" + escapeHTML(telegramSettings.lastError) +
+        " — ستُعاد المحاولة تلقائياً عند عودة الاتصال.</span>" +
+        '<span class="toast-actions"><button type="button" class="act-btn" onclick="retryTelegramBackup()">إعادة المحاولة الآن</button></span>',
+        "warning", 10000, true);
+}
+
+function retryTelegramBackup() {
+    return sendBackupToTelegram("إعادة محاولة").then(function (ok) {
+        if (ok) notify("<strong>رُفعت النسخة إلى تليجرام</strong><span>" + escapeHTML(telegramSettings.chatTitle || telegramSettings.chatId) + "</span>", "success", 4000, true);
+        else notifyTelegramFailure();
+    });
+}
+
+window.retryTelegramBackup = retryTelegramBackup;
+
+/* ---------- الإعداد في قسم المستخدمين ---------- */
+
+function readTelegramForm() {
+    const token = (document.getElementById("tgToken")?.value || "").trim();
+    const chatId = (document.getElementById("tgChatId")?.value || "").trim();
+    return { token: token, chatId: chatId };
+}
+
+/* يقرأ آخر رسالة وصلت للبوت (في الخاص أو منشور في قناة) ليعرف معرّف المحادثة */
+function detectTelegramChat() {
+    const form = readTelegramForm();
+    if (!/^\d+:[\w-]{20,}$/.test(form.token)) {
+        notify("الصق رمز البوت كما أعطاه BotFather (أرقام ثم : ثم حروف).", "warning");
+        return Promise.resolve(false);
+    }
+    return telegramApi("getMe", null, form.token).then(function (bot) {
+        telegramSettings.token = form.token;
+        telegramSettings.botName = bot.username || bot.first_name || "";
+        return telegramApi("getUpdates", null, form.token);
+    }).then(function (updates) {
+        let chat = null;
+        (updates || []).forEach(function (u) {
+            const m = u.message || u.channel_post || u.my_chat_member || u.edited_message || u.edited_channel_post;
+            if (m && m.chat) chat = m.chat;
+        });
+        if (!chat) {
+            saveTelegramSettings();
+            notify("<strong>البوت @" + escapeHTML(telegramSettings.botName) + " يعمل، لكن لم تصله رسالة بعد</strong>" +
+                "<span>افتح البوت في تليجرام واضغط Start (أو انشر أي رسالة في القناة بعد إضافته مشرفاً)، ثم اضغط «اكتشاف المحادثة» مرة أخرى.</span>",
+                "warning", 12000, true);
+            return false;
+        }
+        telegramSettings.chatId = String(chat.id);
+        telegramSettings.chatTitle = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" ") || chat.username || "";
+        saveTelegramSettings();
+        fillTelegramForm();
+        notify("<strong>تم العثور على المحادثة: " + escapeHTML(telegramSettings.chatTitle || telegramSettings.chatId) + "</strong>" +
+            "<span>اضغط «حفظ وإرسال تجربة» لرفع نسخة الآن.</span>", "success", 7000, true);
+        return true;
+    }).catch(function (error) {
+        notify("تعذّر الاتصال بالبوت: " + escapeHTML(error && error.message || error), "error");
+        return false;
+    });
+}
+
+function saveTelegramFromForm() {
+    const form = readTelegramForm();
+    if (!form.token || !form.chatId) {
+        notify("أدخل رمز البوت ومعرّف المحادثة (أو اضغط «اكتشاف المحادثة»).", "warning");
+        return Promise.resolve(false);
+    }
+    if (form.chatId !== telegramSettings.chatId) telegramSettings.chatTitle = "";
+    Object.assign(telegramSettings, { token: form.token, chatId: form.chatId, enabled: true });
+    saveTelegramSettings();
+    return sendBackupToTelegram("تجربة الإعداد").then(function (ok) {
+        if (ok) {
+            notify("<strong>رُفعت نسخة تجريبية إلى تليجرام ✓</strong><span>من الآن تُرفع نسخة بعد كل حفظ سجل.</span>", "success", 6000, true);
+        } else {
+            notifyTelegramFailure();
+        }
+        return ok;
+    });
+}
+
+function toggleTelegram(on) {
+    telegramSettings.enabled = !!on;
+    saveTelegramSettings();
+}
+
+function fillTelegramForm() {
+    const token = document.getElementById("tgToken");
+    const chat = document.getElementById("tgChatId");
+    const toggle = document.getElementById("tgEnabled");
+    if (token && document.activeElement !== token) token.value = telegramSettings.token;
+    if (chat && document.activeElement !== chat) chat.value = telegramSettings.chatId;
+    if (toggle) toggle.checked = !!telegramSettings.enabled;
+}
+
+function renderTelegramStatus() {
+    const el = document.getElementById("tgStatus");
+    if (!el) return;
+    let text, cls;
+    if (!telegramSettings.token || !telegramSettings.chatId) {
+        text = "غير مُعدّ بعد";
+        cls = "";
+    } else if (!telegramSettings.enabled) {
+        text = "متوقف";
+        cls = "";
+    } else if (telegramSettings.lastError) {
+        text = "آخر محاولة فشلت: " + telegramSettings.lastError;
+        cls = "is-error";
+    } else {
+        text = "يعمل" + (telegramSettings.chatTitle ? " — " + telegramSettings.chatTitle : "") +
+            (telegramSettings.lastSentAt ? " · آخر رفع: " + new Date(telegramSettings.lastSentAt).toLocaleString(NUMBER_LOCALE, { dateStyle: "short", timeStyle: "short" }) : "");
+        cls = "is-ok";
+    }
+    el.textContent = text;
+    el.className = "tg-status " + cls;
+}
+
+document.getElementById("tgDetectBtn")?.addEventListener("click", detectTelegramChat);
+document.getElementById("tgSaveBtn")?.addEventListener("click", saveTelegramFromForm);
+document.getElementById("tgEnabled")?.addEventListener("change", function () { toggleTelegram(this.checked); });
+document.getElementById("tgTokenShow")?.addEventListener("click", function () {
+    const input = document.getElementById("tgToken");
+    if (!input) return;
+    input.type = input.type === "password" ? "text" : "password";
+    this.setAttribute("aria-pressed", input.type === "text" ? "true" : "false");
+});
+
+/* إعادة رفع ما فشل: عند عودة الإنترنت وبعد فتح الموقع */
+window.addEventListener("online", function () {
+    if (telegramReady() && telegramSettings.pending && currentUser) sendBackupToTelegram("بعد عودة الاتصال");
+});
+
+onReady(function () {
+    fillTelegramForm();
+    renderTelegramStatus();
+    if (telegramReady() && telegramSettings.pending) {
+        setTimeout(function () {
+            if (currentUser && !recordsLoadFailed) sendBackupToTelegram("نسخة لم تُرفع سابقاً");
+        }, 5000);
+    }
+});
+
+/* ملف النسخة: JSON عادي، أو مضغوط gzip (نسخ تليجرام ‎.json.gz) */
+function readBackupFileText(file) {
+    return file.slice(0, 2).arrayBuffer().then(function (head) {
+        const bytes = new Uint8Array(head);
+        const gzipped = bytes.length === 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+        if (!gzipped) return file.text();
+        if (typeof DecompressionStream !== "function") {
+            throw new Error("هذا المتصفح لا يفك الملفات المضغوطة (‎.gz). افتحها في Chrome أو Edge حديث.");
+        }
+        return new Response(file.stream().pipeThrough(new DecompressionStream("gzip"))).text();
+    });
+}
+
 function restoreBackupFromFile(file) {
 
-    const reader = new FileReader();
-
-    reader.onload = function (event) {
+    readBackupFileText(file).then(function (text) {
 
         let data;
 
         try {
-            data = JSON.parse(event.target.result);
+            data = JSON.parse(text);
         } catch (error) {
             notify("تعذر قراءة الملف. تأكد أنه ملف نسخة احتياطية صحيح.", "error");
             return;
@@ -12465,9 +12774,9 @@ function restoreBackupFromFile(file) {
             }
         });
 
-    };
-
-    reader.readAsText(file, "UTF-8");
+    }).catch(function (error) {
+        notify("تعذر قراءة الملف: " + escapeHTML(error && error.message || error), "error");
+    });
 
 }
 
