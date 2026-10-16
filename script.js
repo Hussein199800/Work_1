@@ -294,6 +294,15 @@ localStorage.setItem(
     JSON.stringify(value)
 );
 
+/* بيانات تدخل في النسخة الاحتياطية: تُعلَّم كتغيير لم يُنسخ بعد */
+if ([
+    "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
+    "audit_transport_settings", "audit_stamp_prices", "audit_records", "audit_price_schedule",
+    "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved"
+].indexOf(key) !== -1) {
+    try { markDataChanged(); } catch (e) {}
+}
+
 }
 
 /* =========================================================
@@ -480,11 +489,19 @@ function moveRecordsToIDBNow() {
 }
 
 /* حفظ السجلات أينما كانت. يُرجع Promise، والفشل يُعرض للمستخدم عند الاستدعاء */
+/* كل حفظ ناجح للسجلات يُعلَّم «تغيّر بعد آخر نسخة احتياطية» */
 function persistRecords() {
+    return persistRecordsNow().then(function (value) {
+        try { markDataChanged(); } catch (e) {}
+        return value;
+    });
+}
+
+function persistRecordsNow() {
 
     /* نقل جارٍ: ننتظره ثم نحفظ آخر نسخة من السجلات في مكانها الجديد */
     if (recordsMoving) {
-        return recordsMoving.catch(function () {}).then(persistRecords);
+        return recordsMoving.catch(function () {}).then(persistRecordsNow);
     }
 
     if (recordsLoadFailed) {
@@ -2724,7 +2741,7 @@ const AGENCY_STATUS_COLORS = {
     cancelled: "#a8352c"
 };
 
-function buildChoiceChips(selectId, containerId, colors) {
+function buildChoiceChips(selectId, containerId, colors, minor) {
 
     const select = document.getElementById(selectId);
     const box = document.getElementById(containerId);
@@ -2733,11 +2750,23 @@ function buildChoiceChips(selectId, containerId, colors) {
         return;
     }
 
-    box.innerHTML = Array.from(select.options).map(function (option) {
+    const chipHTML = function (option) {
         const color = colors[option.value] || "#45577c";
         return '<button type="button" role="radio" class="choice-chip" data-value="' + option.value + '" style="--chip-color:' + color + '">' +
             '<span class="chip-dot" aria-hidden="true"></span>' + escapeHTML(option.textContent.trim()) + "</button>";
-    }).join("");
+    };
+
+    const options = Array.from(select.options);
+
+    /* minor: الخيارات الأقل استخداماً في سطر ثانٍ أصغر وأهدأ */
+    if (minor && minor.length) {
+        const main = options.filter(function (o) { return minor.indexOf(o.value) === -1; });
+        const rest = options.filter(function (o) { return minor.indexOf(o.value) !== -1; });
+        box.innerHTML = '<div class="chip-row">' + main.map(chipHTML).join("") + "</div>" +
+            '<div class="chip-row chip-row-minor"><span class="chip-row-label">أقل استخداماً</span>' + rest.map(chipHTML).join("") + "</div>";
+    } else {
+        box.innerHTML = options.map(chipHTML).join("");
+    }
 
     box.addEventListener("click", function (event) {
         const chip = event.target.closest(".choice-chip");
@@ -2790,7 +2819,7 @@ function syncChoiceChips() {
 document.getElementById("agencyStatus")?.addEventListener("change", syncChoiceChips);
 
 onReady(function () {
-    buildChoiceChips("agencyType", "agencyTypeChips", AGENCY_TYPE_COLORS);
+    buildChoiceChips("agencyType", "agencyTypeChips", AGENCY_TYPE_COLORS, ["executive", "certified_general_special", "certified_legal"]);
     buildChoiceChips("agencyStatus", "agencyStatusChips", AGENCY_STATUS_COLORS);
 });
 
@@ -3186,10 +3215,10 @@ function announceAgencyAdded(agency) {
 }
 
 /* =========================================================
-الإدخال السريع للبنود (نقص الطوابع، الإضافات، بدل الانتقال)
-كل مجموعة بلون ثابت في كل مكان: النقص عنابي، الإضافات ذهبي،
-البدل أزرق. الأزرار تعدّل نفس حقول النموذج (لا حساب جديد).
-ضغطة = +1، الزر الصغير «−» أو Alt+Shift+المفتاح = −1.
+بنود الوكالة (نقص الطوابع، الإضافات، بدل الانتقال)
+عمود طولي واحد بجانب النموذج، كل مجموعة بلون ثابت في كل مكان:
+النقص عنابي، الإضافات ذهبي، البدل أزرق. Alt + المفتاح يزيد البند
+واحداً ومع Shift يُنقصه، عبر نفس الحقول (لا حساب جديد).
 ========================================================= */
 
 const QUICK_ITEMS = [
@@ -3204,41 +3233,6 @@ const QUICK_ITEMS = [
     { id: "agentsCount", group: "add", label: "وكيل عن", key: "K", code: "KeyK" },
     { id: "transportCount", group: "transport", label: "بدل انتقال", key: "T", code: "KeyT" }
 ];
-
-const QUICK_GROUPS = {
-    missing: { title: "نقص الطوابع", icon: "ti-receipt" },
-    add: { title: "الإضافات", icon: "ti-circle-plus" },
-    transport: { title: "البدل", icon: "ti-route" }
-};
-
-function buildQuickItems() {
-
-    const box = document.getElementById("quickItems");
-
-    if (!box || box.dataset.built) {
-        return;
-    }
-
-    box.dataset.built = "1";
-    box.innerHTML =
-        '<p class="quick-items-hint"><i class="ti ti-bolt" aria-hidden="true"></i> إضافة سريعة: اضغط البند لزيادته واحداً، و«−» لإنقاصه. أو من لوحة المفاتيح: <kbd>Alt</kbd> + المفتاح (مع <kbd>Shift</kbd> للإنقاص).</p>' +
-        Object.keys(QUICK_GROUPS).map(function (group) {
-            const g = QUICK_GROUPS[group];
-            return '<div class="qi-group grp-' + group + '" role="group" aria-label="' + g.title + '">' +
-                '<span class="qi-group-title"><i class="ti ' + g.icon + '" aria-hidden="true"></i> ' + g.title + "</span>" +
-                QUICK_ITEMS.filter(function (item) { return item.group === group; }).map(function (item) {
-                    return '<span class="qi-item" data-qi-item="' + item.id + '">' +
-                        '<button type="button" class="qi-chip" data-qi="' + item.id + '" aria-keyshortcuts="Alt+' + item.key + '" title="Alt + ' + item.key + '">' +
-                            '<span class="qi-label">' + item.label + "</span>" +
-                            '<b class="qi-count">0</b>' +
-                            '<kbd class="qi-key">Alt+' + item.key + "</kbd>" +
-                        "</button>" +
-                        '<button type="button" class="qi-minus" data-qi-minus="' + item.id + '" aria-label="إنقاص ' + item.label + '">−</button>' +
-                    "</span>";
-                }).join("") +
-            "</div>";
-        }).join("");
-}
 
 /* تغيير بند بمقدار +1 أو −1 عبر حقله الأصلي (نفس مسار أزرار + و −) */
 function stepQuickItem(id, delta) {
@@ -3267,20 +3261,12 @@ function stepQuickItem(id, delta) {
 /* تلوين الحقول غير الصفرية + أرقام الأزرار + سطر «هذه الوكالة» */
 function syncQuickItems() {
 
-    buildQuickItems();
-
     QUICK_ITEMS.forEach(function (item) {
         const input = document.getElementById(item.id);
         if (!input) return;
-        const count = number(input.value);
-        input.closest(".input-group")?.classList.toggle("has-value", count > 0);
-        const wrap = document.querySelector('[data-qi-item="' + item.id + '"]');
-        if (wrap) {
-            wrap.classList.toggle("is-on", count > 0);
-            wrap.classList.toggle("is-disabled", !!input.disabled);
-            wrap.querySelector(".qi-count").textContent = count;
-            wrap.querySelector(".qi-chip").disabled = !!input.disabled;
-        }
+        const row = input.closest(".input-group");
+        row?.classList.toggle("has-value", number(input.value) > 0);
+        row?.classList.toggle("is-disabled", !!input.disabled);
     });
 
     renderAgencyRecap();
@@ -3339,21 +3325,6 @@ function agencyItemPillsHTML(agency) {
     return pills.length ? '<span class="item-pills">' + pills.join("") + "</span>" : "";
 }
 
-document.getElementById("quickItems")?.addEventListener("click", function (event) {
-    const plus = event.target.closest("[data-qi]");
-    const minus = event.target.closest("[data-qi-minus]");
-    if (plus) stepQuickItem(plus.dataset.qi, 1);
-    if (minus) stepQuickItem(minus.dataset.qiMinus, -1);
-});
-
-/* الزر الأيمن على البند يُنقصه */
-document.getElementById("quickItems")?.addEventListener("contextmenu", function (event) {
-    const chip = event.target.closest("[data-qi]");
-    if (!chip) return;
-    event.preventDefault();
-    stepQuickItem(chip.dataset.qi, -1);
-});
-
 /* Alt + مفتاح البند (يعمل بأي لغة لوحة مفاتيح لأنه يعتمد على موضع المفتاح) */
 document.addEventListener("keydown", function (event) {
 
@@ -3393,7 +3364,198 @@ function focusNextAgencyNumber() {
 }
 
 onReady(function () {
-    syncQuickItems();
+    try { syncQuickItems(); } catch (e) {}
+});
+
+
+/* =========================================================
+فحص تسلسل أرقام الوكالات عند حفظ السجل (اختياري)
+ينبّه للأرقام الناقصة داخل المدى وللأرقام المكررة دون قصد.
+السجلات الناقصة فعلاً تُحفظ عادي بخيار «حفظ على أي حال».
+الإيقاف/التشغيل تفضيل واجهة (audit_ui_seq_check) وليس بيانات.
+========================================================= */
+
+const SEQ_CHECK_KEY = "audit_ui_seq_check";
+
+function isSeqCheckOn() {
+    try { return localStorage.getItem(SEQ_CHECK_KEY) !== "off"; } catch (e) { return true; }
+}
+
+function setSeqCheck(on) {
+    try { localStorage.setItem(SEQ_CHECK_KEY, on ? "on" : "off"); } catch (e) {}
+    const box = document.getElementById("seqCheckToggle");
+    if (box) box.checked = !!on;
+}
+
+function agencySequenceIssues(agencies) {
+
+    const seen = {};
+    const duplicates = [];
+    const nums = [];
+
+    (agencies || []).forEach(function (agency) {
+        const raw = normalizeDigits(String(agency.number || "")).trim();
+        if (!/^\d+$/.test(raw)) return;
+        const n = Number(raw);
+        if (seen[n] && !agency.duplicate && duplicates.indexOf(n) === -1) duplicates.push(n);
+        seen[n] = true;
+        nums.push(n);
+    });
+
+    if (!nums.length) return { missing: [], duplicates: duplicates };
+
+    const min = Math.min.apply(null, nums);
+    const max = Math.max.apply(null, nums);
+    const missing = [];
+
+    /* مدى كبير جداً (أرقام غير متسلسلة أصلاً) لا يُفحص */
+    if (max - min <= 5000) {
+        for (let n = min; n <= max; n++) {
+            if (!seen[n]) missing.push(n);
+        }
+    }
+
+    return { missing: missing, duplicates: duplicates.sort(function (a, b) { return a - b; }) };
+}
+
+/* أرقام متتالية تُكتب كمدى: 117–119 */
+function formatNumberList(list) {
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+        let j = i;
+        while (j + 1 < list.length && list[j + 1] === list[j] + 1) j++;
+        out.push(j > i + 1 ? list[i] + "–" + list[j] : (j === i + 1 ? list[i] + "، " + list[j] : String(list[i])));
+        i = j;
+    }
+    return out.join("، ");
+}
+
+function checkAgencySequenceThen(agencies, next) {
+
+    if (!isSeqCheckOn()) {
+        next();
+        return;
+    }
+
+    const issues = agencySequenceIssues(agencies);
+
+    if (!issues.missing.length && !issues.duplicates.length) {
+        next();
+        return;
+    }
+
+    const parts = [];
+    if (issues.missing.length) {
+        parts.push("أرقام ناقصة (" + issues.missing.length + "): " + formatNumberList(issues.missing.slice(0, 60)) + (issues.missing.length > 60 ? "…" : ""));
+    }
+    if (issues.duplicates.length) {
+        parts.push("أرقام مكررة: " + formatNumberList(issues.duplicates.slice(0, 60)));
+    }
+
+    appChoose({
+        title: "تسلسل أرقام الوكالات",
+        message: parts.join(" — ") + ". إذا كان السجل ناقصاً فعلاً احفظه عادي.",
+        choices: [
+            { value: "save", label: "حفظ على أي حال", kind: "primary" },
+            { value: "review", label: "مراجعة الوكالات", kind: "secondary" },
+            { value: "off", label: "حفظ وإيقاف هذا الفحص", kind: "secondary" }
+        ]
+    }).then(function (choice) {
+        if (choice === "save") next();
+        if (choice === "off") {
+            setSeqCheck(false);
+            notify("أُوقف فحص التسلسل. يمكن تشغيله من «النسخ الاحتياطي» في قسم المستخدمين.", "info", 6000);
+            next();
+        }
+        if (choice === "review") {
+            document.getElementById("pendingAgencies")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    });
+}
+
+document.getElementById("seqCheckToggle")?.addEventListener("change", function () {
+    setSeqCheck(this.checked);
+});
+
+onReady(function () {
+    const box = document.getElementById("seqCheckToggle");
+    if (box) box.checked = isSeqCheckOn();
+});
+
+/* =========================================================
+Ctrl + Z: إلغاء آخر وكالة مضافة (صفحة إنشاء السجل فقط)
+لا يعمل أثناء الكتابة في حقل نصي حتى يبقى «تراجع» الكتابة العادي،
+إلا في حقل رقم الوكالة وهو على الرقم التالي التلقائي (بعد الإضافة مباشرة).
+========================================================= */
+
+let removedAgencyUndo = null;
+
+function undoLastAgency() {
+
+    if (!pendingAgencies.length) {
+        notify("لا توجد وكالة مضافة لإلغائها.", "info", 2500);
+        return;
+    }
+
+    let index = pendingAgencies.findIndex(function (a) { return a.id && a.id === lastAddedAgencyId; });
+    if (index === -1) index = pendingAgencies.length - 1;
+
+    const agency = pendingAgencies.splice(index, 1)[0];
+    removedAgencyUndo = { agency: agency, index: index };
+    lastAddedAgencyId = pendingAgencies.length ? pendingAgencies[pendingAgencies.length - 1].id : null;
+
+    renderPendingAgencies();
+    const numberInput = document.getElementById("agencyNumber");
+    if (numberInput) numberInput.value = getNextAgencyNumber();
+    updatePreview();
+    if (typeof saveRecordDraft === "function") saveRecordDraft();
+
+    notify("<strong>أُلغيت الوكالة رقم " + escapeHTML(agency.number) + "</strong><span>" + escapeHTML(AGENCY_NAMES[agency.type] || "") +
+        " — عدد الوكالات الآن: " + pendingAgencies.length + "</span>" +
+        '<span class="toast-actions"><button type="button" class="act-btn" onclick="restoreRemovedAgency()">تراجع عن الإلغاء</button></span>',
+        "warning", 7000, true);
+}
+
+function restoreRemovedAgency() {
+    if (!removedAgencyUndo) return;
+    const item = removedAgencyUndo;
+    removedAgencyUndo = null;
+    pendingAgencies.splice(Math.min(item.index, pendingAgencies.length), 0, item.agency);
+    lastAddedAgencyId = item.agency.id;
+    renderPendingAgencies();
+    const numberInput = document.getElementById("agencyNumber");
+    if (numberInput) numberInput.value = getNextAgencyNumber();
+    updatePreview();
+    if (typeof saveRecordDraft === "function") saveRecordDraft();
+    notify("أُعيدت الوكالة رقم " + escapeHTML(item.agency.number) + ".", "success", 3000);
+}
+
+window.undoLastAgency = undoLastAgency;
+window.restoreRemovedAgency = restoreRemovedAgency;
+
+document.addEventListener("keydown", function (event) {
+
+    const isUndo = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey &&
+        (event.code === "KeyZ" || event.key === "z" || event.key === "Z");
+
+    if (
+        !isUndo ||
+        document.querySelector("dialog[open]") ||
+        !document.getElementById("newRecordSection")?.classList.contains("active-section")
+    ) {
+        return;
+    }
+
+    const el = document.activeElement;
+    const editable = el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && el.type !== "checkbox") || el.isContentEditable);
+    const numberUntouched = el && el.id === "agencyNumber" && String(el.value).trim() === String(getNextAgencyNumber());
+
+    if (editable && !numberUntouched) {
+        return;
+    }
+
+    event.preventDefault();
+    undoLastAgency();
 });
 
 
@@ -4467,6 +4629,10 @@ recordForm.addEventListener(
                     )
                 ),
 
+            /* مدقق السجل: داخل البرنامج فقط، لا يظهر في التقارير */
+            auditors:
+                getFormAuditors(),
+
             createdAt:
                 oldRecord
                     ? oldRecord.createdAt
@@ -4528,6 +4694,8 @@ recordForm.addEventListener(
 
             persistRecords().then(function () {
 
+                rememberAuditors(record.auditors);
+
                 /* الحفظ تمّ: أي خطأ في تحديث العرض بعده لا يُلغي الحفظ */
                 [resetRecordForm, renderRecords, updateDashboard, renderReports].forEach(function (step) {
                     try {
@@ -4544,6 +4712,13 @@ recordForm.addEventListener(
                     4000,
                     true
                 );
+
+                /* نسخة احتياطية تلقائية بعد كل سجل (أو تذكير إن تعذّرت) */
+                try {
+                    autoBackupAfterSave().catch(function (error) { console.error("Auto backup:", error); });
+                } catch (error) {
+                    console.error("Auto backup:", error);
+                }
 
                 switchSection(
                     "recordsSection"
@@ -4571,6 +4746,9 @@ recordForm.addEventListener(
             });
         };
 
+        /* بعد فحص تسلسل الأرقام (اختياري): التحقق من رقم السجل ثم الحفظ */
+        const afterSequence = function () {
+
         if (sameRecord) {
             appChoose({
                 title: "رقم السجل " + recordNumber + " موجود مسبقاً",
@@ -4588,6 +4766,10 @@ recordForm.addEventListener(
         }
 
         proceed();
+
+        };
+
+        checkAgencySequenceThen(record.agencies, afterSequence);
 
 
     }
@@ -4658,6 +4840,8 @@ if (recordDateField) {
 
 }
 
+setFormAuditors(lastAuditors());
+
 renderPendingAgencies();
 
 ensureAgencyPriceControls();
@@ -4667,6 +4851,82 @@ clearAgencyForm();
 updatePreview();
 
 }
+
+/* =========================================================
+مدققو السجل (اسم أو اسمان) — داخل البرنامج فقط
+لا يدخلون في أي تقرير أو حساب. آخر أسماء مستخدمة تُحفظ كتفضيل
+واجهة (audit_ui_last_auditors) لتعبئة السجل التالي تلقائياً.
+========================================================= */
+
+const LAST_AUDITORS_KEY = "audit_ui_last_auditors";
+
+function getRecordAuditors(record) {
+    return Array.isArray(record && record.auditors)
+        ? record.auditors.map(function (n) { return String(n || "").trim(); }).filter(Boolean)
+        : [];
+}
+
+function getFormAuditors() {
+    const out = [];
+    ["recordAuditor1", "recordAuditor2"].forEach(function (id) {
+        const v = (document.getElementById(id)?.value || "").trim().replace(/\s+/g, " ");
+        if (v && out.indexOf(v) === -1) out.push(v);
+    });
+    return out;
+}
+
+function setFormAuditors(list) {
+    const names = Array.isArray(list) ? list : [];
+    const a = document.getElementById("recordAuditor1");
+    const b = document.getElementById("recordAuditor2");
+    if (a) a.value = names[0] || "";
+    if (b) b.value = names[1] || "";
+}
+
+function lastAuditors() {
+    try {
+        const list = JSON.parse(localStorage.getItem(LAST_AUDITORS_KEY) || "[]");
+        return Array.isArray(list) ? list : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function rememberAuditors(list) {
+    try { localStorage.setItem(LAST_AUDITORS_KEY, JSON.stringify(list || [])); } catch (e) {}
+}
+
+/* كل أسماء المدققين المستخدمة سابقاً (للاقتراح وللفلترة) */
+function allAuditorNames() {
+    const set = {};
+    records.forEach(function (r) {
+        getRecordAuditors(r).forEach(function (n) { set[n] = true; });
+    });
+    lastAuditors().forEach(function (n) { if (n) set[n] = true; });
+    return Object.keys(set).sort(function (a, b) { return a.localeCompare(b, "ar"); });
+}
+
+function refreshAuditorSuggestions() {
+    const list = document.getElementById("auditorNames");
+    if (!list) return;
+    list.innerHTML = allAuditorNames().map(function (n) {
+        return '<option value="' + escapeHTML(n) + '"></option>';
+    }).join("");
+}
+
+["recordAuditor1", "recordAuditor2"].forEach(function (id) {
+    document.getElementById(id)?.addEventListener("input", function () {
+        if (typeof saveRecordDraft === "function") saveRecordDraft();
+    });
+});
+
+onReady(function () {
+    refreshAuditorSuggestions();
+    const a = document.getElementById("recordAuditor1");
+    if (a && !a.value && !document.getElementById("editingRecordId")?.value) {
+        setFormAuditors(lastAuditors());
+    }
+});
 
 /* =========================================================
 عرض السجلات
@@ -4679,7 +4939,7 @@ updatePreview();
 ========================================================= */
 
 const RECORDS_VIEW_KEY = "audit_ui_records_view";
-const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", office: "all", sort: "date-desc" };
+const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", office: "all", auditor: "all", sort: "date-desc" };
 
 function loadRecordsView() {
     try {
@@ -4726,8 +4986,9 @@ function getVisibleRecords() {
         if (range[1] && (!day || day > range[1])) return false;
         if (view.rep !== "all" && (record.representativeType === "external" ? "external" : "internal") !== view.rep) return false;
         if (view.office !== "all" && String(record.officeName || "").trim() !== view.office) return false;
+        if (view.auditor !== "all" && getRecordAuditors(record).indexOf(view.auditor) === -1) return false;
         if (q) {
-            const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, formatDay(getRecordDay(record))].join(" ")).toLowerCase();
+            const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, getRecordAuditors(record).join(" "), formatDay(getRecordDay(record))].join(" ")).toLowerCase();
             if (hay.indexOf(q) === -1) return false;
         }
         return true;
@@ -4767,10 +5028,23 @@ function syncRecordsFilters() {
         }).join("");
     }
 
+    const auditor = document.getElementById("rfAuditor");
+    if (auditor) {
+        const names = allAuditorNames();
+        if (recordsView.auditor !== "all" && names.indexOf(recordsView.auditor) === -1) {
+            names.unshift(recordsView.auditor);
+        }
+        auditor.innerHTML = '<option value="all">كل المدققين</option>' + names.map(function (n) {
+            return '<option value="' + escapeHTML(n) + '">' + escapeHTML(n) + "</option>";
+        }).join("");
+    }
+    refreshAuditorSuggestions();
+
     const set = function (id, value) {
         const el = document.getElementById(id);
         if (el) el.value = value;
     };
+    set("rfAuditor", recordsView.auditor);
     set("rfPeriod", recordsView.period);
     set("rfFrom", recordsView.from);
     set("rfTo", recordsView.to);
@@ -4784,7 +5058,7 @@ function syncRecordsFilters() {
 }
 
 document.getElementById("recordsFilters")?.addEventListener("change", function (event) {
-    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfOffice: "office", rfSort: "sort" };
+    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfOffice: "office", rfAuditor: "auditor", rfSort: "sort" };
     const key = map[event.target.id];
     if (!key) return;
     recordsView[key] = event.target.value;
@@ -4861,7 +5135,9 @@ function renderRecords() {
 
         return "<tr>" +
             '<td><span class="record-tag">' + escapeHTML(record.recordNumber) + "</span></td>" +
-            "<td><strong>" + escapeHTML(record.officeName) + "</strong></td>" +
+            "<td><strong>" + escapeHTML(record.officeName) + "</strong>" +
+                (getRecordAuditors(record).length ? '<small class="auditor-note"><i class="ti ti-user-check" aria-hidden="true"></i> ' + escapeHTML(getRecordAuditors(record).join(" و")) + "</small>" : "") +
+            "</td>" +
             "<td>" + escapeHTML(record.representativeName) + "</td>" +
             '<td class="num"><span class="agency-count">' + (record.agencies || []).length + "</span>" + bar + "</td>" +
             '<td class="num">' + money(getRecordBaseTotal(record)) + "</td>" +
@@ -5325,6 +5601,8 @@ if (recordDateInput) {
         getRecordDay(record);
 
 }
+
+setFormAuditors(getRecordAuditors(record));
 
 
 pendingAgencies =
@@ -11816,7 +12094,328 @@ function downloadBackup() {
 
     URL.revokeObjectURL(url);
 
+    try { markBackupDone(); } catch (e) {}
+
 }
+
+/* =========================================================
+النسخ الاحتياطي التلقائي
+- مجلد ثابت يُختار مرة واحدة (Chrome / Edge على الكمبيوتر):
+  بعد كل حفظ سجل تُكتب فيه نسخة اليوم (ملف واحد لكل يوم يُحدَّث).
+- بدون مجلد أو في متصفح لا يدعمه: تنزيل تلقائي مرة كل يوم.
+- تنبيه عند مغادرة الموقع إذا تغيّرت البيانات بعد آخر نسخة.
+مقبض المجلد يُحفظ في قاعدة منفصلة (audit_ui_db) بعيداً عن السجلات،
+وحالة النسخ تفضيل واجهة (audit_ui_backup_state) وليست بيانات.
+========================================================= */
+
+const BACKUP_STATE_KEY = "audit_ui_backup_state";
+const UI_DB_NAME = "audit_ui_db";
+const UI_DB_STORE = "handles";
+const BACKUP_FOLDER_SUPPORTED = typeof window.showDirectoryPicker === "function";
+
+function loadBackupState() {
+    try {
+        return Object.assign({ lastBackupAt: "", lastChangeAt: "", lastAutoDownloadDay: "", folderName: "" },
+            JSON.parse(localStorage.getItem(BACKUP_STATE_KEY) || "{}"));
+    } catch (e) {
+        return { lastBackupAt: "", lastChangeAt: "", lastAutoDownloadDay: "", folderName: "" };
+    }
+}
+
+let backupState = loadBackupState();
+
+function saveBackupState() {
+    try { localStorage.setItem(BACKUP_STATE_KEY, JSON.stringify(backupState)); } catch (e) {}
+    renderBackupStatus();
+}
+
+/* تغيّرت البيانات (سجل، أسعار، مستخدمون…) ولم تُنسخ بعد */
+function markDataChanged() {
+    backupState.lastChangeAt = new Date().toISOString();
+    saveBackupState();
+}
+
+function markBackupDone(extra) {
+    backupState.lastBackupAt = new Date().toISOString();
+    Object.assign(backupState, extra || {});
+    saveBackupState();
+}
+
+function hasUnbackedChanges() {
+    return !!backupState.lastChangeAt && (!backupState.lastBackupAt || backupState.lastChangeAt > backupState.lastBackupAt);
+}
+
+/* نفس محتوى «تحميل نسخة احتياطية» تماماً (version: 1) */
+function buildBackupJSON() {
+    return JSON.stringify({
+        appName: "نظام تدقيق السجلات والوكالات",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        users: users,
+        prices: prices,
+        additionPrices: additionPrices,
+        additionStampStatus: additionStampStatus,
+        transportSettings: transportSettings,
+        stampPrices: stampPrices,
+        committeeShares: committeeShares,
+        committeeRates: committeeRates,
+        priceSchedule: priceSchedule,
+        councilSaved: councilSaved,
+        records: records
+    }, null, 2);
+}
+
+/* ---------- مقبض المجلد في قاعدة الواجهة ---------- */
+
+function uiDb() {
+    return new Promise(function (resolve, reject) {
+        if (!window.indexedDB) {
+            reject(new Error("IndexedDB غير متاح"));
+            return;
+        }
+        const req = indexedDB.open(UI_DB_NAME, 1);
+        req.onupgradeneeded = function () {
+            req.result.createObjectStore(UI_DB_STORE);
+        };
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+    });
+}
+
+function uiDbGet(key) {
+    return uiDb().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            const req = db.transaction(UI_DB_STORE, "readonly").objectStore(UI_DB_STORE).get(key);
+            req.onsuccess = function () { resolve(req.result || null); };
+            req.onerror = function () { reject(req.error); };
+        });
+    });
+}
+
+function uiDbPut(key, value) {
+    return uiDb().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            const tx = db.transaction(UI_DB_STORE, "readwrite");
+            tx.objectStore(UI_DB_STORE).put(value, key);
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function () { reject(tx.error); };
+        });
+    });
+}
+
+let backupFolderHandle = null;
+
+function loadBackupFolder() {
+    if (!BACKUP_FOLDER_SUPPORTED) return Promise.resolve(null);
+    return uiDbGet("backupFolder").then(function (handle) {
+        backupFolderHandle = handle;
+        return handle;
+    }).catch(function () { return null; });
+}
+
+/* اختيار المجلد: يفتح على سطح المكتب أول مرة، ثم على آخر مجلد مختار */
+function chooseBackupFolder() {
+
+    if (!BACKUP_FOLDER_SUPPORTED) {
+        notify("<strong>اختيار المجلد غير مدعوم في هذا المتصفح</strong><span>استخدم Chrome أو Edge على الكمبيوتر. حتى ذلك الحين تُنزَّل نسخة احتياطية تلقائياً مرة كل يوم.</span>", "warning", 8000, true);
+        return Promise.resolve(false);
+    }
+
+    return window.showDirectoryPicker({ id: "audit-backups", mode: "readwrite", startIn: backupFolderHandle || "desktop" })
+        .then(function (handle) {
+            backupFolderHandle = handle;
+            backupState.folderName = handle.name;
+            saveBackupState();
+            return uiDbPut("backupFolder", handle).then(function () {
+                notify("<strong>مجلد النسخ الاحتياطية: " + escapeHTML(handle.name) + "</strong><span>ستُحفظ فيه نسخة تلقائياً بعد كل سجل.</span>", "success", 5000, true);
+                return writeBackupToFolder(true);
+            });
+        })
+        .catch(function (error) {
+            if (error && error.name === "AbortError") return false;
+            notify("تعذر اختيار المجلد: " + escapeHTML(error && error.message || error), "error");
+            return false;
+        });
+}
+
+window.chooseBackupFolder = chooseBackupFolder;
+
+/* صلاحية الكتابة: interactive = يمكن سؤال المستخدم (بعد ضغطة زر) */
+function ensureFolderPermission(interactive) {
+    if (!backupFolderHandle) return Promise.resolve(false);
+    const opts = { mode: "readwrite" };
+    return backupFolderHandle.queryPermission(opts).then(function (state) {
+        if (state === "granted") return true;
+        if (!interactive) return false;
+        return backupFolderHandle.requestPermission(opts).then(function (s) { return s === "granted"; });
+    }).catch(function () { return false; });
+}
+
+function backupFileName() {
+    return "نسخة-احتياطية-" + todayDay() + ".json";
+}
+
+/* كتابة نسخة اليوم في المجلد (تحلّ محل نسخة اليوم السابقة: الأحدث تحوي كل شيء) */
+function writeBackupToFolder(interactive) {
+    return ensureFolderPermission(interactive).then(function (ok) {
+        if (!ok) return false;
+        const name = backupFileName();
+        return backupFolderHandle.getFileHandle(name, { create: true })
+            .then(function (file) { return file.createWritable(); })
+            .then(function (stream) {
+                return stream.write(buildBackupJSON()).then(function () { return stream.close(); });
+            })
+            .then(function () {
+                markBackupDone({ lastBackupFile: name, folderName: backupFolderHandle.name });
+                return true;
+            });
+    });
+}
+
+/* تنزيل عادي (بدون مجلد): يحسب كنسخة */
+function downloadBackupFile(auto) {
+    const blob = new Blob([buildBackupJSON()], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = backupFileName();
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+    markBackupDone(auto ? { lastAutoDownloadDay: todayDay() } : null);
+}
+
+/* بعد حفظ كل سجل: نسخة تلقائية + تذكير */
+function autoBackupAfterSave() {
+
+    const done = function () {
+        notify("<strong>حُفظ السجل ونُسخ احتياطياً</strong><span>النسخة في مجلد «" + escapeHTML(backupState.folderName || "") + "» — " + escapeHTML(backupFileName()) + "</span>", "success", 3500, true);
+    };
+
+    const remind = function (text) {
+        notify("<strong>حُفظ السجل — تذكير بالنسخة الاحتياطية</strong><span>" + text + "</span>" +
+            '<span class="toast-actions">' +
+                (BACKUP_FOLDER_SUPPORTED ? '<button type="button" class="act-btn" onclick="backupNow()">' + (backupFolderHandle ? "السماح والنسخ الآن" : "اختيار مجلد النسخ") + "</button>" : "") +
+                '<button type="button" class="act-btn" onclick="downloadBackupFile(false)">تنزيل نسخة الآن</button>' +
+            "</span>", "warning", 12000, true);
+    };
+
+    const fallback = function () {
+        /* لا مجلد أو لا صلاحية: تنزيل تلقائي مرة يومياً حتى لا تضيع البيانات إن نُسي النسخ */
+        if (backupState.lastAutoDownloadDay !== todayDay()) {
+            try {
+                downloadBackupFile(true);
+                notify("<strong>حُفظ السجل ونُزّلت نسخة احتياطية تلقائياً</strong><span>" + escapeHTML(backupFileName()) + " في مجلد التنزيلات. " +
+                    (BACKUP_FOLDER_SUPPORTED ? "اختر مجلداً ثابتاً من «النسخ الاحتياطي» لتُحفظ النسخ فيه مباشرة بعد كل سجل." : "") + "</span>", "info", 9000, true);
+                return;
+            } catch (e) {}
+        }
+        remind(backupFolderHandle
+            ? "يحتاج المتصفح إذنك للكتابة في مجلد «" + escapeHTML(backupState.folderName || "") + "»."
+            : "لم يُختر مجلد للنسخ الاحتياطية بعد. آخر نسخة: " + escapeHTML(backupAgeText()) + ".");
+    };
+
+    if (!backupFolderHandle) {
+        fallback();
+        return Promise.resolve(false);
+    }
+
+    /* الضغط على «حفظ السجل» يسمح للمتصفح بسؤال الإذن إن لزم */
+    return writeBackupToFolder(true).then(function (ok) {
+        if (ok) done(); else fallback();
+        return ok;
+    }).catch(function (error) {
+        console.error("Auto backup failed:", error);
+        fallback();
+        return false;
+    });
+}
+
+/* زر «نسخ الآن» في القائمة الجانبية والتذكيرات */
+function backupNow() {
+    if (BACKUP_FOLDER_SUPPORTED && !backupFolderHandle) {
+        return chooseBackupFolder();
+    }
+    if (backupFolderHandle) {
+        return writeBackupToFolder(true).then(function (ok) {
+            if (ok) {
+                notify("<strong>تم النسخ الاحتياطي</strong><span>" + escapeHTML(backupFileName()) + " في مجلد «" + escapeHTML(backupState.folderName || "") + "»</span>", "success", 4000, true);
+            } else {
+                downloadBackupFile(false);
+            }
+            return ok;
+        }).catch(function (error) {
+            notify("تعذر الكتابة في المجلد: " + escapeHTML(error && error.message || error) + " — نُزّلت النسخة بدلاً من ذلك.", "warning");
+            downloadBackupFile(false);
+        });
+    }
+    downloadBackupFile(false);
+    return Promise.resolve(true);
+}
+
+window.backupNow = backupNow;
+window.downloadBackupFile = downloadBackupFile;
+
+function backupAgeText() {
+    if (!backupState.lastBackupAt) return "لم تُؤخذ نسخة بعد";
+    const mins = Math.round((Date.now() - new Date(backupState.lastBackupAt).getTime()) / 60000);
+    if (mins < 1) return "الآن";
+    if (mins < 60) return "قبل " + mins + " دقيقة";
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return "قبل " + hours + " ساعة";
+    return "قبل " + Math.round(hours / 24) + " يوم";
+}
+
+function renderBackupStatus() {
+
+    const pending = hasUnbackedChanges();
+    const btn = document.getElementById("backupStatus");
+    const text = document.getElementById("backupStatusText");
+
+    if (btn) {
+        btn.classList.toggle("is-pending", pending);
+        btn.title = pending ? "توجد تغييرات بعد آخر نسخة — اضغط للنسخ الآن" : "اضغط لأخذ نسخة احتياطية الآن";
+    }
+    if (text) {
+        text.textContent = (pending ? "تغييرات غير منسوخة · " : "") + "آخر نسخة: " + backupAgeText();
+    }
+
+    const folder = document.getElementById("backupFolderName");
+    if (folder) {
+        folder.textContent = !BACKUP_FOLDER_SUPPORTED
+            ? "غير مدعوم في هذا المتصفح (تنزيل تلقائي مرة يومياً)"
+            : (backupState.folderName || "لم يُختر بعد");
+    }
+    const chooseBtn = document.getElementById("chooseBackupFolderBtn");
+    if (chooseBtn) {
+        chooseBtn.hidden = !BACKUP_FOLDER_SUPPORTED;
+        chooseBtn.innerHTML = '<i class="ti ti-folder" aria-hidden="true"></i> ' + (backupState.folderName ? "تغيير المجلد" : "اختيار المجلد");
+    }
+}
+
+document.getElementById("chooseBackupFolderBtn")?.addEventListener("click", chooseBackupFolder);
+
+/* عند المغادرة: تنبيه المتصفح إذا وُجدت تغييرات لم تُنسخ */
+window.addEventListener("beforeunload", function (event) {
+    if (!currentUser || !hasUnbackedChanges()) return;
+    event.preventDefault();
+    event.returnValue = "";
+});
+
+/* عند إخفاء الصفحة (إغلاق التبويب أو الانتقال لغيره): محاولة نسخ صامتة إن كان الإذن ممنوحاً */
+document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden" && currentUser && backupFolderHandle && hasUnbackedChanges()) {
+        writeBackupToFolder(false).catch(function () {});
+    }
+});
+
+onReady(function () {
+    loadBackupFolder().then(renderBackupStatus);
+    renderBackupStatus();
+    setInterval(renderBackupStatus, 60000);
+});
+
 
 function restoreBackupFromFile(file) {
 
@@ -12516,6 +13115,7 @@ function saveRecordDraft() {
             representativeName: getFieldValue("representativeName"),
             representativeType: getFieldValue("representativeType"),
             recordDate: getFieldValue("recordDate"),
+            auditors: getFormAuditors(),
             pendingAgencies: pendingAgencies,
             savedAt: new Date().toISOString()
         };
@@ -12597,6 +13197,7 @@ function importRecordDraftFromFile(file) {
             setValue("representativeName", data.representativeName);
             setValue("representativeType", data.representativeType === "external" ? "external" : "internal");
             setValue("recordDate", data.recordDate || todayDay());
+            if (Array.isArray(data.auditors)) setFormAuditors(data.auditors);
             updateRepresentativeTypeHint();
 
             pendingAgencies = list;
@@ -12680,6 +13281,7 @@ function restoreRecordDraft() {
     setValue("representativeName", draft.representativeName);
     setValue("representativeType", draft.representativeType === "external" ? "external" : "internal");
     setValue("recordDate", draft.recordDate || todayDay());
+    if (Array.isArray(draft.auditors)) setFormAuditors(draft.auditors);
     updateRepresentativeTypeHint();
 
     pendingAgencies = Array.isArray(draft.pendingAgencies)
