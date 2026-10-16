@@ -1383,33 +1383,35 @@
                         <i class="ti ti-file-certificate"></i> أسعار الوكالات
                     </h3>
 
+                    <p class="field-hint base-prices-note" id="basePricesNote"></p>
+
                     <div id="pricesContainer"></div>
 
                 </div>
 
-                <!-- أسعار حسب الأشهر: جدول أسعار يبدأ من شهر معيّن -->
+                <!-- أسعار حسب الفترات: جدول أسعار يبدأ من تاريخ معيّن -->
                 <div class="content-card" id="priceScheduleCard">
 
                     <h3>
-                        <i class="ti ti-calendar-dollar"></i> أسعار حسب الأشهر
+                        <i class="ti ti-calendar-dollar"></i> أسعار حسب الفترات
                     </h3>
 
                     <p class="field-hint">
-                        الأسعار أعلاه هي الأساسية. أضف جدولاً يبدأ من شهر معيّن ليُطبَّق تلقائياً على كل سجل يقع «تاريخ السجل» فيه في ذلك الشهر أو بعده (حتى الجدول التالي). السجلات المحفوظة لا تتغير.
+                        كل جدول يبدأ من تاريخ معيّن ويُطبَّق تلقائياً على كل سجل يقع «تاريخ السجل» فيه في ذلك اليوم أو بعده (حتى الجدول التالي). سعر المكاتب الخارجية = سعر المكاتب الرئيسية + بدل الانتقال (يُضاف تلقائياً للعامة والخاصة والقضائية). السجلات المحفوظة لا تتغير.
                     </p>
 
                     <div class="schedule-add">
                         <label class="input-group">
-                            <span>يبدأ من شهر</span>
-                            <input type="month" id="scheduleMonth" lang="en-GB" dir="ltr">
+                            <span>يبدأ من تاريخ</span>
+                            <input type="date" id="scheduleMonth" lang="en-GB" dir="ltr">
                         </label>
-                        <button type="button" class="secondary-btn" id="addScheduleBtn"><i class="ti ti-plus"></i> إضافة جدول لهذا الشهر</button>
+                        <button type="button" class="secondary-btn" id="addScheduleBtn"><i class="ti ti-plus"></i> إضافة جدول من هذا التاريخ</button>
                     </div>
 
                     <div id="priceScheduleList"></div>
 
                     <div class="button-row">
-                        <button type="button" class="primary-btn" id="saveScheduleBtn"><i class="ti ti-device-floppy"></i> حفظ أسعار الأشهر</button>
+                        <button type="button" class="primary-btn" id="saveScheduleBtn"><i class="ti ti-device-floppy"></i> حفظ أسعار الفترات</button>
                     </div>
 
                 </div>

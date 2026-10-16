@@ -1898,24 +1898,67 @@ function getCurrentAgencyPricing() {
 
 const PRICE_SCHEDULE_KEY = "audit_price_schedule";
 
-let priceSchedule = loadData(PRICE_SCHEDULE_KEY, []);
+/*
+    جدول الأسعار الذي زوّدنا به المكتب لسنة 2026 (أسعار المكاتب الرئيسية).
+    «البدائية» = العامة والخاصة، و«المصدقة البدائية» = صورة مصدقة عامة/خاصة،
+    و«حصة الفرع» = المبلغ المطلوب من المندوب.
+    أسعار المندوبين الخارجيين = هذه الأسعار + بدل الانتقال (يُضاف تلقائياً
+    للعامة والخاصة والشرعية فقط)، لذلك لا تُدخل كجدول منفصل.
+    يُضاف مرة واحدة فقط إذا لم يكن للمستخدم جدول محفوظ.
+*/
+function priceRow(primary, primaryRep, legal, legalRep, certPrimary, certPrimaryRep, certLegal, certLegalRep, exec, execRep) {
+    return {
+        general: { agency: primary, representative: primaryRep },
+        special: { agency: primary, representative: primaryRep },
+        legal: { agency: legal, representative: legalRep },
+        certified_general_special: { agency: certPrimary, representative: certPrimaryRep },
+        certified_legal: { agency: certLegal, representative: certLegalRep },
+        executive: { agency: exec, representative: execRep }
+    };
+}
+
+const DEFAULT_PRICE_SCHEDULE = [
+    { from: "2026-03-01", prices: priceRow(1050, 580, 1050, 580, 1050, 580, 1050, 580, 520, 350) },
+    { from: "2026-03-05", prices: priceRow(1070, 600, 720, 250, 990, 550, 640, 200, 520, 350) },
+    { from: "2026-04-01", prices: priceRow(1700, 300, 1350, 125, 1550, 300, 1200, 125, 900, 50) },
+    { from: "2026-05-01", prices: priceRow(1900, 350, 1550, 175, 1550, 300, 1200, 125, 900, 50) },
+    { from: "2026-06-14", prices: priceRow(1900, 350, 1550, 175, 1650, 400, 1300, 225, 900, 50) },
+    { from: "2026-08-03", prices: priceRow(1700, 300, 1350, 125, 1650, 400, 1300, 225, 900, 50) },
+    { from: "2026-09-01", prices: priceRow(1700, 300, 1350, 125, 1550, 300, 1200, 125, 900, 50) }
+];
+
+let priceSchedule = loadData(PRICE_SCHEDULE_KEY, null);
 
 if (!Array.isArray(priceSchedule)) {
-    priceSchedule = [];
+    let stored = null;
+    try { stored = localStorage.getItem(PRICE_SCHEDULE_KEY); } catch (e) {}
+    priceSchedule = JSON.parse(JSON.stringify(DEFAULT_PRICE_SCHEDULE)).map(function (e) {
+        e.id = "default-" + e.from;
+        return e;
+    });
+    /* لا نكتب فوق جدول موجود (حتى لو كان تالفاً) */
+    if (stored === null) {
+        try { saveData(PRICE_SCHEDULE_KEY, priceSchedule); } catch (e) {}
+    }
+}
+
+/* بداية الجدول: يوم كامل YYYY-MM-DD (الجداول القديمة بالشهر تُعامل كأول يوم فيه) */
+function scheduleStart(from) {
+    return /^\d{4}-\d{2}$/.test(from || "") ? from + "-01" : String(from || "");
 }
 
 function getFormRecordDay() {
     return document.getElementById("recordDate")?.value || todayDay();
 }
 
-/* جدول الأسعار الساري ليوم معيّن */
+/* جدول الأسعار الساري ليوم معيّن: أحدث جدول بدأ في هذا اليوم أو قبله */
 function priceTableForDay(day) {
-    const month = String(day || todayDay()).slice(0, 7);
+    const d = String(day || todayDay()).slice(0, 10);
     const entry = priceSchedule
-        .filter(function (e) { return e && /^\d{4}-\d{2}$/.test(e.from) && e.from <= month; })
-        .sort(function (a, b) { return a.from.localeCompare(b.from); })
+        .filter(function (e) { return e && /^\d{4}-\d{2}(-\d{2})?$/.test(e.from) && scheduleStart(e.from) <= d; })
+        .sort(function (a, b) { return scheduleStart(a.from).localeCompare(scheduleStart(b.from)); })
         .pop();
-    return entry ? { prices: entry.prices || {}, month: entry.from } : { prices: prices, month: null };
+    return entry ? { prices: entry.prices || {}, month: scheduleStart(entry.from) } : { prices: prices, month: null };
 }
 
 /*
@@ -1960,7 +2003,7 @@ document.getElementById("recordDate")?.addEventListener("change", function () {
 
     appConfirm({
         title: "أسعار شهر مختلفة",
-        message: "تاريخ السجل الجديد يقع في شهر له أسعار " + (table.month ? "خاصة (من " + table.month + ")" : "أساسية") +
+        message: "تاريخ السجل الجديد يقع في فترة لها أسعار " + (table.month ? "خاصة (من " + formatDay(table.month) + ")" : "أساسية") +
             " مختلفة عن أسعار " + changed.length + " وكالة مضافة. هل تريد إعادة تسعير الوكالات المضافة حسب أسعار هذا الشهر؟",
         confirmText: "إعادة التسعير",
         cancelText: "إبقاء الأسعار كما هي"
@@ -8372,7 +8415,7 @@ function renderGuide() {
             "<li><b>إضافة سريعة:</b> <b>Ctrl + S</b> يضيف الوكالة من أي حقل في صفحة إنشاء السجل، و«وكالة مماثلة للأخيرة» يكرر آخر وكالة (نوعها وحالتها وإضافاتها وطوابعها) بالرقم التالي. رقم ونوع آخر وكالة يظهران في الشريط السفلي.</li>" +
             "<li><b>وكالة منسية:</b> اكتب رقمها الصحيح (مثلاً 116) ثم «إضافة الوكالة»، واختر «إدراجها وإزاحة الأرقام»: تأخذ رقمها، وكل وكالة بعدها يزداد رقمها 1 مع بقاء بياناتها.</li>" +
             "<li><b>تغيير النوع:</b> من قائمة «النوع» في سطر الوكالة المضافة؛ تُعاد حسابها بسعر النوع الجديد ويبقى رقمها.</li>" +
-            "<li><b>أسعار حسب الأشهر:</b> من قسم الأسعار ← «أسعار حسب الأشهر». كل وكالة جديدة تأخذ أسعار شهر «تاريخ السجل»، والسجلات المحفوظة لا تتغير.</li>" +
+            "<li><b>أسعار حسب الفترات:</b> من قسم الأسعار ← «أسعار حسب الفترات». كل جدول يبدأ من تاريخ (يوم) محدد، وكل وكالة جديدة تأخذ أسعار فترة «تاريخ السجل»، والسجلات المحفوظة لا تتغير.</li>" +
             "<li><b>الوضع الليلي:</b> زر «الوضع الليلي» في القائمة الجانبية (أو أيقونة القمر على الهاتف)، ويُحفظ اختيارك.</li>" +
             "<li><b>الحفظ التلقائي:</b> السجل غير المحفوظ يُستعاد تلقائياً إذا أُغلقت الصفحة أو انقطعت الكهرباء.</li>" +
             "<li><b>الحاسبة:</b> لحساب حصة أعضاء مجلس الفرع من بدل الانتقال لسجلات ومدى وكالات محددة، ولحساب وكالة دون إنشاء سجل، ولمطابقة ما سلّمه المندوب. كل ذلك منفصل ولا يغيّر أي رقم في السجلات.</li>" +
@@ -9505,10 +9548,10 @@ renderTransportPrices();
 }
 
 /* =========================================================
-بطاقة «أسعار حسب الأشهر» في صفحة الأسعار
+بطاقة «أسعار حسب الفترات» في صفحة الأسعار
 ========================================================= */
 
-/* نسخة عمل غير محفوظة حتى يُضغط «حفظ أسعار الأشهر» */
+/* نسخة عمل غير محفوظة حتى يُضغط «حفظ أسعار الفترات» */
 let scheduleDraft = null;
 
 function scheduleWorkingCopy() {
@@ -9518,12 +9561,13 @@ function scheduleWorkingCopy() {
     return scheduleDraft;
 }
 
-function monthLabel(ym) {
-    const p = String(ym).split("-").map(Number);
+/* تاريخ بداية الجدول للعرض: 5 آذار 2026 */
+function monthLabel(from) {
+    const p = scheduleStart(from).split("-").map(Number);
     try {
-        return new Date(p[0], p[1] - 1, 1).toLocaleDateString(NUMBER_LOCALE, { month: "long", year: "numeric" });
+        return new Date(p[0], p[1] - 1, p[2] || 1).toLocaleDateString(NUMBER_LOCALE, { day: "numeric", month: "long", year: "numeric" });
     } catch (e) {
-        return ym;
+        return from;
     }
 }
 
@@ -9535,20 +9579,31 @@ function renderPriceSchedule() {
         return;
     }
 
-    const list = scheduleWorkingCopy().slice().sort(function (a, b) { return a.from.localeCompare(b.from); });
+    const list = scheduleWorkingCopy().slice().sort(function (a, b) { return scheduleStart(a.from).localeCompare(scheduleStart(b.from)); });
+
+    /* تنبيه في بطاقة الأسعار الأساسية: متى تُستخدم */
+    const note = document.getElementById("basePricesNote");
+    if (note) {
+        const saved = priceSchedule.slice().sort(function (a, b) { return scheduleStart(a.from).localeCompare(scheduleStart(b.from)); });
+        const activeNow = priceTableForDay(todayDay()).month;
+        note.innerHTML = saved.length
+            ? '<i class="ti ti-info-circle" aria-hidden="true"></i><span>هذه الأسعار تُستخدم فقط للسجلات قبل ' + escapeHTML(monthLabel(saved[0].from)) +
+              ". " + (activeNow ? "الأسعار السارية الآن هي جدول <b>" + escapeHTML(monthLabel(activeNow)) + "</b> في «أسعار حسب الفترات» أدناه؛ لتغيير الأسعار الحالية أضف جدولاً جديداً بتاريخ بدايته." : "") + "</span>"
+            : "";
+    }
 
     if (!list.length) {
         box.innerHTML = '<p class="empty-hint">لا توجد جداول أسعار خاصة بأشهر. كل السجلات تستخدم الأسعار الأساسية.</p>';
         return;
     }
 
-    const currentMonth = todayDay().slice(0, 7);
-    const active = priceTableForDay(todayDay()).month;
+    const today = todayDay();
+    const active = priceTableForDay(today).month;
 
     box.innerHTML = list.map(function (entry) {
-        return '<div class="schedule-entry' + (entry.from === active ? " is-current" : "") + '" data-from="' + entry.from + '">' +
+        return '<div class="schedule-entry' + (scheduleStart(entry.from) === active ? " is-current" : "") + '" data-from="' + entry.from + '">' +
             '<div class="schedule-head"><strong><i class="ti ti-calendar-event" aria-hidden="true"></i> من ' + escapeHTML(monthLabel(entry.from)) + "</strong>" +
-            (entry.from === active ? '<span class="badge badge-success">السارية الآن</span>' : entry.from > currentMonth ? '<span class="badge badge-warning">قادمة</span>' : "") +
+            (scheduleStart(entry.from) === active ? '<span class="badge badge-success">السارية الآن</span>' : scheduleStart(entry.from) > today ? '<span class="badge badge-warning">قادمة</span>' : "") +
             '<button type="button" class="act-btn act-danger" data-remove-schedule="' + entry.from + '" aria-label="حذف جدول ' + entry.from + '"><i class="ti ti-trash" aria-hidden="true"></i> حذف</button></div>' +
             '<div class="table-wrapper"><table class="schedule-table"><thead><tr><th>نوع الوكالة</th><th class="num">سعر الوكالة</th><th class="num">المطلوب من المندوب</th></tr></thead><tbody>' +
             Object.keys(AGENCY_NAMES).map(function (type) {
@@ -9579,7 +9634,7 @@ document.getElementById("priceScheduleList")?.addEventListener("click", function
     const from = btn.dataset.removeSchedule;
     appConfirm({
         title: "حذف جدول أسعار الشهر",
-        message: "سيُحذف جدول الأسعار الذي يبدأ من " + monthLabel(from) + ". السجلات المحفوظة لا تتأثر. (يُطبَّق الحذف بعد الضغط على «حفظ أسعار الأشهر»)",
+        message: "سيُحذف جدول الأسعار الذي يبدأ من " + monthLabel(from) + ". السجلات المحفوظة لا تتأثر. (يُطبَّق الحذف بعد الضغط على «حفظ أسعار الفترات»)",
         confirmText: "حذف الجدول",
         cancelText: "إلغاء",
         danger: true
@@ -9595,19 +9650,19 @@ document.getElementById("addScheduleBtn")?.addEventListener("click", function ()
     const monthInput = document.getElementById("scheduleMonth");
     const from = monthInput?.value;
 
-    if (!/^\d{4}-\d{2}$/.test(from || "")) {
-        notify("اختر الشهر الذي تبدأ منه الأسعار.", "error");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "")) {
+        notify("اختر التاريخ الذي تبدأ منه الأسعار.", "error");
         monthInput?.focus();
         return;
     }
 
-    if (scheduleWorkingCopy().some(function (e) { return e.from === from; })) {
-        notify("يوجد جدول أسعار لهذا الشهر. عدّل أسعاره مباشرة.", "warning");
+    if (scheduleWorkingCopy().some(function (e) { return scheduleStart(e.from) === from; })) {
+        notify("يوجد جدول أسعار يبدأ في هذا التاريخ. عدّل أسعاره مباشرة.", "warning");
         return;
     }
 
-    /* يبدأ بأسعار الشهر الساري قبله، ثم تعدّلها */
-    const base = priceTableForDay(from + "-01").prices;
+    /* يبدأ بأسعار الفترة السارية قبله، ثم تعدّلها */
+    const base = priceTableForDay(from).prices;
     const copy = {};
     Object.keys(AGENCY_NAMES).forEach(function (type) {
         const p = (base && base[type]) || prices[type] || { agency: 0, representative: 0 };
@@ -9616,7 +9671,7 @@ document.getElementById("addScheduleBtn")?.addEventListener("click", function ()
 
     scheduleWorkingCopy().push({ id: generateId(), from: from, prices: copy, createdAt: new Date().toISOString() });
     renderPriceSchedule();
-    notify("أُضيف جدول أسعار يبدأ من " + escapeHTML(monthLabel(from)) + ". عدّل الأسعار ثم اضغط «حفظ أسعار الأشهر».", "info", 6000);
+    notify("أُضيف جدول أسعار يبدأ من " + escapeHTML(monthLabel(from)) + ". عدّل الأسعار ثم اضغط «حفظ أسعار الفترات».", "info", 6000);
 });
 
 document.getElementById("saveScheduleBtn")?.addEventListener("click", function () {
@@ -9626,12 +9681,12 @@ document.getElementById("saveScheduleBtn")?.addEventListener("click", function (
         return;
     }
 
-    const next = scheduleWorkingCopy().slice().sort(function (a, b) { return a.from.localeCompare(b.from); });
+    const next = scheduleWorkingCopy().slice().sort(function (a, b) { return scheduleStart(a.from).localeCompare(scheduleStart(b.from)); });
 
     try {
         saveData(PRICE_SCHEDULE_KEY, next);
     } catch (error) {
-        notify("تعذر حفظ أسعار الأشهر: " + escapeHTML(error && error.message || error), "error");
+        notify("تعذر حفظ أسعار الفترات: " + escapeHTML(error && error.message || error), "error");
         return;
     }
 
@@ -9639,7 +9694,7 @@ document.getElementById("saveScheduleBtn")?.addEventListener("click", function (
     scheduleDraft = null;
     renderPriceSchedule();
     updatePreview();
-    notify("<strong>حُفظت أسعار الأشهر</strong><span>" + next.length + " جدول. الوكالات الجديدة تأخذ أسعار شهر «تاريخ السجل».</span>", "success", 5000, true);
+    notify("<strong>حُفظت أسعار الفترات</strong><span>" + next.length + " جدول. الوكالات الجديدة تأخذ أسعار فترة «تاريخ السجل».</span>", "success", 5000, true);
 });
 
 /* =========================================================
