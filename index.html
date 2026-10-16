@@ -3,6 +3,18 @@
 
 <head>
     <meta charset="UTF-8">
+
+    <!-- الوضع النهاري/الليلي قبل رسم الصفحة (بلا وميض): اختيار المستخدم، وإلا إعداد الجهاز -->
+    <script>
+        (function () {
+            var t = null;
+            try { t = localStorage.getItem("audit_ui_theme"); } catch (e) {}
+            if (t !== "dark" && t !== "light") {
+                t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+            }
+            document.documentElement.setAttribute("data-theme", t);
+        })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>نظام تدقيق السجلات والوكالات</title>
@@ -113,6 +125,10 @@
                 <span id="mobileSectionName">الرئيسية</span>
             </div>
 
+            <button type="button" class="menu-toggle mobile-theme" onclick="toggleTheme()" aria-label="تبديل الوضع النهاري والليلي">
+                <i class="ti ti-moon theme-when-light"></i><i class="ti ti-sun theme-when-dark"></i>
+            </button>
+
             <button type="button" class="menu-toggle mobile-search" onclick="openGlobalSearch()" aria-label="بحث عن سجل أو وكالة">
                 <i class="ti ti-search"></i>
             </button>
@@ -149,6 +165,13 @@
                 <i class="ti ti-search" aria-hidden="true"></i>
                 <span>ابحث عن سجل أو وكالة…</span>
                 <kbd>Ctrl K</kbd>
+            </button>
+
+            <!-- التبديل بين الوضع النهاري والليلي -->
+            <button type="button" class="theme-toggle" onclick="toggleTheme()" aria-label="تبديل الوضع النهاري والليلي">
+                <span class="theme-icon" aria-hidden="true"><i class="ti ti-sun"></i><i class="ti ti-moon"></i></span>
+                <span class="theme-label">الوضع الليلي</span>
+                <span class="theme-switch" aria-hidden="true"></span>
             </button>
 
             <!-- بطاقة المستخدم -->
@@ -1018,10 +1041,20 @@
                                 type="button"
                                 id="addAgencyBtn"
                                 class="primary-btn"
-                                aria-keyshortcuts="Control+Enter"
+                                aria-keyshortcuts="Control+S Control+Enter"
                             >
                                 <i class="ti ti-plus"></i> إضافة الوكالة
-                                <kbd class="kbd-hint">Ctrl + Enter</kbd>
+                                <kbd class="kbd-hint">Ctrl + S</kbd>
+                            </button>
+
+                            <button
+                                type="button"
+                                id="similarAgencyBtn"
+                                class="secondary-btn"
+                                onclick="addSimilarAgency()"
+                                title="نفس نوع وحالة وإضافات آخر وكالة، بالرقم التالي"
+                            >
+                                <i class="ti ti-copy"></i> وكالة مماثلة للأخيرة
                             </button>
 
                             <button
@@ -1071,6 +1104,7 @@
                     <div class="record-dock" id="recordDock">
 
                         <dl class="dock-stats" aria-live="polite">
+                            <div class="dock-last is-empty" id="dockLast"><dt>آخر وكالة</dt><dd>—</dd></div>
                             <div><dt>الوكالات</dt><dd id="dockCount">0</dd></div>
                             <div><dt>إجمالي السجل</dt><dd id="dockGrand">0 ل.س</dd></div>
                             <div class="dock-due"><dt>المطلوب من المندوب</dt><dd id="dockRep">0 ل.س</dd></div>
@@ -1350,6 +1384,33 @@
                     </h3>
 
                     <div id="pricesContainer"></div>
+
+                </div>
+
+                <!-- أسعار حسب الأشهر: جدول أسعار يبدأ من شهر معيّن -->
+                <div class="content-card" id="priceScheduleCard">
+
+                    <h3>
+                        <i class="ti ti-calendar-dollar"></i> أسعار حسب الأشهر
+                    </h3>
+
+                    <p class="field-hint">
+                        الأسعار أعلاه هي الأساسية. أضف جدولاً يبدأ من شهر معيّن ليُطبَّق تلقائياً على كل سجل يقع «تاريخ السجل» فيه في ذلك الشهر أو بعده (حتى الجدول التالي). السجلات المحفوظة لا تتغير.
+                    </p>
+
+                    <div class="schedule-add">
+                        <label class="input-group">
+                            <span>يبدأ من شهر</span>
+                            <input type="month" id="scheduleMonth" lang="en-GB" dir="ltr">
+                        </label>
+                        <button type="button" class="secondary-btn" id="addScheduleBtn"><i class="ti ti-plus"></i> إضافة جدول لهذا الشهر</button>
+                    </div>
+
+                    <div id="priceScheduleList"></div>
+
+                    <div class="button-row">
+                        <button type="button" class="primary-btn" id="saveScheduleBtn"><i class="ti ti-device-floppy"></i> حفظ أسعار الأشهر</button>
+                    </div>
 
                 </div>
 

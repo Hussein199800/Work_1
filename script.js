@@ -1883,14 +1883,103 @@ function getCurrentAgencyPricing() {
     return getPricingForType(
         document.getElementById(
             "agencyType"
-        )?.value || DEFAULT_AGENCY_TYPE
+        )?.value || DEFAULT_AGENCY_TYPE,
+        getFormRecordDay()
     );
 }
 
-/* أسعار نوع وكالة معيّن (تستخدمها الحاسبة أيضاً) */
-function getPricingForType(type) {
+/* =========================================================
+الأسعار حسب الأشهر
+جدول أسعار يبدأ من شهر معيّن (مثلاً من 2026-11: الخاصة 1900).
+كل وكالة جديدة تأخذ أسعار شهر «تاريخ السجل»؛ الشهر الذي ليس له
+جدول يأخذ أحدث جدول قبله، وإلا الأسعار الأساسية.
+الوكالات المحفوظة تحتفظ بأسعارها (appliedPrices) ولا تتغير.
+========================================================= */
+
+const PRICE_SCHEDULE_KEY = "audit_price_schedule";
+
+let priceSchedule = loadData(PRICE_SCHEDULE_KEY, []);
+
+if (!Array.isArray(priceSchedule)) {
+    priceSchedule = [];
+}
+
+function getFormRecordDay() {
+    return document.getElementById("recordDate")?.value || todayDay();
+}
+
+/* جدول الأسعار الساري ليوم معيّن */
+function priceTableForDay(day) {
+    const month = String(day || todayDay()).slice(0, 7);
+    const entry = priceSchedule
+        .filter(function (e) { return e && /^\d{4}-\d{2}$/.test(e.from) && e.from <= month; })
+        .sort(function (a, b) { return a.from.localeCompare(b.from); })
+        .pop();
+    return entry ? { prices: entry.prices || {}, month: entry.from } : { prices: prices, month: null };
+}
+
+/*
+    تغيّر تاريخ السجل إلى شهر بأسعار مختلفة: نعرض إعادة تسعير
+    الوكالات المضافة بأسعار الشهر الجديد (بموافقة المستخدم فقط).
+*/
+function pendingAgenciesNeedingReprice(day) {
+    return pendingAgencies.filter(function (agency) {
+        if (agency.status === "cancelled") return false;
+        const p = getPricingForType(agency.type, day);
+        const applied = agency.appliedPrices || {};
+        return number(applied.agency !== undefined ? applied.agency : agency.basePrice) !== number(p.agency) ||
+            number(applied.representative !== undefined ? applied.representative : agency.representativeBase) !== number(p.representative);
+    });
+}
+
+function repricePendingAgencies(day) {
+    pendingAgencies = pendingAgencies.map(function (agency) {
+        return buildAgency(agencyInputsOf(agency), getPricingForType(agency.type, day), agency.id);
+    });
+    renderPendingAgencies();
+    updatePreview();
+}
+
+document.getElementById("recordDate")?.addEventListener("change", function () {
+
+    const day = this.value;
+
+    if (!day || !pendingAgencies.length) {
+        updatePreview();
+        return;
+    }
+
+    const changed = pendingAgenciesNeedingReprice(day);
+
+    if (!changed.length) {
+        updatePreview();
+        return;
+    }
+
+    const table = priceTableForDay(day);
+
+    appConfirm({
+        title: "أسعار شهر مختلفة",
+        message: "تاريخ السجل الجديد يقع في شهر له أسعار " + (table.month ? "خاصة (من " + table.month + ")" : "أساسية") +
+            " مختلفة عن أسعار " + changed.length + " وكالة مضافة. هل تريد إعادة تسعير الوكالات المضافة حسب أسعار هذا الشهر؟",
+        confirmText: "إعادة التسعير",
+        cancelText: "إبقاء الأسعار كما هي"
+    }).then(function (ok) {
+        if (ok) {
+            repricePendingAgencies(day);
+            notify("أُعيد تسعير " + pendingAgencies.length + " وكالة حسب أسعار الشهر.", "success");
+        }
+        updatePreview();
+    });
+});
+
+/* أسعار نوع وكالة معيّن في يوم معيّن (تستخدمها الحاسبة أيضاً) */
+function getPricingForType(type, day) {
+
+    const table = priceTableForDay(day);
 
     const globalPrice =
+        (table.prices && table.prices[type]) ||
         prices[type] ||
         DEFAULT_PRICES[type] ||
         {
@@ -1922,6 +2011,7 @@ function getPricingForType(type) {
             number(globalPrice.agency),
         representative:
             number(globalPrice.representative),
+        priceMonth: table.month,
         additions: additions,
         transport: getTransportPricing()
     };
@@ -2305,142 +2395,78 @@ return total;
 قراءة بيانات الوكالة
 ========================================================= */
 
-function getAgencyFromForm() {
+/*
+    مدخلات الوكالة كما هي في النموذج (بدون أي حساب).
+*/
+function readAgencyInputs() {
 
-const status =
-    document.getElementById(
-        "agencyStatus"
-    )?.value ||
-    "active";
+    const val = function (id) {
+        return document.getElementById(id)?.value;
+    };
 
+    return {
+        number: (val("agencyNumber") || "").trim(),
+        type: val("agencyType") || DEFAULT_AGENCY_TYPE,
+        status: val("agencyStatus") || "active",
+        duplicate: !!document.getElementById("agencyDuplicate")?.checked,
+        notes: (val("agencyNotes") || "").trim(),
+        additions: {
+            save: number(val("saveCount")),
+            signature: number(val("signatureCount")),
+            inheritance: number(val("inheritanceCount")),
+            children: number(val("childrenCount")),
+            agents: number(val("agentsCount")),
+            originality: number(val("originalityCount")),
+            transport: number(val("transportCount"))
+        },
+        missing: {
+            pleading: number(val("missingPleading")),
+            ambulance: number(val("missingAmbulance")),
+            aid: number(val("missingAid"))
+        }
+    };
+}
 
-const cancelled =
-    status ===
-    "cancelled";
+/* مدخلات وكالة محفوظة (لإعادة تسعيرها) */
+function agencyInputsOf(agency) {
+    const ms = agency.stamps || agency.missingStamps || {};
+    const ad = agency.additions || {};
+    return {
+        number: String(agency.number),
+        type: agency.type || DEFAULT_AGENCY_TYPE,
+        status: agency.status || "active",
+        duplicate: !!agency.duplicate,
+        notes: agency.notes || "",
+        additions: {
+            save: number(ad.save), signature: number(ad.signature), inheritance: number(ad.inheritance),
+            children: number(ad.children), agents: number(ad.agents), originality: number(ad.originality),
+            transport: number(ad.transport)
+        },
+        missing: { pleading: number(ms.pleading), ambulance: number(ms.ambulance), aid: number(ms.aid) }
+    };
+}
 
+/*
+    حساب الوكالة كاملة من مدخلاتها وأسعار معيّنة (نفس قواعد الحساب
+    السابقة تماماً). تُستخدم للنموذج ولإعادة التسعير حسب الشهر.
+*/
+function buildAgency(inputs, pricing, keepId) {
 
-const isDuplicate =
-    !!document.getElementById(
-        "agencyDuplicate"
-    )?.checked;
+    const status = inputs.status || "active";
+    const cancelled = status === "cancelled";
+    const type = inputs.type || DEFAULT_AGENCY_TYPE;
 
-
-const additions = {
-
-    save:
-        number(
-            document.getElementById(
-                "saveCount"
-            )?.value
-        ),
-
-    signature:
-        number(
-            document.getElementById(
-                "signatureCount"
-            )?.value
-        ),
-
-    inheritance:
-        number(
-            document.getElementById(
-                "inheritanceCount"
-            )?.value
-        ),
-
-    children:
-        number(
-            document.getElementById(
-                "childrenCount"
-            )?.value
-        ),
-
-    agents:
-        number(
-            document.getElementById(
-                "agentsCount"
-            )?.value
-        ),
-
-    originality:
-        number(
-            document.getElementById(
-                "originalityCount"
-            )?.value
-        ),
+    const additions = Object.assign({}, inputs.additions);
 
     /* الوكالة الملغاة، والأنواع التي لا يُضاف لها البدل، لا يُحسب عليها بدل انتقال */
-    transport:
-        cancelled ||
-        !isTransportEligible(
-            document.getElementById("agencyType")?.value || DEFAULT_AGENCY_TYPE
-        )
-            ? 0
-            : number(
-                document.getElementById(
-                    "transportCount"
-                )?.value
-            )
+    additions.transport = cancelled || !isTransportEligible(type) ? 0 : number(additions.transport);
 
-};
+    const missing = inputs.missing;
 
+    const additionResult = calculateAdditions(additions, pricing);
+    const stampResult = calculateStamps(additionResult, missing, cancelled);
 
-const missing = {
-
-    pleading:
-        number(
-            document.getElementById(
-                "missingPleading"
-            )?.value
-        ),
-
-    ambulance:
-        number(
-            document.getElementById(
-                "missingAmbulance"
-            )?.value
-        ),
-
-    aid:
-        number(
-            document.getElementById(
-                "missingAid"
-            )?.value
-        )
-
-};
-
-
-const pricing =
-    getCurrentAgencyPricing();
-
-
-const additionResult =
-    calculateAdditions(
-        additions,
-        pricing
-    );
-
-
-const stampResult =
-    calculateStamps(
-        additionResult,
-        missing,
-        cancelled
-    );
-
-
-const transportCash =
-    additions.transport *
-    number(
-        pricing
-            .transport
-            .cashRemainder
-    );
-
-
-const representativeAmount =
-    calculateRepresentativeAmount(
+    const representativeAmount = calculateRepresentativeAmount(
         pricing.representative,
         additionResult.total,
         stampResult.missingValue,
@@ -2448,130 +2474,42 @@ const representativeAmount =
         cancelled
     );
 
+    const basePrice = cancelled ? 0 : number(pricing.agency);
 
-const type =
-    document.getElementById(
-        "agencyType"
-    )?.value ||
-    DEFAULT_AGENCY_TYPE;
+    return {
+        id: keepId || generateId(),
+        number: inputs.number || String(getNextAgencyNumber()),
+        type: type,
+        typeName: AGENCY_NAMES[type],
+        status: status,
+        duplicate: !!inputs.duplicate,
+        transportInAdditions: true,
+        basePrice: basePrice,
+        representativeBase: cancelled ? 0 : number(pricing.representative),
+        additions: additions,
+        additionValues: additionResult.values,
+        additionsTotal: additionResult.total,
+        pleadingAdditions: additionResult.pleadingStamps,
+        stamps: missing,
+        missingStampsValue: stampResult.missingValue,
+        pleadingRequired: stampResult.requiredPleading,
+        representativeAmount: representativeAmount,
+        notes: inputs.notes || "",
+        transportSettings: JSON.parse(JSON.stringify(pricing.transport)),
+        appliedPrices: {
+            agency: basePrice,
+            representative: pricing.representative,
+            priceMonth: pricing.priceMonth || null,
+            additions: JSON.parse(JSON.stringify(pricing.additions)),
+            transport: JSON.parse(JSON.stringify(pricing.transport)),
+            stamps: JSON.parse(JSON.stringify(stampPrices))
+        }
+    };
+}
 
-
-const basePrice =
-    cancelled
-        ? 0
-        : number(
-            pricing.agency
-        );
-
-
-return {
-
-    id:
-        generateId(),
-
-    number:
-        document.getElementById(
-            "agencyNumber"
-        )?.value.trim() ||
-        String(
-            getNextAgencyNumber()
-        ),
-
-    type:
-        type,
-
-    typeName:
-        AGENCY_NAMES[type],
-
-    status:
-        status,
-
-    duplicate:
-        isDuplicate,
-
-    transportInAdditions:
-        true,
-
-    basePrice:
-        basePrice,
-
-    representativeBase:
-        cancelled
-            ? 0
-            : number(
-                pricing.representative
-            ),
-
-    additions:
-        additions,
-
-    additionValues:
-        additionResult.values,
-
-    additionsTotal:
-        additionResult.total,
-
-    pleadingAdditions:
-        additionResult.pleadingStamps,
-
-    stamps:
-        missing,
-
-    missingStampsValue:
-        stampResult.missingValue,
-
-    pleadingRequired:
-        stampResult.requiredPleading,
-
-    representativeAmount:
-        representativeAmount,
-
-    notes:
-        document.getElementById(
-            "agencyNotes"
-        )?.value.trim() ||
-        "",
-
-    transportSettings:
-        JSON.parse(
-            JSON.stringify(
-                pricing.transport
-            )
-        ),
-
-    appliedPrices: {
-
-        agency:
-            basePrice,
-
-        representative:
-            pricing.representative,
-
-        additions:
-            JSON.parse(
-                JSON.stringify(
-                    pricing.additions
-                )
-            ),
-
-        transport:
-            JSON.parse(
-                JSON.stringify(
-                    pricing.transport
-                )
-            ),
-
-        stamps:
-            JSON.parse(
-                JSON.stringify(
-                    stampPrices
-                )
-            )
-
-    }
-
-};
-
+function getAgencyFromForm() {
+    const inputs = readAgencyInputs();
+    return buildAgency(inputs, getPricingForType(inputs.type, getFormRecordDay()));
 }
 
 /* =========================================================
@@ -2635,6 +2573,40 @@ function setAgencyTransportCount(agency, newCount) {
     agency.representativeAmount = number(agency.representativeAmount) + cashDiff;
     agency.transportInAdditions = true;
 }
+
+/*
+    تغيير نوع وكالة مضافة من سطرها: تُعاد حسابها بأسعار النوع الجديد
+    (حسب شهر تاريخ السجل) مع بقاء رقمها وإضافاتها وطوابعها وملاحظاتها.
+*/
+function changePendingType(index, type) {
+
+    const agency = pendingAgencies[index];
+
+    if (!agency || !AGENCY_NAMES[type] || agency.type === type) {
+        return;
+    }
+
+    const inputs = agencyInputsOf(agency);
+    const wasEligible = isTransportEligible(agency.type);
+
+    inputs.type = type;
+
+    /* صار النوع مشمولاً ببدل الانتقال والمندوب خارجي: بدل واحد كبقية الوكالات */
+    if (!wasEligible && isTransportEligible(type) && isExternalRepresentative() && inputs.status !== "cancelled") {
+        inputs.additions.transport = 1;
+    }
+
+    const updated = buildAgency(inputs, getPricingForType(type, getFormRecordDay()), agency.id);
+
+    pendingAgencies[index] = updated;
+    lastAddedAgencyId = updated.id;
+    renderPendingAgencies();
+
+    notify("<strong>تغيّر نوع الوكالة رقم " + escapeHTML(updated.number) + "</strong><span>" + AGENCY_NAMES[type] +
+        " — السعر " + money(updated.basePrice) + "</span>", "success", 3500, true);
+}
+
+window.changePendingType = changePendingType;
 
 function changePendingTransport(index, value) {
     const agency = pendingAgencies[index];
@@ -2802,17 +2774,92 @@ function updateRecordDock() {
     count.textContent = pendingAgencies.length;
     document.getElementById("dockGrand").textContent = money(grand);
     document.getElementById("dockRep").textContent = money(rep);
+
+    /* آخر وكالة أُضيفت: رقمها ونوعها بلونه */
+    const lastBox = document.getElementById("dockLast");
+
+    if (lastBox) {
+        const last =
+            pendingAgencies.find(function (a) { return a.id === lastAddedAgencyId; }) ||
+            pendingAgencies[pendingAgencies.length - 1];
+
+        lastBox.classList.toggle("is-empty", !last);
+        lastBox.innerHTML = last
+            ? '<dt>آخر وكالة</dt><dd><span class="dock-last-no" style="--c:' + (AGENCY_TYPE_COLORS[last.type] || "#888") + '">' + escapeHTML(last.number) + "</span>" +
+              escapeHTML(AGENCY_NAMES[last.type] || "") + (last.status !== "active" ? " · " + getAgencyStatusName(last.status) : "") + "</dd>"
+            : "<dt>آخر وكالة</dt><dd>—</dd>";
+    }
 }
 
 /*
-    Ctrl + Enter يضيف الوكالة من أي حقل في صفحة الإنشاء.
+    «وكالة مماثلة»: نفس نوع وحالة وإضافات وطوابع آخر وكالة أُضيفت،
+    بالرقم التالي، بضغطة واحدة. الحساب يتم بنفس طريقة الإضافة العادية.
+*/
+function addSimilarAgency() {
+
+    const last =
+        pendingAgencies.find(function (a) { return a.id === lastAddedAgencyId; }) ||
+        pendingAgencies[pendingAgencies.length - 1];
+
+    if (!last) {
+        notify("أضف وكالة أولاً، ثم استخدم «وكالة مماثلة» لتكرارها برقم جديد.", "warning");
+        return;
+    }
+
+    const set = function (id, value) {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    };
+
+    const ad = last.additions || {};
+    const ms = last.stamps || last.missingStamps || {};
+
+    set("agencyNumber", getNextAgencyNumber());
+    set("agencyType", last.type);
+    set("agencyStatus", last.status || "active");
+    set("saveCount", number(ad.save));
+    set("signatureCount", number(ad.signature));
+    set("inheritanceCount", number(ad.inheritance));
+    set("childrenCount", number(ad.children));
+    set("agentsCount", number(ad.agents));
+    set("originalityCount", number(ad.originality));
+    set("missingPleading", number(ms.pleading));
+    set("missingAmbulance", number(ms.ambulance));
+    set("missingAid", number(ms.aid));
+    set("agencyNotes", "");
+
+    const dup = document.getElementById("agencyDuplicate");
+    if (dup) dup.checked = false;
+
+    const transport = document.getElementById("transportCount");
+    if (transport) {
+        transport.value = number(ad.transport);
+        if (number(ad.transport) === 0) transport.dataset.userZero = "1"; else delete transport.dataset.userZero;
+    }
+
+    syncTransportField();
+    updatePreview();
+
+    document.getElementById("addAgencyBtn")?.click();
+}
+
+window.addSimilarAgency = addSimilarAgency;
+
+/*
+    Ctrl + S (أو Ctrl + Enter) يضيف الوكالة من أي حقل في صفحة الإنشاء.
+    في هذه الصفحة يُمنع حفظ المتصفح للصفحة (Ctrl + S) حتى لا يتعارض،
+    وفي بقية الصفحات يبقى سلوك المتصفح كما هو.
     لا نستخدم Enter وحده حتى لا تُضاف وكالة إضافية بضغطة غير مقصودة.
 */
 document.addEventListener("keydown", function (event) {
 
+    const isAddShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.shiftKey && !event.altKey &&
+        (event.key === "Enter" || event.code === "KeyS" || event.key === "s" || event.key === "S" || event.key === "س");
+
     if (
-        event.key !== "Enter" ||
-        !(event.ctrlKey || event.metaKey) ||
+        !isAddShortcut ||
         document.querySelector("dialog[open]") ||
         !document.getElementById("newRecordSection")?.classList.contains("active-section")
     ) {
@@ -3001,14 +3048,62 @@ addAgencyBtn.addEventListener(
         });
 
         if (sameNumber && !agency.duplicate) {
-            appConfirm({
-                title: "رقم الوكالة مضاف مسبقاً",
-                message: "الوكالة رقم " + agency.number + " موجودة في هذا السجل. هل تريد إضافتها مرة أخرى؟",
-                confirmText: "إضافتها مرة أخرى",
-                cancelText: "إلغاء",
-                danger: true
-            }).then(function (ok) {
-                if (ok) {
+
+            const n = parseInt(agency.number, 10);
+            const numeric = String(n) === String(agency.number).trim();
+            const following = numeric ? pendingAgencies.filter(function (item) {
+                const v = parseInt(item.number, 10);
+                return Number.isFinite(v) && v >= n;
+            }).length : 0;
+
+            const choices = [];
+
+            /*
+                وكالة منسية: تُدرج بهذا الرقم، وكل وكالة رقمها مساوٍ له أو
+                أكبر يزداد رقمها 1 (بياناتها كما هي)، فيصبح التسلسل مطابقاً للدفتر.
+            */
+            if (numeric) {
+                choices.push({ value: "insert", label: "إدراجها وإزاحة " + following + " وكالة +1", kind: "primary" });
+            }
+            choices.push({ value: "duplicate", label: "إضافتها كمكررة", kind: "secondary" });
+
+            appChoose({
+                title: "رقم الوكالة " + agency.number + " مستخدم في هذا السجل",
+                message: numeric
+                    ? "إن كانت هذه وكالة منسية: «إدراجها» يضعها بالرقم " + agency.number + " ويزيد أرقام الوكالات من " + agency.number + " فما بعد بواحد (" + following + " وكالة)، مع بقاء بيانات كل وكالة كما هي. أو أضفها كمكررة بنفس الرقم."
+                    : "الوكالة رقم " + agency.number + " موجودة في هذا السجل. هل تريد إضافتها كمكررة؟",
+                choices: choices
+            }).then(function (choice) {
+
+                if (choice === "insert") {
+
+                    pendingAgencies.forEach(function (item) {
+                        const v = parseInt(item.number, 10);
+                        if (Number.isFinite(v) && String(v) === String(item.number).trim() && v >= n) {
+                            item.number = String(v + 1);
+                        }
+                    });
+
+                    /* إدراجها في مكانها حسب الترتيب */
+                    const at = pendingAgencies.findIndex(function (item) {
+                        const v = parseInt(item.number, 10);
+                        return Number.isFinite(v) && v > n;
+                    });
+
+                    if (at === -1) {
+                        pendingAgencies.push(agency);
+                    } else {
+                        pendingAgencies.splice(at, 0, agency);
+                    }
+
+                    lastAddedAgencyId = agency.id;
+                    renderPendingAgencies();
+                    clearAgencyForm();
+                    announceAgencyAdded(agency);
+                    notify("<strong>أُدرجت الوكالة رقم " + escapeHTML(agency.number) + "</strong><span>وزادت أرقام " + following +
+                        " وكالة بعدها بواحد. راجع التسلسل ثم احفظ السجل.</span>", "success", 6000, true);
+
+                } else if (choice === "duplicate") {
                     agency.duplicate = true;
                     commit();
                 }
@@ -3237,6 +3332,15 @@ container.innerHTML =
 
 
                         <div class="button-row">
+
+                            <label class="type-select" title="تغيير نوع الوكالة من سطرها">
+                                النوع
+                                <select onchange="changePendingType(${index}, this.value)" aria-label="نوع الوكالة رقم ${escapeHTML(agency.number)}">
+                                    ${Object.keys(AGENCY_NAMES).map(function (t) {
+                                        return '<option value="' + t + '"' + (t === agency.type ? " selected" : "") + ">" + AGENCY_NAMES[t] + "</option>";
+                                    }).join("")}
+                                </select>
+                            </label>
 
                             ${transportControl}
 
@@ -4111,87 +4215,117 @@ recordForm.addEventListener(
         };
 
 
-        /* نسخة من السجلات قبل التغيير: إن فشل الحفظ نرجع إليها */
-        const recordsBefore = records.slice();
-
-        const index =
-            editingId
-                ? records.findIndex(
-                    function (item) {
-
-                        return (
-                            item.id ===
-                            editingId
-                        );
-
-                    }
-                )
-                : -1;
-
         /*
-            سجل قيد التعديل لم يعد موجوداً (مسودة قديمة، أو استعادة نسخة
-            احتياطية): يُحفظ كسجل جديد بدل أن يضيع بصمت.
+            منع تكرار السجلات: رقم سجل موجود مسبقاً (لسجل آخر) يحتاج تأكيداً،
+            حتى لا يُحفظ نفس السجل مرتين دون انتباه.
         */
-        if (index !== -1) {
+        const sameRecord = records.find(function (r) {
+            return r.id !== record.id && String(r.recordNumber).trim() === recordNumber;
+        });
 
-            records[index] =
-                record;
+        const proceed = function () {
 
-        } else {
+            /* نسخة من السجلات قبل التغيير: إن فشل الحفظ نرجع إليها */
+            const recordsBefore = records.slice();
 
-            records.push(
-                record
-            );
+            const index =
+                editingId
+                    ? records.findIndex(
+                        function (item) {
 
+                            return (
+                                item.id ===
+                                editingId
+                            );
+
+                        }
+                    )
+                    : -1;
+
+            /*
+                سجل قيد التعديل لم يعد موجوداً (مسودة قديمة، أو استعادة نسخة
+                احتياطية): يُحفظ كسجل جديد بدل أن يضيع بصمت.
+            */
+            if (index !== -1) {
+
+                records[index] =
+                    record;
+
+            } else {
+
+                records.push(
+                    record
+                );
+
+            }
+
+            /* زر الحفظ يتوقف حتى ينتهي الحفظ (لا حفظ مزدوج) */
+            const submitButtons = recordForm.querySelectorAll('button[type="submit"]');
+            submitButtons.forEach(function (b) { b.disabled = true; });
+
+            persistRecords().then(function () {
+
+                /* الحفظ تمّ: أي خطأ في تحديث العرض بعده لا يُلغي الحفظ */
+                [resetRecordForm, renderRecords, updateDashboard, renderReports].forEach(function (step) {
+                    try {
+                        step();
+                    } catch (error) {
+                        console.error("After-save step failed:", step.name, error);
+                    }
+                });
+
+                notify(
+                    "<strong>" + (index !== -1 ? "تم تعديل السجل بنجاح" : "تم حفظ السجل بنجاح") + "</strong>" +
+                    "<span>سجل " + escapeHTML(record.recordNumber) + " — " + record.agencies.length + " وكالة</span>",
+                    "success",
+                    4000,
+                    true
+                );
+
+                switchSection(
+                    "recordsSection"
+                );
+
+            }).catch(function (error) {
+
+                records = recordsBefore;
+
+                console.error("Save record failed:", error);
+
+                notify(
+                    "<strong>لم يُحفظ السجل</strong><span>" +
+                    (isQuotaError(error)
+                        ? "مساحة التخزين في المتصفح ممتلئة. حمّل نسخة احتياطية من قسم المستخدمين ثم أخبر المسؤول."
+                        : "حدث خطأ أثناء الحفظ: " + escapeHTML(error && error.message || error)) +
+                    " بيانات السجل ما زالت في النموذج ولم تُمسح.</span>",
+                    "error",
+                    12000,
+                    true
+                );
+
+            }).then(function () {
+                submitButtons.forEach(function (b) { b.disabled = false; });
+            });
+        };
+
+        if (sameRecord) {
+            appChoose({
+                title: "رقم السجل " + recordNumber + " موجود مسبقاً",
+                message: "يوجد سجل محفوظ بنفس الرقم (" + (sameRecord.officeName || "") + " — " + (sameRecord.representativeName || "") + " — " +
+                    formatDay(getRecordDay(sameRecord)) + " — " + (sameRecord.agencies || []).length + " وكالة). هل هذا سجل مختلف فعلاً؟",
+                choices: [
+                    { value: "save", label: "نعم، احفظه كسجل منفصل", kind: "primary" },
+                    { value: "open", label: "افتح السجل الموجود", kind: "secondary" }
+                ]
+            }).then(function (choice) {
+                if (choice === "save") proceed();
+                if (choice === "open") showFinalRecordReport(sameRecord.id, "summary");
+            });
+            return;
         }
 
-        /* زر الحفظ يتوقف حتى ينتهي الحفظ (لا حفظ مزدوج) */
-        const submitButtons = recordForm.querySelectorAll('button[type="submit"]');
-        submitButtons.forEach(function (b) { b.disabled = true; });
+        proceed();
 
-        persistRecords().then(function () {
-
-            /* الحفظ تمّ: أي خطأ في تحديث العرض بعده لا يُلغي الحفظ */
-            [resetRecordForm, renderRecords, updateDashboard, renderReports].forEach(function (step) {
-                try {
-                    step();
-                } catch (error) {
-                    console.error("After-save step failed:", step.name, error);
-                }
-            });
-
-            notify(
-                "<strong>" + (index !== -1 ? "تم تعديل السجل بنجاح" : "تم حفظ السجل بنجاح") + "</strong>" +
-                "<span>سجل " + escapeHTML(record.recordNumber) + " — " + record.agencies.length + " وكالة</span>",
-                "success",
-                4000,
-                true
-            );
-
-            switchSection(
-                "recordsSection"
-            );
-
-        }).catch(function (error) {
-
-            records = recordsBefore;
-
-            console.error("Save record failed:", error);
-
-            notify(
-                "<strong>لم يُحفظ السجل</strong><span>" +
-                (isQuotaError(error)
-                    ? "مساحة التخزين في المتصفح ممتلئة. حمّل نسخة احتياطية من قسم المستخدمين ثم أخبر المسؤول."
-                    : "حدث خطأ أثناء الحفظ: " + escapeHTML(error && error.message || error)) +
-                " بيانات السجل ما زالت في النموذج ولم تُمسح.</span>",
-                "error",
-                12000,
-                true
-            );
-
-        }).then(function () {
-            submitButtons.forEach(function (b) { b.disabled = false; });
-        });
 
     }
 );
@@ -4505,6 +4639,38 @@ function openGlobalSearch() {
 }
 
 window.openGlobalSearch = openGlobalSearch;
+
+/* =========================================================
+الوضع النهاري / الليلي
+الاختيار يُحفظ في audit_ui_theme (تفضيل عرض، ليس بيانات) ويُطبَّق
+قبل رسم الصفحة من index.html حتى لا يومض.
+========================================================= */
+
+function currentTheme() {
+    return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+
+function applyThemeChrome() {
+    const dark = currentTheme() === "dark";
+    document.querySelectorAll(".theme-label").forEach(function (el) {
+        el.textContent = dark ? "الوضع النهاري" : "الوضع الليلي";
+    });
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#16121f" : "#efebe3");
+}
+
+function toggleTheme() {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    const root = document.documentElement;
+    root.classList.add("theme-switching");
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("audit_ui_theme", next); } catch (e) {}
+    applyThemeChrome();
+    setTimeout(function () { root.classList.remove("theme-switching"); }, 400);
+}
+
+window.toggleTheme = toggleTheme;
+
+onReady(applyThemeChrome);
 
 /* Ctrl + K (أو ⌘ + K) يفتح البحث من أي مكان */
 document.addEventListener("keydown", function (event) {
@@ -5897,6 +6063,72 @@ onReady(function () {
         notify(flash.message, flash.variant, 4500);
     }
 });
+
+/*
+    نافذة اختيار بين عدة أفعال. تُرجع Promise بقيمة الخيار، أو null عند الإلغاء.
+    options: { title, message, choices: [{ value, label, kind: primary|secondary|danger }] }
+*/
+function appChoose(options) {
+
+    options = options || {};
+
+    return new Promise(function (resolve) {
+
+        const dialog = document.createElement("dialog");
+        dialog.className = "app-dialog no-print";
+        dialog.setAttribute("aria-labelledby", "appChooseTitle");
+
+        dialog.innerHTML =
+            '<div class="app-dialog-card">' +
+                '<div class="app-dialog-icon" aria-hidden="true"><i class="ti ti-arrows-sort"></i></div>' +
+                '<h3 id="appChooseTitle"></h3>' +
+                '<p class="app-dialog-message"></p>' +
+                '<div class="app-dialog-actions app-choose-actions"></div>' +
+            "</div>";
+
+        dialog.querySelector("h3").textContent = options.title || "اختر";
+        dialog.querySelector(".app-dialog-message").textContent = options.message || "";
+
+        let done = false;
+
+        const finish = function (value) {
+            if (done) return;
+            done = true;
+            try { if (dialog.open) dialog.close(); } catch (e) {}
+            dialog.remove();
+            resolve(value);
+        };
+
+        const actions = dialog.querySelector(".app-choose-actions");
+
+        (options.choices || []).concat([{ value: null, label: "إلغاء", kind: "secondary" }]).forEach(function (choice) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = (choice.kind === "danger" ? "danger-btn" : choice.kind === "primary" ? "primary-btn" : "secondary-btn");
+            b.textContent = choice.label;
+            b.addEventListener("click", function () { finish(choice.value); });
+            actions.appendChild(b);
+        });
+
+        dialog.addEventListener("cancel", function (event) { event.preventDefault(); finish(null); });
+        dialog.addEventListener("close", function () { finish(null); });
+        dialog.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") { event.preventDefault(); finish(null); }
+        });
+        dialog.addEventListener("click", function (event) {
+            if (event.target === dialog) finish(null);
+        });
+
+        document.body.appendChild(dialog);
+
+        if (typeof dialog.showModal === "function") {
+            dialog.showModal();
+            actions.querySelector("button")?.focus();
+        } else {
+            finish(null);
+        }
+    });
+}
 
 /*
     نافذة تأكيد بتصميم النظام. تُرجع Promise بقيمة true عند التأكيد.
@@ -8137,6 +8369,11 @@ function renderGuide() {
         '<ul class="guide-list">' +
             "<li><b>عرض نوع واحد:</b> في التقرير المختصر أو المفصل اضغط على نوع الوكالة لعرض وكالاته فقط، ومنها زر «تعديل» لكل وكالة.</li>" +
             "<li><b>بعد تعديل وكالة:</b> اضغط «إضافة الوكالة» ثم «حفظ السجل» حتى يُحفظ التعديل.</li>" +
+            "<li><b>إضافة سريعة:</b> <b>Ctrl + S</b> يضيف الوكالة من أي حقل في صفحة إنشاء السجل، و«وكالة مماثلة للأخيرة» يكرر آخر وكالة (نوعها وحالتها وإضافاتها وطوابعها) بالرقم التالي. رقم ونوع آخر وكالة يظهران في الشريط السفلي.</li>" +
+            "<li><b>وكالة منسية:</b> اكتب رقمها الصحيح (مثلاً 116) ثم «إضافة الوكالة»، واختر «إدراجها وإزاحة الأرقام»: تأخذ رقمها، وكل وكالة بعدها يزداد رقمها 1 مع بقاء بياناتها.</li>" +
+            "<li><b>تغيير النوع:</b> من قائمة «النوع» في سطر الوكالة المضافة؛ تُعاد حسابها بسعر النوع الجديد ويبقى رقمها.</li>" +
+            "<li><b>أسعار حسب الأشهر:</b> من قسم الأسعار ← «أسعار حسب الأشهر». كل وكالة جديدة تأخذ أسعار شهر «تاريخ السجل»، والسجلات المحفوظة لا تتغير.</li>" +
+            "<li><b>الوضع الليلي:</b> زر «الوضع الليلي» في القائمة الجانبية (أو أيقونة القمر على الهاتف)، ويُحفظ اختيارك.</li>" +
             "<li><b>الحفظ التلقائي:</b> السجل غير المحفوظ يُستعاد تلقائياً إذا أُغلقت الصفحة أو انقطعت الكهرباء.</li>" +
             "<li><b>الحاسبة:</b> لحساب حصة أعضاء مجلس الفرع من بدل الانتقال لسجلات ومدى وكالات محددة، ولحساب وكالة دون إنشاء سجل، ولمطابقة ما سلّمه المندوب. كل ذلك منفصل ولا يغيّر أي رقم في السجلات.</li>" +
             "<li><b>حفظ PDF:</b> في نافذة الطباعة اختر «حفظ بتنسيق PDF» وفعّل «رسومات الخلفية» لتظهر الألوان.</li>" +
@@ -9259,11 +9496,151 @@ container.innerHTML =
 
 renderAdditionPrices();
 
+renderPriceSchedule();
+
 renderStampPrices();
 
 renderTransportPrices();
 
 }
+
+/* =========================================================
+بطاقة «أسعار حسب الأشهر» في صفحة الأسعار
+========================================================= */
+
+/* نسخة عمل غير محفوظة حتى يُضغط «حفظ أسعار الأشهر» */
+let scheduleDraft = null;
+
+function scheduleWorkingCopy() {
+    if (!scheduleDraft) {
+        scheduleDraft = JSON.parse(JSON.stringify(priceSchedule));
+    }
+    return scheduleDraft;
+}
+
+function monthLabel(ym) {
+    const p = String(ym).split("-").map(Number);
+    try {
+        return new Date(p[0], p[1] - 1, 1).toLocaleDateString(NUMBER_LOCALE, { month: "long", year: "numeric" });
+    } catch (e) {
+        return ym;
+    }
+}
+
+function renderPriceSchedule() {
+
+    const box = document.getElementById("priceScheduleList");
+
+    if (!box) {
+        return;
+    }
+
+    const list = scheduleWorkingCopy().slice().sort(function (a, b) { return a.from.localeCompare(b.from); });
+
+    if (!list.length) {
+        box.innerHTML = '<p class="empty-hint">لا توجد جداول أسعار خاصة بأشهر. كل السجلات تستخدم الأسعار الأساسية.</p>';
+        return;
+    }
+
+    const currentMonth = todayDay().slice(0, 7);
+    const active = priceTableForDay(todayDay()).month;
+
+    box.innerHTML = list.map(function (entry) {
+        return '<div class="schedule-entry' + (entry.from === active ? " is-current" : "") + '" data-from="' + entry.from + '">' +
+            '<div class="schedule-head"><strong><i class="ti ti-calendar-event" aria-hidden="true"></i> من ' + escapeHTML(monthLabel(entry.from)) + "</strong>" +
+            (entry.from === active ? '<span class="badge badge-success">السارية الآن</span>' : entry.from > currentMonth ? '<span class="badge badge-warning">قادمة</span>' : "") +
+            '<button type="button" class="act-btn act-danger" data-remove-schedule="' + entry.from + '" aria-label="حذف جدول ' + entry.from + '"><i class="ti ti-trash" aria-hidden="true"></i> حذف</button></div>' +
+            '<div class="table-wrapper"><table class="schedule-table"><thead><tr><th>نوع الوكالة</th><th class="num">سعر الوكالة</th><th class="num">المطلوب من المندوب</th></tr></thead><tbody>' +
+            Object.keys(AGENCY_NAMES).map(function (type) {
+                const p = (entry.prices && entry.prices[type]) || prices[type] || { agency: 0, representative: 0 };
+                return "<tr><td>" + agencyTypeDot(type) + AGENCY_NAMES[type] + "</td>" +
+                    '<td class="num"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" data-sch-type="' + type + '" data-sch-field="agency" value="' + number(p.agency) + '" aria-label="سعر ' + AGENCY_NAMES[type] + '"></td>' +
+                    '<td class="num"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" data-sch-type="' + type + '" data-sch-field="representative" value="' + number(p.representative) + '" aria-label="المطلوب من المندوب ' + AGENCY_NAMES[type] + '"></td></tr>';
+            }).join("") +
+            "</tbody></table></div></div>";
+    }).join("");
+}
+
+/* قيم الحقول تُنقل إلى نسخة العمل عند الكتابة */
+document.getElementById("priceScheduleList")?.addEventListener("input", function (event) {
+    const input = event.target.closest("[data-sch-type]");
+    if (!input) return;
+    const from = input.closest("[data-from]").dataset.from;
+    const entry = scheduleWorkingCopy().find(function (e) { return e.from === from; });
+    if (!entry) return;
+    entry.prices = entry.prices || {};
+    entry.prices[input.dataset.schType] = entry.prices[input.dataset.schType] || {};
+    entry.prices[input.dataset.schType][input.dataset.schField] = number(input.value);
+});
+
+document.getElementById("priceScheduleList")?.addEventListener("click", function (event) {
+    const btn = event.target.closest("[data-remove-schedule]");
+    if (!btn) return;
+    const from = btn.dataset.removeSchedule;
+    appConfirm({
+        title: "حذف جدول أسعار الشهر",
+        message: "سيُحذف جدول الأسعار الذي يبدأ من " + monthLabel(from) + ". السجلات المحفوظة لا تتأثر. (يُطبَّق الحذف بعد الضغط على «حفظ أسعار الأشهر»)",
+        confirmText: "حذف الجدول",
+        cancelText: "إلغاء",
+        danger: true
+    }).then(function (ok) {
+        if (!ok) return;
+        scheduleDraft = scheduleWorkingCopy().filter(function (e) { return e.from !== from; });
+        renderPriceSchedule();
+    });
+});
+
+document.getElementById("addScheduleBtn")?.addEventListener("click", function () {
+
+    const monthInput = document.getElementById("scheduleMonth");
+    const from = monthInput?.value;
+
+    if (!/^\d{4}-\d{2}$/.test(from || "")) {
+        notify("اختر الشهر الذي تبدأ منه الأسعار.", "error");
+        monthInput?.focus();
+        return;
+    }
+
+    if (scheduleWorkingCopy().some(function (e) { return e.from === from; })) {
+        notify("يوجد جدول أسعار لهذا الشهر. عدّل أسعاره مباشرة.", "warning");
+        return;
+    }
+
+    /* يبدأ بأسعار الشهر الساري قبله، ثم تعدّلها */
+    const base = priceTableForDay(from + "-01").prices;
+    const copy = {};
+    Object.keys(AGENCY_NAMES).forEach(function (type) {
+        const p = (base && base[type]) || prices[type] || { agency: 0, representative: 0 };
+        copy[type] = { agency: number(p.agency), representative: number(p.representative) };
+    });
+
+    scheduleWorkingCopy().push({ id: generateId(), from: from, prices: copy, createdAt: new Date().toISOString() });
+    renderPriceSchedule();
+    notify("أُضيف جدول أسعار يبدأ من " + escapeHTML(monthLabel(from)) + ". عدّل الأسعار ثم اضغط «حفظ أسعار الأشهر».", "info", 6000);
+});
+
+document.getElementById("saveScheduleBtn")?.addEventListener("click", function () {
+
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("هذه العملية للمدير فقط.", "error");
+        return;
+    }
+
+    const next = scheduleWorkingCopy().slice().sort(function (a, b) { return a.from.localeCompare(b.from); });
+
+    try {
+        saveData(PRICE_SCHEDULE_KEY, next);
+    } catch (error) {
+        notify("تعذر حفظ أسعار الأشهر: " + escapeHTML(error && error.message || error), "error");
+        return;
+    }
+
+    priceSchedule = next;
+    scheduleDraft = null;
+    renderPriceSchedule();
+    updatePreview();
+    notify("<strong>حُفظت أسعار الأشهر</strong><span>" + next.length + " جدول. الوكالات الجديدة تأخذ أسعار شهر «تاريخ السجل».</span>", "success", 5000, true);
+});
 
 /* =========================================================
 أسعار الإضافات
@@ -11010,6 +11387,7 @@ function downloadBackup() {
         stampPrices: stampPrices,
         committeeShares: committeeShares,
         committeeRates: committeeRates,
+        priceSchedule: priceSchedule,
         councilSaved: councilSaved,
         records: records
     };
@@ -11111,6 +11489,11 @@ function applyBackupSettings(data) {
 
         if (Array.isArray(data.councilSaved)) {
             saveData(COUNCIL_SAVED_KEY, data.councilSaved);
+        }
+
+        /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+        if (Array.isArray(data.priceSchedule)) {
+            saveData(PRICE_SCHEDULE_KEY, data.priceSchedule);
         }
 
         /*
