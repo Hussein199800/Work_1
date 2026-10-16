@@ -1487,6 +1487,7 @@
                                 <li>البنود (النقص، الإضافات، البدل) في عمود طولي واحد بحقول صغيرة، وأنواع الوكالات الأقل استخداماً في سطر ثانٍ.</li>
                                 <li>اسم المدقق (واحد أو اثنان) لكل سجل داخل البرنامج فقط، مع فلتر في صفحة السجلات.</li>
                                 <li>فحص اختياري لتسلسل أرقام الوكالات عند الحفظ، و Ctrl + Z لإلغاء آخر وكالة.</li>
+                                <li>رفع كل نسخة احتياطية تلقائياً إلى بوت تليجرام (أو قناة خاصة) مضغوطة، مع إعادة المحاولة عند انقطاع الإنترنت، واستعادة الملفات المضغوطة مباشرة.</li>
                             </ul>
                         </div>
                     </li>
@@ -1498,7 +1499,6 @@
                             <h3>مؤجَّل بطلب من حسين</h3>
                             <ul class="devlog-list">
                                 <li>مزامنة البيانات مع Firebase (نسخة على الإنترنت).</li>
-                                <li>إرسال نسخ احتياطية تلقائية إلى Telegram.</li>
                             </ul>
                         </div>
                     </li>
@@ -1766,6 +1766,50 @@
                         <button type="button" class="secondary-btn" id="chooseBackupFolderBtn"><i class="ti ti-folder" aria-hidden="true"></i> اختيار المجلد</button>
                     </div>
 
+                    <!-- النسخ إلى تليجرام: الإعداد محفوظ في هذا الجهاز فقط -->
+                    <details class="tg-box" id="tgBox">
+                        <summary>
+                            <i class="ti ti-brand-telegram" aria-hidden="true"></i>
+                            <span>النسخ الاحتياطي إلى تليجرام
+                                <small class="tg-status" id="tgStatus">غير مُعدّ بعد</small>
+                            </span>
+                        </summary>
+
+                        <ol class="tg-steps">
+                            <li>في تليجرام افتح <b>@BotFather</b> وأرسل <code>/newbot</code>، اختر اسماً للبوت، ثم انسخ <b>الرمز (token)</b> الذي يعطيك إياه.</li>
+                            <li>افتح البوت الجديد واضغط <b>Start</b>. (للقناة الخاصة بدلاً من ذلك: أضف البوت مشرفاً فيها وانشر أي رسالة.)</li>
+                            <li>الصق الرمز هنا واضغط <b>«اكتشاف المحادثة»</b> ثم <b>«حفظ وإرسال تجربة»</b>.</li>
+                        </ol>
+
+                        <div class="tg-grid">
+                            <label class="field">
+                                <span>رمز البوت (token)</span>
+                                <span class="tg-token">
+                                    <input type="password" id="tgToken" dir="ltr" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
+                                    <button type="button" class="icon-btn" id="tgTokenShow" aria-pressed="false" title="إظهار/إخفاء الرمز" aria-label="إظهار أو إخفاء الرمز"><i class="ti ti-eye" aria-hidden="true"></i></button>
+                                </span>
+                            </label>
+                            <label class="field">
+                                <span>معرّف المحادثة أو القناة</span>
+                                <input type="text" id="tgChatId" dir="ltr" autocomplete="off" spellcheck="false" placeholder="يُملأ تلقائياً">
+                            </label>
+                        </div>
+
+                        <div class="button-row">
+                            <button type="button" class="secondary-btn" id="tgDetectBtn"><i class="ti ti-radar" aria-hidden="true"></i> اكتشاف المحادثة</button>
+                            <button type="button" class="primary-btn" id="tgSaveBtn"><i class="ti ti-send" aria-hidden="true"></i> حفظ وإرسال تجربة</button>
+                            <label class="checkbox-row tg-toggle" for="tgEnabled">
+                                <input type="checkbox" id="tgEnabled">
+                                رفع نسخة بعد كل حفظ سجل
+                            </label>
+                        </div>
+
+                        <small class="field-hint">
+                            تُرفع النسخة مضغوطة (‎.json.gz) برسالة جديدة بدون صوت إشعار، ويمكن استعادتها من «استيراد نسخة احتياطية» مباشرة.
+                            الرمز محفوظ في هذا المتصفح فقط ولا يدخل في ملفات النسخ — لا تشاركه مع أحد.
+                        </small>
+                    </details>
+
                     <label class="checkbox-row" for="seqCheckToggle">
                         <input type="checkbox" id="seqCheckToggle">
                         فحص تسلسل أرقام الوكالات (الناقصة والمكررة) عند حفظ السجل
@@ -1792,7 +1836,7 @@
                         <input
                             type="file"
                             id="restoreBackupInput"
-                            accept="application/json"
+                            accept=".json,.gz,application/json,application/gzip"
                             class="hidden"
                         >
 
