@@ -174,6 +174,12 @@
                 <span class="theme-switch" aria-hidden="true"></span>
             </button>
 
+            <!-- حالة النسخ الاحتياطي: الضغط يأخذ نسخة الآن -->
+            <button type="button" class="backup-status" id="backupStatus" onclick="backupNow()">
+                <i class="ti ti-shield-check" aria-hidden="true"></i>
+                <span class="backup-status-text"><b>النسخ الاحتياطي</b><small id="backupStatusText">—</small></span>
+            </button>
+
             <!-- بطاقة المستخدم -->
 
             <div class="profile-card">
@@ -473,6 +479,13 @@
                     </label>
 
                     <label class="filter-field">
+                        <span>المدقق</span>
+                        <select id="rfAuditor">
+                            <option value="all">كل المدققين</option>
+                        </select>
+                    </label>
+
+                    <label class="filter-field">
                         <span>الترتيب</span>
                         <select id="rfSort">
                             <option value="date-desc">التاريخ: الأحدث أولاً</option>
@@ -675,6 +688,23 @@
 
                             </div>
 
+                            <!-- مدقق السجل: داخل البرنامج فقط، لا يظهر في التقارير -->
+                            <div class="input-group auditors-group">
+
+                                <label for="recordAuditor1">
+                                    <i class="ti ti-user-check"></i> المدقق
+                                    <small class="label-note">(داخل البرنامج فقط)</small>
+                                </label>
+
+                                <div class="auditor-inputs">
+                                    <input type="text" id="recordAuditor1" list="auditorNames" autocomplete="off" placeholder="اسم المدقق">
+                                    <input type="text" id="recordAuditor2" list="auditorNames" autocomplete="off" placeholder="مدقق ثانٍ (اختياري)" aria-label="المدقق الثاني">
+                                </div>
+
+                                <datalist id="auditorNames"></datalist>
+
+                            </div>
+
                         </div>
 
                         <!-- إعادة سجل غير محفوظ من ملف (مثلاً بعد امتلاء مساحة المتصفح) -->
@@ -697,7 +727,7 @@
 
                         <div class="agency-layout">
 
-                        <div class="agency-col">
+                        <div class="agency-col agency-main">
 
                         <div class="form-grid">
 
@@ -784,232 +814,6 @@
                                     </option>
 
                                 </select>
-
-                            </div>
-
-                        </div>
-
-                        <!-- ================= QUICK ITEMS ================= -->
-                        <!-- إضافة سريعة: ضغطة = +1، الزر الصغير أو Alt+Shift = −1. تعدّل نفس الحقول أدناه -->
-
-                        <div class="quick-items" id="quickItems" aria-label="إضافة سريعة للبنود"></div>
-
-                        <!-- ================= ADDITIONS ================= -->
-
-                        <h4 class="sub-title grp-title grp-add">
-                            <i class="ti ti-circle-plus"></i> الإضافات
-                        </h4>
-
-                        <div class="form-grid six-columns grp-add">
-
-                            <!-- SAVE -->
-                            <div class="input-group">
-                                <label>حفظ</label>
-                                <div class="number-control">
-                                    <button type="button" class="number-btn minus-btn" data-target="saveCount">−</button>
-                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="saveCount" min="0" value="0">
-                                    <button type="button" class="number-btn plus-btn" data-target="saveCount">+</button>
-                                </div>
-                            </div>
-
-                            <!-- ORIGINALITY -->
-                            <div class="input-group originality-addition">
-                                <label>أصالة وبأي صفة كانت</label>
-                                <div class="number-control">
-                                    <button type="button" class="number-btn minus-btn" data-target="originalityCount">−</button>
-                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="originalityCount" min="0" value="0">
-                                    <button type="button" class="number-btn plus-btn" data-target="originalityCount">+</button>
-                                </div>
-                            </div>
-
-                            <!-- SIGNATURE -->
-                            <div class="input-group">
-                                <label>توقيع إضافي</label>
-                                <div class="number-control">
-                                    <button type="button" class="number-btn minus-btn" data-target="signatureCount">−</button>
-                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="signatureCount" min="0" value="0">
-                                    <button type="button" class="number-btn plus-btn" data-target="signatureCount">+</button>
-                                </div>
-                            </div>
-
-                            <!-- INHERITANCE -->
-                            <div class="input-group">
-                                <label>إضافة إلى التركة</label>
-                                <div class="number-control">
-                                    <button type="button" class="number-btn minus-btn" data-target="inheritanceCount">−</button>
-                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="inheritanceCount" min="0" value="0">
-                                    <button type="button" class="number-btn plus-btn" data-target="inheritanceCount">+</button>
-                                </div>
-                            </div>
-
-                            <!-- CHILDREN -->
-                            <div class="input-group">
-                                <label>ولاية عن الأولاد</label>
-                                <div class="number-control">
-                                    <button type="button" class="number-btn minus-btn" data-target="childrenCount">−</button>
-                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="childrenCount" min="0" value="0">
-                                    <button type="button" class="number-btn plus-btn" data-target="childrenCount">+</button>
-                                </div>
-                            </div>
-
-                            <!-- AGENTS -->
-                            <div class="input-group">
-                                <label>وكيل عن</label>
-                                <div class="number-control">
-                                    <button type="button" class="number-btn minus-btn" data-target="agentsCount">−</button>
-                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="agentsCount" min="0" value="0">
-                                    <button type="button" class="number-btn plus-btn" data-target="agentsCount">+</button>
-                                </div>
-                            </div>
-
-                            <!-- TRANSPORT -->
-                            <div class="input-group grp-transport">
-                                <label>بدل انتقال</label>
-                                <div class="number-control">
-                                    <button type="button" class="number-btn minus-btn" data-target="transportCount">−</button>
-                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="transportCount" min="0" value="0">
-                                    <button type="button" class="number-btn plus-btn" data-target="transportCount">+</button>
-                                </div>
-                            </div>
-
-                        </div>
-
-                        </div>
-
-                        <div class="agency-col">
-
-                        <!-- ================= MISSING STAMPS ================= -->
-
-                        <h4 class="sub-title grp-title grp-missing">
-                            <i class="ti ti-receipt"></i> الطوابع الناقصة
-                        </h4>
-
-                        <div class="form-grid three-columns grp-missing">
-
-                            <!-- PLEADING -->
-
-                            <div class="input-group">
-
-                                <label>
-                                    نقص مرافعة
-                                </label>
-
-                                <div class="price-number-row">
-
-                                    <div class="number-control">
-
-                                        <button
-                                            type="button"
-                                            class="number-btn minus-btn"
-                                            data-target="missingPleading"
-                                        >
-                                            −
-                                        </button>
-
-                                        <input
-                                            type="text" inputmode="numeric" data-num="int" autocomplete="off"
-                                            id="missingPleading"
-                                            min="0"
-                                            value="0"
-                                        >
-
-                                        <button
-                                            type="button"
-                                            class="number-btn plus-btn"
-                                            data-target="missingPleading"
-                                        >
-                                            +
-                                        </button>
-
-                                    </div>
-
-                                </div>
-
-                                <small>
-                                    السعر حسب قسم الأسعار
-                                </small>
-
-                            </div>
-
-                            <!-- AMBULANCE -->
-
-                            <div class="input-group">
-
-                                <label>
-                                    نقص إسعاف
-                                </label>
-
-                                <div class="number-control">
-
-                                    <button
-                                        type="button"
-                                        class="number-btn minus-btn"
-                                        data-target="missingAmbulance"
-                                    >
-                                        −
-                                    </button>
-
-                                    <input
-                                        type="text" inputmode="numeric" data-num="int" autocomplete="off"
-                                        id="missingAmbulance"
-                                        min="0"
-                                        value="0"
-                                    >
-
-                                    <button
-                                        type="button"
-                                        class="number-btn plus-btn"
-                                        data-target="missingAmbulance"
-                                    >
-                                        +
-                                    </button>
-
-                                </div>
-
-                                <small>
-                                    السعر حسب قسم الأسعار
-                                </small>
-
-                            </div>
-
-                            <!-- AID -->
-
-                            <div class="input-group">
-
-                                <label>
-                                    نقص معونة
-                                </label>
-
-                                <div class="number-control">
-
-                                    <button
-                                        type="button"
-                                        class="number-btn minus-btn"
-                                        data-target="missingAid"
-                                    >
-                                        −
-                                    </button>
-
-                                    <input
-                                        type="text" inputmode="numeric" data-num="int" autocomplete="off"
-                                        id="missingAid"
-                                        min="0"
-                                        value="0"
-                                    >
-
-                                    <button
-                                        type="button"
-                                        class="number-btn plus-btn"
-                                        data-target="missingAid"
-                                    >
-                                        +
-                                    </button>
-
-                                </div>
-
-                                <small>
-                                    السعر حسب قسم الأسعار
-                                </small>
 
                             </div>
 
@@ -1144,6 +948,121 @@
                         </div>
 
                         </div>
+
+                        <!-- ================= البنود: عمود طولي واحد =================
+                             نقص الطوابع (عنابي)، الإضافات (ذهبي)، البدل (أزرق).
+                             نفس الحقول السابقة بنفس المعرّفات؛ Alt + المفتاح يزيد، ومع Shift يُنقص. -->
+
+                        <aside class="agency-items" id="agencyItems" aria-label="بنود الوكالة">
+
+                        <div class="items-head">
+                            <h3 class="items-title"><i class="ti ti-list-check" aria-hidden="true"></i> البنود</h3>
+                            <span class="items-help" tabindex="0" role="note" aria-label="اضغط + أو − لكل بند، أو من لوحة المفاتيح Alt مع المفتاح المكتوب بجانب البند للزيادة، ومع Shift للإنقاص." title="اضغط + أو − لكل بند، أو من لوحة المفاتيح: Alt مع المفتاح المكتوب بجانب البند للزيادة، ومع Shift للإنقاص."><i class="ti ti-help-circle" aria-hidden="true"></i></span>
+                        </div>
+
+                        <div class="item-group grp-missing" role="group" aria-label="نقص الطوابع">
+                            <h4 class="item-group-title"><i class="ti ti-receipt" aria-hidden="true"></i> نقص الطوابع</h4>
+                            <div class="input-group item-row grp-missing" data-qi-item="missingPleading">
+                                <label for="missingPleading">نقص مرافعة</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="missingPleading" aria-label="إنقاص نقص مرافعة">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="missingPleading" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="missingPleading" aria-label="زيادة نقص مرافعة">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + 1 للزيادة، Alt + Shift + 1 للإنقاص">Alt+1</kbd>
+                            </div>
+                            <div class="input-group item-row grp-missing" data-qi-item="missingAmbulance">
+                                <label for="missingAmbulance">نقص إسعاف</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="missingAmbulance" aria-label="إنقاص نقص إسعاف">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="missingAmbulance" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="missingAmbulance" aria-label="زيادة نقص إسعاف">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + 2 للزيادة، Alt + Shift + 2 للإنقاص">Alt+2</kbd>
+                            </div>
+                            <div class="input-group item-row grp-missing" data-qi-item="missingAid">
+                                <label for="missingAid">نقص معونة</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="missingAid" aria-label="إنقاص نقص معونة">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="missingAid" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="missingAid" aria-label="زيادة نقص معونة">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + 3 للزيادة، Alt + Shift + 3 للإنقاص">Alt+3</kbd>
+                            </div>
+                        </div>
+
+                        <div class="item-group grp-add" role="group" aria-label="الإضافات">
+                            <h4 class="item-group-title"><i class="ti ti-circle-plus" aria-hidden="true"></i> الإضافات</h4>
+                            <div class="input-group item-row grp-add" data-qi-item="signatureCount">
+                                <label for="signatureCount">توقيع إضافي</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="signatureCount" aria-label="إنقاص توقيع إضافي">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="signatureCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="signatureCount" aria-label="زيادة توقيع إضافي">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + G للزيادة، Alt + Shift + G للإنقاص">Alt+G</kbd>
+                            </div>
+                            <div class="input-group item-row grp-add" data-qi-item="saveCount">
+                                <label for="saveCount">حفظ</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="saveCount" aria-label="إنقاص حفظ">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="saveCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="saveCount" aria-label="زيادة حفظ">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + H للزيادة، Alt + Shift + H للإنقاص">Alt+H</kbd>
+                            </div>
+                            <div class="input-group item-row grp-add" data-qi-item="originalityCount">
+                                <label for="originalityCount">أصالة وبأي صفة كانت</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="originalityCount" aria-label="إنقاص أصالة وبأي صفة كانت">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="originalityCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="originalityCount" aria-label="زيادة أصالة وبأي صفة كانت">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + A للزيادة، Alt + Shift + A للإنقاص">Alt+A</kbd>
+                            </div>
+                            <div class="input-group item-row grp-add" data-qi-item="inheritanceCount">
+                                <label for="inheritanceCount">إضافة إلى التركة</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="inheritanceCount" aria-label="إنقاص إضافة إلى التركة">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="inheritanceCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="inheritanceCount" aria-label="زيادة إضافة إلى التركة">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + R للزيادة، Alt + Shift + R للإنقاص">Alt+R</kbd>
+                            </div>
+                            <div class="input-group item-row grp-add" data-qi-item="childrenCount">
+                                <label for="childrenCount">ولاية عن الأولاد</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="childrenCount" aria-label="إنقاص ولاية عن الأولاد">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="childrenCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="childrenCount" aria-label="زيادة ولاية عن الأولاد">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + W للزيادة، Alt + Shift + W للإنقاص">Alt+W</kbd>
+                            </div>
+                            <div class="input-group item-row grp-add" data-qi-item="agentsCount">
+                                <label for="agentsCount">وكيل عن</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="agentsCount" aria-label="إنقاص وكيل عن">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="agentsCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="agentsCount" aria-label="زيادة وكيل عن">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + K للزيادة، Alt + Shift + K للإنقاص">Alt+K</kbd>
+                            </div>
+                        </div>
+
+                        <div class="item-group grp-transport" role="group" aria-label="بدل الانتقال">
+                            <h4 class="item-group-title"><i class="ti ti-route" aria-hidden="true"></i> بدل الانتقال</h4>
+                            <div class="input-group item-row grp-transport" data-qi-item="transportCount">
+                                <label for="transportCount">بدل انتقال</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="transportCount" aria-label="إنقاص بدل انتقال">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="transportCount" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="transportCount" aria-label="زيادة بدل انتقال">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + T للزيادة، Alt + Shift + T للإنقاص">Alt+T</kbd>
+                            </div>
+                        </div>
+
+                        </aside>
 
                         </div>
 
@@ -1464,7 +1383,7 @@
                 </div>
 
                 <div class="devlog-stats">
-                    <div><b>5</b><span>مراحل</span></div>
+                    <div><b>6</b><span>مراحل</span></div>
                     <div><b>30 أيلول</b><span>البداية</span></div>
                     <div><b>16 تشرين الأول</b><span>آخر تحديث</span></div>
                     <div><b>0</b><span>بيانات مفقودة</span></div>
@@ -1543,6 +1462,20 @@
                                 <li>جدول أسعار 2026 حسب الفترات (1–4 آذار، 5 آذار، نيسان، أيار، 14 حزيران، 3 آب، أيلول)، وكل وكالة تأخذ أسعار تاريخ سجلها.</li>
                                 <li>فلترة السجلات (الفترة، المندوب، المكتب) وترتيبها، وهذه الصفحة.</li>
                                 <li>إدخال أسرع للبنود: شريط «إضافة سريعة» وألوان ثابتة لكل مجموعة (النقص عنابي، الإضافات ذهبي، البدل أزرق)، واختصارات Alt، وسطر «هذه الوكالة» للمطابقة مع الورقة، وشارات البنود في قائمة الوكالات.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-shield-check"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">16 تشرين الأول 2026</p>
+                            <h3>نسخ احتياطي تلقائي وإدخال أخف</h3>
+                            <ul class="devlog-list">
+                                <li>نسخة احتياطية تلقائية بعد كل حفظ سجل في مجلد ثابت يُختار مرة واحدة، أو تنزيل تلقائي مرة يومياً، مع تنبيه عند المغادرة وحالة «آخر نسخة» في القائمة الجانبية.</li>
+                                <li>البنود (النقص، الإضافات، البدل) في عمود طولي واحد بحقول صغيرة، وأنواع الوكالات الأقل استخداماً في سطر ثانٍ.</li>
+                                <li>اسم المدقق (واحد أو اثنان) لكل سجل داخل البرنامج فقط، مع فلتر في صفحة السجلات.</li>
+                                <li>فحص اختياري لتسلسل أرقام الوكالات عند الحفظ، و Ctrl + Z لإلغاء آخر وكالة.</li>
                             </ul>
                         </div>
                     </li>
@@ -1811,6 +1744,21 @@
                     </p>
 
                     <p class="storage-info" id="storageInfo"></p>
+
+                    <!-- النسخ التلقائي: مجلد ثابت يُختار مرة واحدة -->
+                    <div class="backup-folder-row">
+                        <span>
+                            <i class="ti ti-folder-check" aria-hidden="true"></i>
+                            مجلد النسخ الاحتياطية التلقائية: <b id="backupFolderName">لم يُختر بعد</b>
+                            <small class="field-hint">بعد كل حفظ سجل تُكتب فيه نسخة اليوم تلقائياً. يعمل في Chrome و Edge على الكمبيوتر.</small>
+                        </span>
+                        <button type="button" class="secondary-btn" id="chooseBackupFolderBtn"><i class="ti ti-folder" aria-hidden="true"></i> اختيار المجلد</button>
+                    </div>
+
+                    <label class="checkbox-row" for="seqCheckToggle">
+                        <input type="checkbox" id="seqCheckToggle">
+                        فحص تسلسل أرقام الوكالات (الناقصة والمكررة) عند حفظ السجل
+                    </label>
 
                     <div class="button-row">
 
