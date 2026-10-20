@@ -13610,6 +13610,7 @@ function fbSync(reason) {
         const toPush = [];
         const apply = [];      /* {id, record|null} */
         let conflicts = 0, lostLocal = false, maxSynced = fbState.lastPull || 0;
+        const conflictNums = [];
         const seen = {};
 
         remoteList.forEach(function (rem) {
@@ -13631,6 +13632,7 @@ function fbSync(reason) {
             }
             /* تعارض: الحذف لا يغلب تعديلاً، وإلا فالأحدث */
             conflicts++;
+            if (localById[id]) conflictNums.push(localById[id].recordNumber);
             if (rem.deleted) return;                  /* يبقى المحلي ويُرفع */
             if (L === null) { apply.push({ id: id, record: JSON.parse(rem.json) }); base[id] = R; return; }
             const remoteRecord = JSON.parse(rem.json);
@@ -13720,8 +13722,23 @@ function fbSync(reason) {
                     [renderRecords, updateDashboard, renderReports].forEach(function (step) {
                         try { step(); } catch (e) { console.error("Refresh after sync failed:", e); }
                     });
-                    notify("<strong>مزامنة Firebase</strong><span>وصل " + apply.length + " تغيير من جهاز آخر" +
-                        (conflicts ? " (" + conflicts + " تعارض حُسم للأحدث بعد نسخة احتياطية)" : "") + ".</span>", "info", 6000, true);
+                    notify("<strong>مزامنة Firebase</strong><span>وصل " + apply.length + " تغيير من جهاز آخر.</span>", "info", 5000, true);
+                }
+
+                if (conflictNums.length) {
+                    notify("<strong>سجلات عُدّلت في جهازين قبل أن يتزامنا</strong><span>السجل " + conflictNums.map(escapeHTML).join("، ") +
+                        ": بقي التعديل الأحدث، وأُخذت نسخة احتياطية قبل الحسم. راجعها إن لزم.</span>", "warning", 15000, true);
+                }
+
+                /* السجل المفتوح للتعديل هنا عُدّل في جهاز آخر: الحفظ سيكتب فوق تعديله */
+                const editingId = document.getElementById("editingRecordId")?.value;
+                const editedRemote = editingId && apply.find(function (a) { return a.id === String(editingId); });
+                if (editedRemote) {
+                    const num = editedRemote.record ? editedRemote.record.recordNumber : "";
+                    notify("<strong>السجل " + escapeHTML(num) + " الذي تعدّله الآن عُدّل من جهاز آخر</strong>" +
+                        "<span>إن حفظت الآن فستُكتب نسختك فوق تعديله. الأفضل فتح النسخة الجديدة ثم إعادة تعديلك.</span>" +
+                        (editedRemote.record ? '<span class="toast-actions"><button type="button" class="act-btn" onclick="editRecord(\'' + escapeHTML(editingId) + '\')">فتح النسخة الجديدة</button></span>' : ""),
+                        "warning", 30000, true);
                 }
 
                 if (applySettings) {
@@ -13856,6 +13873,11 @@ function fbConnect() {
 }
 
 window.addEventListener("online", function () { fbScheduleSync(2000); });
+
+/* والصفحة مفتوحة أمامك: فحص هادئ كل دقيقة لتصل تعديلات الطرف الآخر (يقرأ المتغيّر فقط) */
+setInterval(function () {
+    if (fbUser && !fbSyncing && document.visibilityState === "visible") fbSync("poll");
+}, 60000);
 document.addEventListener("visibilitychange", function () {
     /* العودة إلى الصفحة: جلب تغييرات الأجهزة الأخرى (مرة كل دقيقة على الأكثر) */
     if (document.visibilityState === "visible" && fbUser && (!fbState.lastSyncAt || Date.now() - Date.parse(fbState.lastSyncAt) > 60000)) {
