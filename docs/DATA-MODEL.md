@@ -23,7 +23,7 @@
 تفضيلات واجهة (ليست بيانات، يمكن أن تضيع دون ضرر): `audit_ui_theme`, `audit_ui_records_view`, `audit_ui_activity_period`, `audit_ui_last_auditors`, `audit_ui_backup_state`, `audit_ui_seq_check`, `audit_ui_telegram` (رمز البوت — لا يدخل النسخ الاحتياطية ولا المستودع)، `audit_ui_firebase` (حالة المزامنة لهذا الجهاز: `signedIn, uid, base{id:hash}, lastPull, settingsBase, settingsLocalHash, settingsChangedAt, lastSyncAt` — حذفه يعني فقط مزامنة أولى جديدة).
 
 ## Firebase (اختياري)
-نسخة متزامنة على Firestore: `users/{uid}/records/{id}` و`users/{uid}/meta/settings`. التفاصيل والقواعد في [`FIREBASE.md`](FIREBASE.md). البيانات المحلية تبقى الأصل.
+نسخة متزامنة على Firestore في مساحة مشتركة: `workspaces/idlib/records/{id}` و`workspaces/idlib/meta/settings`. التفاصيل والقواعد في [`FIREBASE.md`](FIREBASE.md). البيانات المحلية تبقى الأصل.
 
 ## IndexedDB
 - `audit_db` → مخزن `kv` → مفتاح `audit_records`: السجلات حين `audit_records_store === "idb"`. **لا تحذف هذه القاعدة أبداً.**

@@ -13352,8 +13352,9 @@ if (restoreBackupBtn && restoreBackupInput) {
 /*
     البيانات المحلية (localStorage / IndexedDB) تبقى هي الأصل، وFirebase نسخة متزامنة.
     - الدخول بحساب Google؛ قواعد Firestore تسمح لحساب المالك فقط (docs/FIREBASE.md).
-    - كل سجل وثيقة مستقلة: users/{uid}/records/{id} = {id, json, hash, deleted, updatedAt, syncedAt}
-      والإعدادات (الأسعار، الجداول، النسب، المستخدمون…) وثيقة واحدة users/{uid}/meta/settings.
+    - مساحة مشتركة للفرع (FB_WORKSPACE) يعمل عليها كل الحسابات المسموحة في القواعد (حسين وباسل):
+      كل سجل وثيقة مستقلة: workspaces/{ws}/records/{id} = {id, json, hash, deleted, updatedAt, syncedAt}
+      والإعدادات (الأسعار، الجداول، النسب، المستخدمون…) وثيقة واحدة workspaces/{ws}/meta/settings.
     - مزامنة ثلاثية: لكل سجل نحفظ بصمة آخر نسخة متزامنة على هذا الجهاز (base).
       تغيّر المحلي فقط ← يُرفع. تغيّر البعيد فقط ← يُطبَّق هنا. تغيّر الاثنان ← الأحدث يفوز
       بعد نسخة احتياطية، والحذف لا يغلب تعديلاً أبداً.
@@ -13371,6 +13372,8 @@ const FIREBASE_CONFIG = {
 };
 const FIREBASE_SDK = "https://www.gstatic.com/firebasejs/10.12.2/";
 const FB_STATE_KEY = "audit_ui_firebase";
+/* المساحة المشتركة: لا تغيّرها بعد بدء المزامنة (تغييرها = مساحة فارغة جديدة) */
+const FB_WORKSPACE = "idlib";
 
 /* مفاتيح الإعدادات المتزامنة (نفس ما تحويه النسخة الاحتياطية عدا السجلات) */
 const FB_SETTINGS_KEYS = [
@@ -13473,7 +13476,8 @@ function fbLoadBackend() {
         const app = appMod.initializeApp(FIREBASE_CONFIG);
         const auth = authMod.getAuth(app);
         const db = fs.getFirestore(app);
-        const col = function (uid, name) { return fs.collection(db, "users", uid, name); };
+        /* ws = المساحة المشتركة (لا معرّف الحساب): كل الحسابات المسموحة ترى البيانات نفسها */
+        const col = function (ws, name) { return fs.collection(db, "workspaces", ws, name); };
         const millis = function (ts) { return ts && typeof ts.toMillis === "function" ? ts.toMillis() : 0; };
 
         fbBackend = {
@@ -13505,7 +13509,7 @@ function fbLoadBackend() {
                 });
             },
             getSettings: function (uid) {
-                return fs.getDoc(fs.doc(db, "users", uid, "meta", "settings")).then(function (d) {
+                return fs.getDoc(fs.doc(db, "workspaces", uid, "meta", "settings")).then(function (d) {
                     if (!d.exists()) return null;
                     const v = d.data();
                     return { json: v.json || "", hash: v.hash, changedAt: v.changedAt || 0, records: v.records || 0, syncedAt: millis(v.syncedAt) };
@@ -13525,7 +13529,7 @@ function fbLoadBackend() {
                     return p.then(function () {
                         const batch = fs.writeBatch(db);
                         chunk.forEach(function (r) {
-                            batch.set(fs.doc(db, "users", uid, "records", fbDocId(r.id)), {
+                            batch.set(fs.doc(db, "workspaces", uid, "records", fbDocId(r.id)), {
                                 id: String(r.id), json: r.deleted ? "" : r.json, hash: r.hash, deleted: !!r.deleted,
                                 updatedAt: r.updatedAt || "", syncedAt: fs.serverTimestamp()
                             });
@@ -13535,7 +13539,7 @@ function fbLoadBackend() {
                 }, Promise.resolve());
             },
             pushSettings: function (uid, s) {
-                return fs.setDoc(fs.doc(db, "users", uid, "meta", "settings"), {
+                return fs.setDoc(fs.doc(db, "workspaces", uid, "meta", "settings"), {
                     json: s.json, hash: s.hash, changedAt: s.changedAt || 0, records: s.records || 0, syncedAt: fs.serverTimestamp()
                 });
             }
@@ -13568,7 +13572,7 @@ function fbSync(reason) {
     if (!fbUser || recordsLoadFailed || !currentUser) return Promise.resolve(false);
     if (fbSyncing) { fbSyncAgain = true; return fbSyncing; }
 
-    const uid = fbUser.uid;
+    const uid = FB_WORKSPACE;
     const first = !fbState.firstSyncDone || fbState.uid !== uid;
     if (first) {
         fbState.base = {};
