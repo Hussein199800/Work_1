@@ -6492,3 +6492,7 @@ html.theme-switching *::after {
 .reprice-records summary { cursor: pointer; font-weight: 600; color: var(--heading); }
 .reprice-records-list { max-height: 360px; overflow: auto; }
 .reprice-records tr.is-excluded td { opacity: .5; }
+
+/* المزامنة مع Firebase */
+.tg-status.is-ok { color: var(--accent); }
+.tg-status.is-error { color: var(--danger); }

@@ -1533,17 +1533,7 @@
                                 <li>«سعر الوكالة» لكل وكالة: حسب تاريخ السجل أو فترة أخرى، فيضم السجل الواحد سعرين أو ثلاثة، وتُحسب حصتا الإسعاف والتعاون من سعر كل وكالة.</li>
                                 <li>تسعير السجلات المحفوظة حسب تاريخها: معاينة بالفترات والسجلات، واستثناء السجلات المختلطة، ونسخة احتياطية قبل التنفيذ، وتراجع كامل.</li>
                                 <li>تصحيح صفحة «تطوير الموقع»: الفكرة والنشر الأول لشذى البكور وباسل البكور.</li>
-                            </ul>
-                        </div>
-                    </li>
-
-                    <li class="devlog-stage is-next">
-                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-hourglass"></i></span>
-                        <div class="content-card">
-                            <p class="devlog-date">لاحقاً</p>
-                            <h3>قيد التحضير</h3>
-                            <ul class="devlog-list">
-                                <li>مزامنة البيانات مع Firebase لاستخدام الموقع من أي جهاز — بانتظار إنشاء مشروع Firebase.</li>
+                                <li>المزامنة مع Firebase: الدخول بحساب Google واستخدام الموقع من أي جهاز، مع بقاء البيانات المحلية أصلاً، ونسخة احتياطية قبل أول مزامنة، وحماية لا تسمح إلا لحساب المالك.</li>
                             </ul>
                         </div>
                     </li>
@@ -1821,6 +1811,28 @@
                         </span>
                         <button type="button" class="secondary-btn" id="chooseBackupFolderBtn"><i class="ti ti-folder" aria-hidden="true"></i> اختيار المجلد</button>
                     </div>
+
+                    <!-- المزامنة مع Firebase: استخدام الموقع من أي جهاز بحساب Google -->
+                    <details class="tg-box fb-box" id="fbBox">
+                        <summary>
+                            <i class="ti ti-cloud" aria-hidden="true"></i>
+                            <span>المزامنة مع Firebase — استخدام الموقع من أي جهاز
+                                <small class="tg-status" id="fbStatus">غير متصل</small>
+                            </span>
+                        </summary>
+
+                        <ol class="tg-steps">
+                            <li>اضغط <b>«الدخول بحساب Google»</b> واختر حساب المالك. أول مرة على كل جهاز تُنزَّل نسخة احتياطية كاملة قبل المزامنة.</li>
+                            <li>بعدها كل سجل يُحفظ يُرفع تلقائياً، وعند فتح الموقع (أو العودة إليه) تصل تغييرات الأجهزة الأخرى.</li>
+                            <li>بيانات هذا الجهاز تبقى كما هي: المزامنة تضيف وتحدّث، وحذف سجل في جهاز لا يُطبَّق على تعديل أحدث في جهاز آخر.</li>
+                        </ol>
+
+                        <div class="button-row" id="fbActions"></div>
+
+                        <small class="field-hint">
+                            الحماية في قواعد Firestore: لا يقرأ البيانات ولا يكتبها إلا حساب المالك. الإعدادات (الأسعار والجداول والمستخدمون) تُزامَن أيضاً.
+                        </small>
+                    </details>
 
                     <!-- النسخ إلى تليجرام: الإعداد محفوظ في هذا الجهاز فقط -->
                     <details class="tg-box" id="tgBox">
