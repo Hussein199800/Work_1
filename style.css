@@ -5409,6 +5409,16 @@ html.theme-switching *::after {
     background: var(--grad-money);
 }
 
+.devlog-avatar.is-origin {
+    background: linear-gradient(135deg, var(--gold-600), var(--gold-700));
+}
+
+.devlog-person small a {
+    color: var(--accent);
+    direction: ltr;
+    unicode-bidi: isolate;
+}
+
 .devlog-stats {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -6437,3 +6447,52 @@ html.theme-switching *::after {
 .agency-main .notes-group.grp-notes textarea {
     background: var(--surface);
 }
+
+/* إعادة تسعير السجلات المحفوظة */
+.reprice-table td b { color: var(--heading); }
+.reprice-totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    margin: 12px 0 4px;
+    color: var(--text-2);
+    font-size: 14px;
+}
+.reprice-totals b { color: var(--heading); }
+
+/* سعر الوكالة: حسب تاريخ السجل أو فترة أخرى — يتلوّن حين يختلف عن التلقائي */
+.price-period-group {
+    grid-column: 1 / -1;
+    order: 4;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+.price-period-group label {
+    margin: 0;
+    white-space: nowrap;
+}
+.price-period-group select {
+    flex: 1;
+    height: 36px;
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: var(--fs-sm);
+}
+.price-period-group.is-override select,
+.period-select.is-override {
+    border-color: var(--grp-add);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--grp-add) 22%, transparent);
+}
+.period-select select {
+    min-width: 200px;
+}
+.reprice-records { margin: 12px 0; }
+.reprice-records summary { cursor: pointer; font-weight: 600; color: var(--heading); }
+.reprice-records-list { max-height: 360px; overflow: auto; }
+.reprice-records tr.is-excluded td { opacity: .5; }
+
+/* المزامنة مع Firebase */
+.tg-status.is-ok { color: var(--accent); }
+.tg-status.is-error { color: var(--danger); }

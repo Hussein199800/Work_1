@@ -817,6 +817,19 @@
 
                             </div>
 
+                            <!-- سعر الوكالة: حسب تاريخ السجل، أو فترة أخرى (السجل الواحد قد يضم سعرين أو ثلاثة) -->
+                            <div class="input-group price-period-group">
+
+                                <label for="agencyPricePeriod">
+                                    <i class="ti ti-calendar-dollar"></i> سعر الوكالة
+                                </label>
+
+                                <select id="agencyPricePeriod">
+                                    <option value="">حسب تاريخ السجل</option>
+                                </select>
+
+                            </div>
+
                         </div>
 
                         <!-- NOTES -->
@@ -1372,16 +1385,23 @@
                     <span class="page-icon"><i class="ti ti-timeline-event"></i></span>
                     <div class="page-title-text">
                         <h2>تطوير الموقع</h2>
-                        <p>كيف بدأنا، وما الذي طوّرناه مرحلة بعد مرحلة</p>
+                        <p>من الفكرة الأصلية إلى اليوم، مرحلة بعد مرحلة</p>
                     </div>
                 </div>
 
                 <div class="devlog-team">
                     <div class="devlog-person">
+                        <span class="devlog-avatar is-origin" aria-hidden="true">ش</span>
+                        <div>
+                            <b>شذى البكور وباسل البكور</b>
+                            <small>أصحاب الفكرة والنسخة الأولى المنشورة — <a href="https://shaza-albakkour.github.io/agencies/" target="_blank" rel="noopener">shaza-albakkour.github.io/agencies</a></small>
+                        </div>
+                    </div>
+                    <div class="devlog-person">
                         <span class="devlog-avatar" aria-hidden="true">ح</span>
                         <div>
                             <b>حسين الطويل</b>
-                            <small>صاحب المشروع — الفكرة وقواعد الحساب، مراجعة كل مرحلة واختبارها على السجلات الحقيقية</small>
+                            <small>تطوير النظام منذ إنشاء مستودع Work_1 على GitHub (30 أيلول 2026): قواعد الحساب، ومراجعة كل مرحلة واختبارها على السجلات الحقيقية</small>
                         </div>
                     </div>
                     <div class="devlog-person">
@@ -1394,22 +1414,34 @@
                 </div>
 
                 <div class="devlog-stats">
-                    <div><b>6</b><span>مراحل</span></div>
-                    <div><b>30 أيلول</b><span>البداية</span></div>
-                    <div><b>16 تشرين الأول</b><span>آخر تحديث</span></div>
+                    <div><b>8</b><span>مراحل</span></div>
+                    <div><b>30 أيلول</b><span>مستودع Work_1</span></div>
+                    <div><b>20 تشرين الأول</b><span>آخر تحديث</span></div>
                     <div><b>0</b><span>بيانات مفقودة</span></div>
                 </div>
 
                 <ol class="devlog-timeline">
 
                     <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-bulb"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">الفكرة والنشر الأول</p>
+                            <h3>النسخة الأصلية — شذى البكور وباسل البكور</h3>
+                            <ul class="devlog-list">
+                                <li>فكرة نظام تدقيق السجلات والوكالات، وبناء نسخته الأولى (الصفحة والتنسيق والبرمجة).</li>
+                                <li>النشر الأول للموقع على <a href="https://shaza-albakkour.github.io/agencies/" target="_blank" rel="noopener">shaza-albakkour.github.io/agencies</a>.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
                         <span class="devlog-dot" aria-hidden="true"><i class="ti ti-seeding"></i></span>
                         <div class="content-card">
-                            <p class="devlog-date">30 أيلول 2026 · البداية</p>
-                            <h3>النسخة الأولى على GitHub</h3>
+                            <p class="devlog-date">30 أيلول 2026 · مستودع Work_1</p>
+                            <h3>استلام المشروع ومتابعة تطويره</h3>
                             <ul class="devlog-list">
-                                <li>رفع حسين النسخة الأولى من النظام (الصفحة والتنسيق والبرمجة) إلى GitHub.</li>
-                                <li>نشر الموقع على GitHub Pages، وبدأ إدخال السجلات الحقيقية فيه.</li>
+                                <li>استلم حسين الطويل المشروع من نسخته الأصلية وأنشأ مستودع Work_1 على GitHub.</li>
+                                <li>نشر الموقع على GitHub Pages وبدأ استخدامه في تدقيق السجلات الحقيقية، ومن هنا انطلقت إضافات حسين وتطويراته التي تعرضها المراحل التالية.</li>
                             </ul>
                         </div>
                     </li>
@@ -1492,13 +1524,16 @@
                         </div>
                     </li>
 
-                    <li class="devlog-stage is-next">
-                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-hourglass"></i></span>
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-calendar-dollar"></i></span>
                         <div class="content-card">
-                            <p class="devlog-date">لاحقاً</p>
-                            <h3>مؤجَّل بطلب من حسين</h3>
+                            <p class="devlog-date">20 تشرين الأول 2026</p>
+                            <h3>سعر كل وكالة وحصص اللجان الصحيحة</h3>
                             <ul class="devlog-list">
-                                <li>مزامنة البيانات مع Firebase (نسخة على الإنترنت).</li>
+                                <li>«سعر الوكالة» لكل وكالة: حسب تاريخ السجل أو فترة أخرى، فيضم السجل الواحد سعرين أو ثلاثة، وتُحسب حصتا الإسعاف والتعاون من سعر كل وكالة.</li>
+                                <li>تسعير السجلات المحفوظة حسب تاريخها: معاينة بالفترات والسجلات، واستثناء السجلات المختلطة، ونسخة احتياطية قبل التنفيذ، وتراجع كامل.</li>
+                                <li>تصحيح صفحة «تطوير الموقع»: الفكرة والنشر الأول لشذى البكور وباسل البكور.</li>
+                                <li>المزامنة مع Firebase: الدخول بحساب Google واستخدام الموقع من أي جهاز، مع بقاء البيانات المحلية أصلاً، ونسخة احتياطية قبل أول مزامنة، وحماية لا تسمح إلا لحساب المالك.</li>
                             </ul>
                         </div>
                     </li>
@@ -1565,6 +1600,17 @@
                     <div class="button-row">
                         <button type="button" class="primary-btn" id="saveScheduleBtn"><i class="ti ti-device-floppy"></i> حفظ أسعار الفترات</button>
                     </div>
+
+                </div>
+
+                <!-- إعادة تسعير السجلات المحفوظة بسعر فترة تاريخها -->
+                <div class="content-card" id="recordRepriceCard">
+
+                    <h3>
+                        <i class="ti ti-calendar-repeat"></i> تسعير السجلات المحفوظة حسب تاريخها
+                    </h3>
+
+                    <div id="recordRepriceBox"></div>
 
                 </div>
 
@@ -1765,6 +1811,28 @@
                         </span>
                         <button type="button" class="secondary-btn" id="chooseBackupFolderBtn"><i class="ti ti-folder" aria-hidden="true"></i> اختيار المجلد</button>
                     </div>
+
+                    <!-- المزامنة مع Firebase: استخدام الموقع من أي جهاز بحساب Google -->
+                    <details class="tg-box fb-box" id="fbBox">
+                        <summary>
+                            <i class="ti ti-cloud" aria-hidden="true"></i>
+                            <span>المزامنة مع Firebase — استخدام الموقع من أي جهاز
+                                <small class="tg-status" id="fbStatus">غير متصل</small>
+                            </span>
+                        </summary>
+
+                        <ol class="tg-steps">
+                            <li>اضغط <b>«الدخول بحساب Google»</b> واختر حساب المالك. أول مرة على كل جهاز تُنزَّل نسخة احتياطية كاملة قبل المزامنة.</li>
+                            <li>بعدها كل سجل يُحفظ يُرفع تلقائياً، وعند فتح الموقع (أو العودة إليه) تصل تغييرات الأجهزة الأخرى.</li>
+                            <li>بيانات هذا الجهاز تبقى كما هي: المزامنة تضيف وتحدّث، وحذف سجل في جهاز لا يُطبَّق على تعديل أحدث في جهاز آخر.</li>
+                        </ol>
+
+                        <div class="button-row" id="fbActions"></div>
+
+                        <small class="field-hint">
+                            الحماية في قواعد Firestore: لا يقرأ البيانات ولا يكتبها إلا حساب المالك. الإعدادات (الأسعار والجداول والمستخدمون) تُزامَن أيضاً.
+                        </small>
+                    </details>
 
                     <!-- النسخ إلى تليجرام: الإعداد محفوظ في هذا الجهاز فقط -->
                     <details class="tg-box" id="tgBox">

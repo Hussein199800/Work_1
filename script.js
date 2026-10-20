@@ -301,6 +301,8 @@ if ([
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved"
 ].indexOf(key) !== -1) {
     try { markDataChanged(); } catch (e) {}
+    /* قبل تحميل قسم Firebase يرمي (منطقة TDZ) ويُتجاهل: حفظ الإعدادات عند فتح الصفحة ليس تعديلاً */
+    try { fbNoteSettingsChange(key); } catch (e) {}
 }
 
 }
@@ -493,6 +495,8 @@ function moveRecordsToIDBNow() {
 function persistRecords() {
     return persistRecordsNow().then(function (value) {
         try { markDataChanged(); } catch (e) {}
+        /* رفع التغيير إلى Firebase (إن كانت المزامنة مفعّلة على هذا الجهاز) */
+        try { fbScheduleSync(); } catch (e) {}
         return value;
     });
 }
@@ -1672,6 +1676,8 @@ if (
 
     renderPrices();
 
+    if (typeof renderRecordReprice === "function") renderRecordReprice();
+
 }
 
 
@@ -1901,7 +1907,7 @@ function getCurrentAgencyPricing() {
         document.getElementById(
             "agencyType"
         )?.value || DEFAULT_AGENCY_TYPE,
-        getFormRecordDay()
+        pricePeriodDay(document.getElementById("agencyPricePeriod")?.value)
     );
 }
 
@@ -1984,7 +1990,7 @@ function priceTableForDay(day) {
 */
 function pendingAgenciesNeedingReprice(day) {
     return pendingAgencies.filter(function (agency) {
-        if (agency.status === "cancelled") return false;
+        if (agency.status === "cancelled" || agency.pricePeriod) return false;
         const p = getPricingForType(agency.type, day);
         const applied = agency.appliedPrices || {};
         return number(applied.agency !== undefined ? applied.agency : agency.basePrice) !== number(p.agency) ||
@@ -1994,6 +2000,8 @@ function pendingAgenciesNeedingReprice(day) {
 
 function repricePendingAgencies(day) {
     pendingAgencies = pendingAgencies.map(function (agency) {
+        /* وكالة لها فترة سعر مختارة تبقى على سعرها */
+        if (agency.pricePeriod) return agency;
         return buildAgency(agencyInputsOf(agency), getPricingForType(agency.type, day), agency.id);
     });
     renderPendingAgencies();
@@ -2032,6 +2040,93 @@ document.getElementById("recordDate")?.addEventListener("change", function () {
         updatePreview();
     });
 });
+
+/*
+    فترة سعر الوكالة (agency.pricePeriod، اختيارية): السجل الواحد قد يضم وكالات
+    بسعرين أو ثلاثة. فارغة = حسب تاريخ السجل؛ "base" = الأسعار الأساسية؛
+    أو تاريخ بداية جدول من «أسعار حسب الفترات».
+*/
+function pricePeriodDay(period) {
+    if (period === "base") return "0000-01-01";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(period || "")) return period;
+    return getFormRecordDay();
+}
+
+function pricingForAgency(type, period) {
+    return getPricingForType(type, pricePeriodDay(period));
+}
+
+function pricePeriodChoices() {
+    const list = priceSchedule
+        .filter(function (e) { return e && /^\d{4}-\d{2}(-\d{2})?$/.test(e.from); })
+        .map(function (e) { return scheduleStart(e.from); })
+        .filter(function (v, i, a) { return a.indexOf(v) === i; })
+        .sort();
+    return list.map(function (day) { return { value: day, label: "من " + monthLabel(day) }; })
+        .concat([{ value: "base", label: "الأسعار الأساسية" }]);
+}
+
+function pricePeriodLabel(period) {
+    if (!period) return "";
+    if (period === "base") return "الأسعار الأساسية";
+    return "من " + monthLabel(period);
+}
+
+function pricePeriodOptionsHTML(selected, type) {
+    const auto = priceTableForDay(getFormRecordDay());
+    const autoText = "حسب تاريخ السجل" + (auto.month ? " (" + monthLabel(auto.month) + ")" : "");
+    return '<option value="">' + escapeHTML(autoText) + "</option>" +
+        pricePeriodChoices().map(function (c) {
+            const price = type ? " — " + money(pricingForAgency(type, c.value).agency) : "";
+            return '<option value="' + c.value + '"' + (c.value === selected ? " selected" : "") + ">" + escapeHTML(c.label + price) + "</option>";
+        }).join("");
+}
+
+/* قائمة «فترة السعر» في نموذج الوكالة */
+function renderAgencyPricePeriod() {
+    const select = document.getElementById("agencyPricePeriod");
+    if (!select) return;
+    const value = select.value;
+    const type = document.getElementById("agencyType")?.value || DEFAULT_AGENCY_TYPE;
+    select.innerHTML = pricePeriodOptionsHTML(value, type);
+    select.value = pricePeriodChoices().some(function (c) { return c.value === value; }) ? value : "";
+    select.closest(".price-period-group")?.classList.toggle("is-override", !!select.value);
+}
+
+function setAgencyPricePeriod(value) {
+    const select = document.getElementById("agencyPricePeriod");
+    if (!select) return;
+    if (value && !Array.prototype.some.call(select.options, function (o) { return o.value === value; })) {
+        select.innerHTML = pricePeriodOptionsHTML(value, null);
+    }
+    select.value = value || "";
+    renderAgencyPricePeriod();
+}
+
+/* تغيير فترة سعر وكالة مضافة من سطرها */
+function changePendingPeriod(index, period) {
+    const agency = pendingAgencies[index];
+    if (!agency || (agency.pricePeriod || "") === (period || "")) return;
+    const inputs = agencyInputsOf(agency);
+    inputs.pricePeriod = period || "";
+    const updated = buildAgency(inputs, pricingForAgency(inputs.type, inputs.pricePeriod), agency.id);
+    pendingAgencies[index] = updated;
+    lastAddedAgencyId = updated.id;
+    renderPendingAgencies();
+    updatePreview();
+    notify("<strong>تغيّر سعر الوكالة رقم " + escapeHTML(updated.number) + "</strong><span>" +
+        escapeHTML(pricePeriodLabel(updated.pricePeriod) || "حسب تاريخ السجل") + " — " + money(updated.basePrice) + "</span>", "success", 3500, true);
+}
+
+window.changePendingPeriod = changePendingPeriod;
+
+document.getElementById("agencyPricePeriod")?.addEventListener("change", function () {
+    this.closest(".price-period-group")?.classList.toggle("is-override", !!this.value);
+    updatePreview();
+});
+document.getElementById("agencyType")?.addEventListener("change", renderAgencyPricePeriod);
+document.getElementById("recordDate")?.addEventListener("change", renderAgencyPricePeriod);
+onReady(renderAgencyPricePeriod);
 
 /* أسعار نوع وكالة معيّن في يوم معيّن (تستخدمها الحاسبة أيضاً) */
 function getPricingForType(type, day) {
@@ -2469,6 +2564,7 @@ function readAgencyInputs() {
         type: val("agencyType") || DEFAULT_AGENCY_TYPE,
         status: val("agencyStatus") || "active",
         duplicate: !!document.getElementById("agencyDuplicate")?.checked,
+        pricePeriod: val("agencyPricePeriod") || "",
         notes: (val("agencyNotes") || "").trim(),
         additions: {
             save: number(val("saveCount")),
@@ -2496,6 +2592,7 @@ function agencyInputsOf(agency) {
         type: agency.type || DEFAULT_AGENCY_TYPE,
         status: agency.status || "active",
         duplicate: !!agency.duplicate,
+        pricePeriod: agency.pricePeriod || "",
         notes: agency.notes || "",
         additions: {
             save: number(ad.save), signature: number(ad.signature), inheritance: number(ad.inheritance),
@@ -2543,6 +2640,7 @@ function buildAgency(inputs, pricing, keepId) {
         typeName: AGENCY_NAMES[type],
         status: status,
         duplicate: !!inputs.duplicate,
+        pricePeriod: inputs.pricePeriod || undefined,
         transportInAdditions: true,
         basePrice: basePrice,
         representativeBase: cancelled ? 0 : number(pricing.representative),
@@ -2569,7 +2667,7 @@ function buildAgency(inputs, pricing, keepId) {
 
 function getAgencyFromForm() {
     const inputs = readAgencyInputs();
-    return buildAgency(inputs, getPricingForType(inputs.type, getFormRecordDay()));
+    return buildAgency(inputs, pricingForAgency(inputs.type, inputs.pricePeriod));
 }
 
 /* =========================================================
@@ -2656,7 +2754,7 @@ function changePendingType(index, type) {
         inputs.additions.transport = 1;
     }
 
-    const updated = buildAgency(inputs, getPricingForType(type, getFormRecordDay()), agency.id);
+    const updated = buildAgency(inputs, pricingForAgency(type, inputs.pricePeriod), agency.id);
 
     pendingAgencies[index] = updated;
     lastAddedAgencyId = updated.id;
@@ -3778,6 +3876,13 @@ container.innerHTML =
                                 </select>
                             </label>
 
+                            ${agency.status === "cancelled" ? "" : `<label class="type-select period-select${agency.pricePeriod ? " is-override" : ""}" title="سعر هذه الوكالة: حسب تاريخ السجل أو فترة أخرى">
+                                السعر
+                                <select onchange="changePendingPeriod(${index}, this.value)" aria-label="فترة سعر الوكالة رقم ${escapeHTML(agency.number)}">
+                                    ${pricePeriodOptionsHTML(agency.pricePeriod || "", agency.type)}
+                                </select>
+                            </label>`}
+
                             ${transportControl}
 
                             <button
@@ -3861,6 +3966,8 @@ document.getElementById(
     "agencyStatus"
 ).value =
     agency.status;
+
+setAgencyPricePeriod(agency.pricePeriod || "");
 
 
 ensureAgencyPriceControls();
@@ -4856,6 +4963,8 @@ if (recordDateField) {
 }
 
 setFormAuditors(lastAuditors());
+
+setAgencyPricePeriod("");
 
 renderPendingAgencies();
 
@@ -10360,9 +10469,318 @@ document.getElementById("saveScheduleBtn")?.addEventListener("click", function (
     priceSchedule = next;
     scheduleDraft = null;
     renderPriceSchedule();
+    renderAgencyPricePeriod();
     updatePreview();
+    renderRecordReprice();
     notify("<strong>حُفظت أسعار الفترات</strong><span>" + next.length + " جدول. الوكالات الجديدة تأخذ أسعار فترة «تاريخ السجل».</span>", "success", 5000, true);
 });
+
+/* =========================================================
+إعادة تسعير السجلات المحفوظة حسب تاريخها
+========================================================= */
+
+/*
+    السجلات المحفوظة قبل «أسعار حسب الفترات» أخذت سعراً واحداً (الأسعار الأساسية)
+    أياً كان تاريخها، فتُحسب حصص اللجان منه أيضاً. هذه الأداة تعيد سعر الوكالة
+    وحصة الفرع فقط إلى سعر فترة «تاريخ السجل»، بعد معاينة ونسخة احتياطية وموافقة.
+    لا يُحذف شيء: السعر السابق يُحفظ في agency.priceHistory للتراجع.
+*/
+function collectRecordReprice() {
+    const items = [];
+    records.forEach(function (record) {
+        const day = getRecordDay(record);
+        if (!day) return;
+        (record.agencies || []).forEach(function (agency) {
+            /* الملغاة، والوكالة التي اختير لها سعر فترة بعينها، تبقى كما هي */
+            if (!agency || agency.status === "cancelled" || agency.pricePeriod) return;
+            const p = getPricingForType(agency.type, day);
+            const dA = number(p.agency) - number(agency.basePrice);
+            const dR = number(p.representative) - number(agency.representativeBase);
+            if (!dA && !dR) return;
+            items.push({ record: record, agency: agency, day: day, pricing: p, dA: dA, dR: dR });
+        });
+    });
+    return items;
+}
+
+function repriceSummary(items) {
+    const groups = {};
+    const total = { records: new Set(), agencies: 0, dA: 0, dR: 0, ambBefore: 0, ambAfter: 0, coopBefore: 0, coopAfter: 0 };
+    items.forEach(function (it) {
+        const key = (it.pricing.priceMonth || "base") + "|" + it.agency.type + "|" + number(it.agency.basePrice) + "|" + number(it.pricing.agency) +
+            "|" + number(it.agency.representativeBase) + "|" + number(it.pricing.representative);
+        if (!groups[key]) {
+            groups[key] = {
+                month: it.pricing.priceMonth, type: it.agency.type,
+                from: number(it.agency.basePrice), to: number(it.pricing.agency),
+                repFrom: number(it.agency.representativeBase), repTo: number(it.pricing.representative),
+                count: 0, records: new Set()
+            };
+        }
+        groups[key].count++;
+        groups[key].records.add(it.record.id);
+        const rate = committeeRates[it.agency.type] || { ambulance: 0, cooperation: 0 };
+        total.records.add(it.record.id);
+        total.agencies++;
+        total.dA += it.dA;
+        total.dR += it.dR;
+        total.ambBefore += committeeAmount(it.agency.basePrice, rate.ambulance);
+        total.ambAfter += committeeAmount(it.pricing.agency, rate.ambulance);
+        total.coopBefore += committeeAmount(it.agency.basePrice, rate.cooperation);
+        total.coopAfter += committeeAmount(it.pricing.agency, rate.cooperation);
+    });
+    const list = Object.keys(groups).map(function (k) { return groups[k]; }).sort(function (a, b) {
+        return String(a.month || "").localeCompare(String(b.month || "")) || a.type.localeCompare(b.type);
+    });
+    return { list: list, total: total };
+}
+
+/* سجلات استثناها المستخدم من إعادة التسعير (فيها أكثر من سعر — تُعدّل يدوياً) */
+const repriceExcluded = new Set();
+
+function lastRepriceBatch() {
+    let last = null;
+    records.forEach(function (record) {
+        (record.agencies || []).forEach(function (agency) {
+            (agency.priceHistory || []).forEach(function (h) {
+                if (h && h.batch && (!last || String(h.at) > String(last.at))) last = h;
+            });
+        });
+    });
+    return last;
+}
+
+function renderRecordReprice() {
+
+    const box = document.getElementById("recordRepriceBox");
+    if (!box) return;
+
+    /* نحافظ على فتح القائمة وموضع التمرير عند إعادة العرض */
+    const wasOpen = !!box.querySelector(".reprice-records")?.open;
+    const scrollTop = box.querySelector(".reprice-records-list")?.scrollTop || 0;
+    const all = collectRecordReprice();
+    const items = all.filter(function (it) { return !repriceExcluded.has(it.record.id); });
+    const sum = repriceSummary(items);
+    const t = sum.total;
+    const last = lastRepriceBatch();
+    const undoBtn = last
+        ? '<button type="button" class="secondary-btn" data-reprice="undo"><i class="ti ti-arrow-back-up"></i> تراجع عن آخر إعادة تسعير (' + escapeHTML(formatDay(String(last.at).slice(0, 10))) + ")</button>"
+        : "";
+
+    if (!all.length) {
+        box.innerHTML = '<p class="field-hint"><i class="ti ti-circle-check"></i> كل الوكالات المحفوظة مسعّرة حسب فترة تاريخ سجلها.</p>' +
+            (undoBtn ? '<div class="button-row">' + undoBtn + "</div>" : "");
+        return;
+    }
+
+    const rows = sum.list.map(function (g) {
+        const rate = committeeRates[g.type] || { ambulance: 0, cooperation: 0 };
+        return "<tr><td>" + escapeHTML(g.month ? monthLabel(g.month) : "الأسعار الأساسية") + "</td><td>" + escapeHTML(AGENCY_NAMES[g.type] || g.type) + "</td>" +
+            '<td class="num">' + g.records.size + '</td><td class="num">' + g.count + "</td>" +
+            '<td class="num">' + money(g.from) + " ← <b>" + money(g.to) + "</b></td>" +
+            '<td class="num">' + money(g.repFrom) + " ← <b>" + money(g.repTo) + "</b></td>" +
+            '<td class="num">' + money(committeeAmount(g.from, rate.ambulance)) + " ← <b>" + money(committeeAmount(g.to, rate.ambulance)) + "</b></td>" +
+            '<td class="num">' + money(committeeAmount(g.from, rate.cooperation)) + " ← <b>" + money(committeeAmount(g.to, rate.cooperation)) + "</b></td></tr>";
+    }).join("");
+
+    const byRecord = {};
+    all.forEach(function (it) {
+        const r = byRecord[it.record.id] || (byRecord[it.record.id] = { record: it.record, day: it.day, count: 0, from: new Set(), to: new Set() });
+        r.count++;
+        r.from.add(number(it.agency.basePrice));
+        r.to.add(number(it.pricing.agency));
+    });
+    const recList = Object.keys(byRecord).map(function (k) { return byRecord[k]; })
+        .sort(function (a, b) { return a.day.localeCompare(b.day) || String(a.record.recordNumber).localeCompare(String(b.record.recordNumber), undefined, { numeric: true }); });
+    const prices = function (set) { return Array.from(set).sort(function (a, b) { return a - b; }).map(money).join(" / "); };
+    const recRows = recList.map(function (r) {
+        const on = !repriceExcluded.has(r.record.id);
+        return '<tr class="' + (on ? "" : "is-excluded") + '"><td><input type="checkbox" data-reprice-record="' + escapeHTML(r.record.id) + '"' + (on ? " checked" : "") +
+            ' aria-label="تضمين السجل ' + escapeHTML(r.record.recordNumber) + '"></td>' +
+            "<td>" + escapeHTML(r.record.recordNumber) + "</td><td>" + escapeHTML(formatDay(r.day)) + "</td><td>" + escapeHTML(r.record.officeName || "") + "</td>" +
+            '<td class="num">' + r.count + '</td><td class="num">' + prices(r.from) + " ← <b>" + prices(r.to) + "</b></td></tr>";
+    }).join("");
+    const recordsBlock =
+        '<details class="reprice-records"' + (wasOpen || repriceExcluded.size ? " open" : "") + "><summary>السجلات المشمولة: " + t.records.size + " من " + recList.length +
+            " — أزل علامة السجل الذي فيه أكثر من سعر، ثم عدّل وكالاته يدوياً</summary>" +
+            '<div class="button-row"><button type="button" class="secondary-btn" data-reprice="all">تحديد الكل</button>' +
+            '<button type="button" class="secondary-btn" data-reprice="none">إلغاء تحديد الكل</button></div>' +
+            '<div class="table-wrapper reprice-records-list"><table class="schedule-table"><thead><tr><th></th><th>السجل</th><th>التاريخ</th><th>المكتب</th><th>الوكالات</th><th>سعر الوكالة</th></tr></thead><tbody>' +
+            recRows + "</tbody></table></div></details>";
+
+    box.innerHTML =
+        '<p class="field-hint"><i class="ti ti-alert-circle"></i> <b>' + all.length + " وكالة في " + recList.length + " سجل</b> محفوظة بسعر يختلف عن سعر فترة تاريخ سجلها" +
+        (repriceExcluded.size ? " (المشمول بإعادة التسعير: " + t.agencies + " وكالة في " + t.records.size + " سجل)" : "") + ". " +
+        "إعادة التسعير تغيّر سعر الوكالة وحصة الفرع فقط (والمبلغ المطلوب من المندوب بنفس الفرق)، فتُحسب حصص اللجنتين من السعر الصحيح. البنود والإضافات والطوابع والبدل لا تتغير.</p>" +
+        '<div class="table-wrapper"><table class="schedule-table reprice-table"><thead><tr><th>الفترة</th><th>النوع</th><th>السجلات</th><th>الوكالات</th><th>سعر الوكالة</th><th>حصة الفرع</th><th>حصة الإسعاف</th><th>حصة التعاون</th></tr></thead><tbody>' +
+        rows + "</tbody></table></div>" +
+        recordsBlock +
+        '<div class="reprice-totals">' +
+            "<span>فرق أسعار الوكالات: <b>" + money(t.dA) + "</b></span>" +
+            "<span>لجنة الإسعاف: " + money(t.ambBefore) + " ← <b>" + money(t.ambAfter) + "</b></span>" +
+            "<span>لجنة التعاون: " + money(t.coopBefore) + " ← <b>" + money(t.coopAfter) + "</b></span>" +
+        "</div>" +
+        '<div class="button-row">' +
+            '<button type="button" class="primary-btn" data-reprice="apply"' + (items.length ? "" : " disabled") + '><i class="ti ti-refresh"></i> تنزيل نسخة احتياطية ثم إعادة تسعير ' + t.agencies + " وكالة</button>" +
+            undoBtn +
+        "</div>";
+
+    const list = box.querySelector(".reprice-records-list");
+    if (list) list.scrollTop = scrollTop;
+}
+
+function applyRecordReprice() {
+
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("هذه العملية للمدير فقط.", "error");
+        return;
+    }
+    if (recordsLoadFailed) {
+        notify("تعذر قراءة السجلات عند فتح الصفحة، لذلك أُوقف الحفظ حمايةً للبيانات. حدّث الصفحة.", "error");
+        return;
+    }
+
+    const items = collectRecordReprice().filter(function (it) { return !repriceExcluded.has(it.record.id); });
+    if (!items.length) {
+        renderRecordReprice();
+        return;
+    }
+
+    /* نسخة احتياطية كاملة أولاً، ثم الموافقة */
+    try { downloadBackup(); } catch (e) {}
+
+    appConfirm({
+        title: "إعادة تسعير " + items.length + " وكالة",
+        message: "نُزّلت نسخة احتياطية الآن — تأكد أنها حُفظت على جهازك. ستأخذ كل وكالة سعر فترة تاريخ سجلها، وتُعاد حصص اللجنتين على هذا السعر. يمكنك التراجع لاحقاً من الزر نفسه. متابعة؟",
+        confirmText: "إعادة التسعير",
+        cancelText: "إلغاء"
+    }).then(function (ok) {
+
+        if (!ok) return;
+
+        const before = JSON.stringify(records);
+        const batch = "reprice-" + Date.now();
+        const at = new Date().toISOString();
+
+        items.forEach(function (it) {
+            const a = it.agency;
+            const applied = a.appliedPrices || {};
+            if (!Array.isArray(a.priceHistory)) a.priceHistory = [];
+            a.priceHistory.push({
+                batch: batch,
+                at: at,
+                basePrice: number(a.basePrice),
+                representativeBase: number(a.representativeBase),
+                representativeAmount: number(a.representativeAmount),
+                hadApplied: !!a.appliedPrices,
+                appliedAgency: applied.agency,
+                appliedRepresentative: applied.representative,
+                priceMonth: applied.priceMonth === undefined ? null : applied.priceMonth
+            });
+            a.basePrice = number(it.pricing.agency);
+            a.representativeBase = number(it.pricing.representative);
+            a.representativeAmount = number(a.representativeAmount) + it.dR;
+            a.appliedPrices = Object.assign({}, applied, {
+                agency: a.basePrice,
+                representative: a.representativeBase,
+                priceMonth: it.pricing.priceMonth || null
+            });
+        });
+
+        persistRecords().then(function () {
+            refreshAfterReprice();
+            notify("<strong>أُعيد تسعير " + items.length + " وكالة</strong><span>حصص اللجنتين تُحسب الآن من سعر فترة كل سجل.</span>", "success", 7000, true);
+        }, function (error) {
+            /* لم يُحفظ شيء: نعيد النسخة التي في الذاكرة كما كانت */
+            records = JSON.parse(before);
+            refreshAfterReprice();
+            notify("<strong>لم تُحفظ إعادة التسعير</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        });
+    });
+}
+
+function undoRecordReprice() {
+
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("هذه العملية للمدير فقط.", "error");
+        return;
+    }
+
+    const last = lastRepriceBatch();
+    if (!last) return;
+
+    appConfirm({
+        title: "التراجع عن إعادة التسعير",
+        message: "تعود الوكالات التي أُعيد تسعيرها في " + formatDay(String(last.at).slice(0, 10)) + " إلى أسعارها السابقة تماماً. متابعة؟",
+        confirmText: "تراجع",
+        cancelText: "إلغاء"
+    }).then(function (ok) {
+
+        if (!ok) return;
+
+        const before = JSON.stringify(records);
+        let count = 0;
+
+        records.forEach(function (record) {
+            (record.agencies || []).forEach(function (a) {
+                const hist = a.priceHistory || [];
+                const h = hist.length ? hist[hist.length - 1] : null;
+                if (!h || h.batch !== last.batch) return;
+                a.basePrice = h.basePrice;
+                a.representativeBase = h.representativeBase;
+                a.representativeAmount = h.representativeAmount;
+                if (h.hadApplied === false) {
+                    delete a.appliedPrices;
+                } else if (a.appliedPrices) {
+                    if (h.appliedAgency === undefined) delete a.appliedPrices.agency; else a.appliedPrices.agency = h.appliedAgency;
+                    if (h.appliedRepresentative === undefined) delete a.appliedPrices.representative; else a.appliedPrices.representative = h.appliedRepresentative;
+                    a.appliedPrices.priceMonth = h.priceMonth;
+                }
+                hist.pop();
+                if (!hist.length) delete a.priceHistory;
+                count++;
+            });
+        });
+
+        persistRecords().then(function () {
+            refreshAfterReprice();
+            notify("أُعيدت " + count + " وكالة إلى أسعارها السابقة.", "success");
+        }, function (error) {
+            /* لم يُحفظ شيء: نعيد النسخة التي في الذاكرة كما كانت */
+            records = JSON.parse(before);
+            refreshAfterReprice();
+            notify("<strong>لم يُحفظ التراجع</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        });
+    });
+}
+
+/* تحديث الواجهات بعد الحفظ؛ خطأ في عرضٍ ما لا يُلغي ما حُفظ */
+function refreshAfterReprice() {
+    [renderRecordReprice, renderRecords, updateDashboard, renderReports].forEach(function (step) {
+        try { step(); } catch (error) { console.error("Refresh after reprice failed:", error); }
+    });
+}
+
+document.getElementById("recordRepriceBox")?.addEventListener("click", function (event) {
+    const btn = event.target.closest("[data-reprice]");
+    if (!btn) return;
+    if (btn.dataset.reprice === "apply") applyRecordReprice();
+    else if (btn.dataset.reprice === "undo") undoRecordReprice();
+    else if (btn.dataset.reprice === "all") { repriceExcluded.clear(); renderRecordReprice(); }
+    else if (btn.dataset.reprice === "none") {
+        collectRecordReprice().forEach(function (it) { repriceExcluded.add(it.record.id); });
+        renderRecordReprice();
+    }
+});
+
+document.getElementById("recordRepriceBox")?.addEventListener("change", function (event) {
+    const box = event.target.closest("[data-reprice-record]");
+    if (!box) return;
+    if (box.checked) repriceExcluded.delete(box.dataset.repriceRecord); else repriceExcluded.add(box.dataset.repriceRecord);
+    renderRecordReprice();
+});
+
+renderRecordReprice();
 
 /* =========================================================
 أسعار الإضافات
@@ -12926,6 +13344,526 @@ if (restoreBackupBtn && restoreBackupInput) {
     );
 
 }
+
+/* =========================================================
+المزامنة مع Firebase (استخدام الموقع من أي جهاز)
+========================================================= */
+
+/*
+    البيانات المحلية (localStorage / IndexedDB) تبقى هي الأصل، وFirebase نسخة متزامنة.
+    - الدخول بحساب Google؛ قواعد Firestore تسمح لحساب المالك فقط (docs/FIREBASE.md).
+    - مساحة مشتركة للفرع (FB_WORKSPACE) يعمل عليها كل الحسابات المسموحة في القواعد (حسين وباسل):
+      كل سجل وثيقة مستقلة: workspaces/{ws}/records/{id} = {id, json, hash, deleted, updatedAt, syncedAt}
+      والإعدادات (الأسعار، الجداول، النسب، المستخدمون…) وثيقة واحدة workspaces/{ws}/meta/settings.
+    - مزامنة ثلاثية: لكل سجل نحفظ بصمة آخر نسخة متزامنة على هذا الجهاز (base).
+      تغيّر المحلي فقط ← يُرفع. تغيّر البعيد فقط ← يُطبَّق هنا. تغيّر الاثنان ← الأحدث يفوز
+      بعد نسخة احتياطية، والحذف لا يغلب تعديلاً أبداً.
+    - أول مزامنة على أي جهاز: تنزيل نسخة احتياطية أولاً.
+    - حالة المزامنة تفضيل واجهة لهذا الجهاز (audit_ui_firebase)، لا تدخل في النسخ الاحتياطية.
+*/
+
+const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyD4EqYkOr359yOQ_VDbFadUD_Q6-jT88BM",
+    authDomain: "work-1-c2965.firebaseapp.com",
+    projectId: "work-1-c2965",
+    storageBucket: "work-1-c2965.firebasestorage.app",
+    messagingSenderId: "859204415987",
+    appId: "1:859204415987:web:2bfccb5c1d56a3eccc6286"
+};
+const FIREBASE_SDK = "https://www.gstatic.com/firebasejs/10.12.2/";
+const FB_STATE_KEY = "audit_ui_firebase";
+/* المساحة المشتركة: لا تغيّرها بعد بدء المزامنة (تغييرها = مساحة فارغة جديدة) */
+const FB_WORKSPACE = "idlib";
+
+/* مفاتيح الإعدادات المتزامنة (نفس ما تحويه النسخة الاحتياطية عدا السجلات) */
+const FB_SETTINGS_KEYS = [
+    "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
+    "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
+    "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved"
+];
+
+let fbState = loadData(FB_STATE_KEY, null);
+if (!fbState || typeof fbState !== "object") fbState = {};
+if (!fbState.base || typeof fbState.base !== "object") fbState.base = {};
+
+/* أول بصمة للإعدادات على هذا الجهاز: لا تُعدّ تعديلاً */
+if (!fbState.settingsLocalHash) {
+    try { fbState.settingsLocalHash = fbSettingsHash(fbSettingsJSON()); } catch (e) {}
+}
+
+let fbBackend = null;
+let fbUser = null;
+let fbSyncing = null;
+let fbSyncAgain = false;
+let fbTimer = null;
+
+function saveFbState() {
+    try { localStorage.setItem(FB_STATE_KEY, JSON.stringify(fbState)); } catch (e) {}
+}
+
+/* بصمة نصية قصيرة (FNV-1a) لمقارنة النسخ دون رفع كل شيء */
+function fbHash(text) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+        h ^= text.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(36) + "-" + text.length.toString(36);
+}
+
+/* نص ثابت للمحتوى نفسه مهما اختلف ترتيب المفاتيح (حتى لا يرى جهازان المحتوى نفسه مختلفاً) */
+function fbCanonical(value) {
+    if (value === null || typeof value !== "object") return JSON.stringify(value === undefined ? null : value);
+    if (Array.isArray(value)) return "[" + value.map(fbCanonical).join(",") + "]";
+    return "{" + Object.keys(value).filter(function (k) { return value[k] !== undefined; }).sort().map(function (k) {
+        return JSON.stringify(k) + ":" + fbCanonical(value[k]);
+    }).join(",") + "}";
+}
+
+function fbRecordHash(record) {
+    return fbHash(fbCanonical(record));
+}
+
+function fbSettingsHash(json) {
+    const data = JSON.parse(json);
+    const canon = {};
+    Object.keys(data).forEach(function (k) {
+        try { canon[k] = JSON.parse(data[k]); } catch (e) { canon[k] = data[k]; }
+    });
+    return fbHash(fbCanonical(canon));
+}
+
+function fbDocId(id) {
+    const s = String(id);
+    return /^[A-Za-z0-9_-]{1,200}$/.test(s) ? s : "x_" + fbHash(s).replace(/-/g, "_");
+}
+
+function fbSettingsJSON() {
+    const out = {};
+    FB_SETTINGS_KEYS.forEach(function (key) {
+        let raw = null;
+        try { raw = localStorage.getItem(key); } catch (e) {}
+        if (raw !== null) out[key] = raw;
+    });
+    return JSON.stringify(out);
+}
+
+/* يُستدعى من saveData: تغيّرت الإعدادات فعلاً؟ نسجّل وقت التغيير لحسم التعارض */
+function fbNoteSettingsChange(key) {
+    if (FB_SETTINGS_KEYS.indexOf(key) === -1) return;
+    const hash = fbSettingsHash(fbSettingsJSON());
+    if (fbState.settingsLocalHash === hash) return;
+    /* أول حساب على هذا الجهاز لا يُعدّ تعديلاً (إعدادات افتراضية لجهاز جديد لا تغلب البعيدة) */
+    if (fbState.settingsLocalHash) fbState.settingsChangedAt = Date.now();
+    fbState.settingsLocalHash = hash;
+    saveFbState();
+}
+
+/* ---------- الواجهة الخلفية: Firebase الحقيقي (أو بديل للاختبار) ---------- */
+
+function fbLoadBackend() {
+    if (fbBackend) return Promise.resolve(fbBackend);
+    if (window.__FB_TEST_BACKEND) {
+        fbBackend = window.__FB_TEST_BACKEND;
+        return Promise.resolve(fbBackend);
+    }
+    return Promise.all([
+        import(FIREBASE_SDK + "firebase-app.js"),
+        import(FIREBASE_SDK + "firebase-auth.js"),
+        import(FIREBASE_SDK + "firebase-firestore.js")
+    ]).then(function (mods) {
+        const appMod = mods[0], authMod = mods[1], fs = mods[2];
+        const app = appMod.initializeApp(FIREBASE_CONFIG);
+        const auth = authMod.getAuth(app);
+        const db = fs.getFirestore(app);
+        /* ws = المساحة المشتركة (لا معرّف الحساب): كل الحسابات المسموحة ترى البيانات نفسها */
+        const col = function (ws, name) { return fs.collection(db, "workspaces", ws, name); };
+        const millis = function (ts) { return ts && typeof ts.toMillis === "function" ? ts.toMillis() : 0; };
+
+        fbBackend = {
+            onUser: function (cb) {
+                authMod.getRedirectResult(auth).catch(function () {});
+                return authMod.onAuthStateChanged(auth, cb);
+            },
+            signIn: function () {
+                const provider = new authMod.GoogleAuthProvider();
+                provider.setCustomParameters({ prompt: "select_account" });
+                return authMod.signInWithPopup(auth, provider).catch(function (error) {
+                    /* الهاتف أو منع النوافذ المنبثقة: الدخول بإعادة التوجيه */
+                    if (error && /popup-blocked|operation-not-supported|popup-closed-by-browser/.test(error.code || "")) {
+                        return authMod.signInWithRedirect(auth, provider);
+                    }
+                    throw error;
+                });
+            },
+            signOut: function () { return authMod.signOut(auth); },
+            pullRecords: function (uid, since) {
+                const q = since
+                    ? fs.query(col(uid, "records"), fs.where("syncedAt", ">", fs.Timestamp.fromMillis(since)))
+                    : col(uid, "records");
+                return fs.getDocs(q).then(function (snap) {
+                    return snap.docs.map(function (d) {
+                        const v = d.data();
+                        return { id: v.id, json: v.json || "", hash: v.hash, deleted: !!v.deleted, updatedAt: v.updatedAt || "", syncedAt: millis(v.syncedAt) };
+                    });
+                });
+            },
+            getSettings: function (uid) {
+                return fs.getDoc(fs.doc(db, "workspaces", uid, "meta", "settings")).then(function (d) {
+                    if (!d.exists()) return null;
+                    const v = d.data();
+                    return { json: v.json || "", hash: v.hash, changedAt: v.changedAt || 0, records: v.records || 0, syncedAt: millis(v.syncedAt) };
+                });
+            },
+            pushRecords: function (uid, list) {
+                /* دفعات صغيرة: حد Firestore 500 عملية و10 ميغابايت للطلب */
+                const chunks = [];
+                let cur = [], size = 0;
+                list.forEach(function (r) {
+                    const n = (r.json || "").length + 300;
+                    if (cur.length && (cur.length >= 300 || size + n > 3000000)) { chunks.push(cur); cur = []; size = 0; }
+                    cur.push(r); size += n;
+                });
+                if (cur.length) chunks.push(cur);
+                return chunks.reduce(function (p, chunk) {
+                    return p.then(function () {
+                        const batch = fs.writeBatch(db);
+                        chunk.forEach(function (r) {
+                            batch.set(fs.doc(db, "workspaces", uid, "records", fbDocId(r.id)), {
+                                id: String(r.id), json: r.deleted ? "" : r.json, hash: r.hash, deleted: !!r.deleted,
+                                updatedAt: r.updatedAt || "", syncedAt: fs.serverTimestamp()
+                            });
+                        });
+                        return batch.commit();
+                    });
+                }, Promise.resolve());
+            },
+            pushSettings: function (uid, s) {
+                return fs.setDoc(fs.doc(db, "workspaces", uid, "meta", "settings"), {
+                    json: s.json, hash: s.hash, changedAt: s.changedAt || 0, records: s.records || 0, syncedAt: fs.serverTimestamp()
+                });
+            }
+        };
+        return fbBackend;
+    });
+}
+
+/* ---------- المزامنة ---------- */
+
+function fbRecordUpdatedAt(record) {
+    return String(record && (record.updatedAt || record.createdAt) || "");
+}
+
+/* نسخة احتياطية هادئة قبل أي تغيير يُسقط نسخة محلية (تعارض أو حذف من جهاز آخر) */
+function fbSafetyBackup(reason) {
+    const jobs = [];
+    try { if (telegramReady()) jobs.push(telegramAfterBackup(reason)); } catch (e) {}
+    try { if (backupFolderHandle) jobs.push(writeBackupToFolder(false)); } catch (e) {}
+    if (!jobs.length) {
+        try { downloadBackupFile(true); } catch (e) {}
+        return Promise.resolve();
+    }
+    const timeout = new Promise(function (r) { setTimeout(r, 15000); });
+    return Promise.race([Promise.all(jobs.map(function (j) { return Promise.resolve(j).catch(function () {}); })), timeout]);
+}
+
+function fbSync(reason) {
+
+    if (!fbUser || recordsLoadFailed || !currentUser) return Promise.resolve(false);
+    if (fbSyncing) { fbSyncAgain = true; return fbSyncing; }
+
+    const uid = FB_WORKSPACE;
+    const first = !fbState.firstSyncDone || fbState.uid !== uid;
+    if (first) {
+        fbState.base = {};
+        fbState.lastPull = 0;
+        fbState.settingsBase = null;
+        fbState.uid = uid;
+    }
+
+    renderFirebasePanel("syncing");
+
+    fbSyncing = (first && records.length ? Promise.resolve().then(function () {
+        /* أول مزامنة على هذا الجهاز: نسخة كاملة قبل أي شيء */
+        try { downloadBackupFile(false); } catch (e) {}
+    }) : Promise.resolve()).then(function () {
+        return Promise.all([fbBackend.pullRecords(uid, fbState.lastPull || 0), fbBackend.getSettings(uid)]);
+    }).then(function (res) {
+
+        const remoteList = res[0];
+        const remoteSettings = res[1];
+        const base = fbState.base;
+        const localById = {};
+        records.forEach(function (r) { localById[String(r.id)] = r; });
+        const localJSON = {};
+        const localHashes = {};
+        const localHash = function (id) {
+            const r = localById[id];
+            if (!r) return null;
+            if (!(id in localHashes)) {
+                localJSON[id] = JSON.stringify(r);
+                localHashes[id] = fbRecordHash(r);
+            }
+            return localHashes[id];
+        };
+
+        const toPush = [];
+        const apply = [];      /* {id, record|null} */
+        let conflicts = 0, lostLocal = false, maxSynced = fbState.lastPull || 0;
+        const seen = {};
+
+        remoteList.forEach(function (rem) {
+            const id = String(rem.id);
+            seen[id] = true;
+            if (rem.syncedAt > maxSynced) maxSynced = rem.syncedAt;
+            const R = rem.deleted ? "deleted" : rem.hash;
+            const L = localHash(id);
+            const B = base[id];
+            if (L === R || (L === null && R === "deleted")) { base[id] = R; return; }
+            const localChanged = B === undefined ? L !== null : L !== B && !(L === null && B === "deleted");
+            const remoteChanged = B === undefined ? true : R !== B;
+            if (!remoteChanged) return;               /* الرفع أدناه */
+            if (!localChanged) {
+                apply.push({ id: id, record: rem.deleted ? null : JSON.parse(rem.json) });
+                if (rem.deleted) lostLocal = true;
+                base[id] = R;
+                return;
+            }
+            /* تعارض: الحذف لا يغلب تعديلاً، وإلا فالأحدث */
+            conflicts++;
+            if (rem.deleted) return;                  /* يبقى المحلي ويُرفع */
+            if (L === null) { apply.push({ id: id, record: JSON.parse(rem.json) }); base[id] = R; return; }
+            const remoteRecord = JSON.parse(rem.json);
+            if (fbRecordUpdatedAt(remoteRecord) > fbRecordUpdatedAt(localById[id])) {
+                apply.push({ id: id, record: remoteRecord });
+                lostLocal = true;
+                base[id] = R;
+            }
+        });
+
+        /* الرفع: كل ما تغيّر محلياً منذ آخر مزامنة (أو لم يُرفع قط) */
+        records.forEach(function (r) {
+            const id = String(r.id);
+            if (apply.some(function (a) { return a.id === id; })) return;
+            const L = localHash(id);
+            if (base[id] !== L) toPush.push({ id: id, json: localJSON[id], hash: L, updatedAt: fbRecordUpdatedAt(r) });
+        });
+        /* سجلات حُذفت محلياً بعد مزامنتها */
+        Object.keys(base).forEach(function (id) {
+            if (base[id] !== "deleted" && !localById[id] && !apply.some(function (a) { return a.id === id; })) {
+                toPush.push({ id: id, deleted: true, hash: "deleted", updatedAt: new Date().toISOString() });
+            }
+        });
+
+        /* الإعدادات: وحدة واحدة بالمنطق نفسه */
+        const sJSON = fbSettingsJSON();
+        const sL = fbSettingsHash(sJSON);
+        const sB = fbState.settingsBase;
+        let pushSettings = false, applySettings = null;
+        if (!fbState.settingsLocalHash) fbState.settingsLocalHash = sL;
+        if (!remoteSettings) {
+            pushSettings = true;
+        } else if (remoteSettings.hash !== sL) {
+            const remoteChanged = remoteSettings.hash !== sB;
+            const localChanged = sB ? sL !== sB : true;
+            /* الأحدث تعديلاً يفوز. إعدادات لم تُعدَّل قط تُقدَّر بوجود سجلات معها:
+               جهاز جديد فارغ (أسعار افتراضية) لا يكتب فوق إعدادات جهاز فيه سجلات، في أي ترتيب دخول.
+               التعادل ← النسخة المشتركة. */
+            const localScore = number(fbState.settingsChangedAt) || (records.length ? 1 : 0);
+            const remoteScore = number(remoteSettings.changedAt) || (number(remoteSettings.records) ? 1 : 0);
+            if (remoteChanged && (!localChanged || remoteScore >= localScore)) {
+                applySettings = remoteSettings;
+            } else if (localChanged) {
+                pushSettings = true;
+            }
+        } else {
+            fbState.settingsBase = sL;
+        }
+        /* إعدادات تصل أثناء إدخال سجل: تؤجَّل حتى لا تضيع الوكالات المضافة */
+        if (applySettings && pendingAgencies.length) applySettings = null;
+
+        return (lostLocal || conflicts ? fbSafetyBackup("قبل تطبيق مزامنة") : Promise.resolve()).then(function () {
+
+            let localChangedNow = false;
+            apply.forEach(function (a) {
+                const idx = records.findIndex(function (r) { return String(r.id) === a.id; });
+                if (a.record === null) {
+                    if (idx !== -1) { records.splice(idx, 1); localChangedNow = true; }
+                } else if (idx !== -1) {
+                    records[idx] = a.record; localChangedNow = true;
+                } else {
+                    records.push(a.record); localChangedNow = true;
+                }
+            });
+
+            /* حفظ مباشر (لا persistRecords حتى لا تُطلب مزامنة جديدة)، مع تعليم التغيير للنسخ الاحتياطي */
+            const save = localChangedNow ? persistRecordsNow().then(function () { try { markDataChanged(); } catch (e) {} }) : Promise.resolve();
+            return save.then(function () {
+                return toPush.length ? fbBackend.pushRecords(uid, toPush) : null;
+            }).then(function () {
+                toPush.forEach(function (p) { base[p.id] = p.hash; });
+                if (pushSettings) {
+                    return fbBackend.pushSettings(uid, { json: sJSON, hash: sL, changedAt: fbState.settingsChangedAt || 0, records: records.length }).then(function () {
+                        fbState.settingsBase = sL;
+                    });
+                }
+            }).then(function () {
+                fbState.lastPull = maxSynced;
+                fbState.firstSyncDone = true;
+                fbState.lastSyncAt = new Date().toISOString();
+                fbState.email = fbUser.email || "";
+                fbState.lastError = "";
+                fbState.lastResult = { pulled: apply.length, pushed: toPush.length, conflicts: conflicts };
+                saveFbState();
+
+                if (localChangedNow) {
+                    [renderRecords, updateDashboard, renderReports].forEach(function (step) {
+                        try { step(); } catch (e) { console.error("Refresh after sync failed:", e); }
+                    });
+                    notify("<strong>مزامنة Firebase</strong><span>وصل " + apply.length + " تغيير من جهاز آخر" +
+                        (conflicts ? " (" + conflicts + " تعارض حُسم للأحدث بعد نسخة احتياطية)" : "") + ".</span>", "info", 6000, true);
+                }
+
+                if (applySettings) {
+                    /* إعدادات أحدث من جهاز آخر: تُكتب ثم يُعاد التحميل لتُقرأ من جديد */
+                    const data = JSON.parse(applySettings.json || "{}");
+                    FB_SETTINGS_KEYS.forEach(function (key) {
+                        if (typeof data[key] === "string") localStorage.setItem(key, data[key]);
+                    });
+                    fbState.settingsBase = applySettings.hash;
+                    fbState.settingsLocalHash = applySettings.hash;
+                    fbState.settingsChangedAt = number(applySettings.changedAt);
+                    saveFbState();
+                    notify("<strong>وصلت أسعار وإعدادات أحدث من جهاز آخر</strong><span>يُعاد تحميل الصفحة الآن.</span>", "info", 4000, true);
+                    setTimeout(function () { location.reload(); }, 1500);
+                }
+                return true;
+            });
+        });
+    }).catch(function (error) {
+        console.error("Firebase sync failed:", error);
+        const code = String(error && (error.code || error.message) || error);
+        fbState.lastError = /permission/i.test(code)
+            ? "هذا الحساب غير مسموح له بالوصول. ادخل بحساب المالك."
+            : (navigator.onLine === false ? "لا يوجد اتصال بالإنترنت — ستُعاد المحاولة تلقائياً." : code);
+        saveFbState();
+        return false;
+    }).then(function (ok) {
+        fbSyncing = null;
+        renderFirebasePanel();
+        if (fbSyncAgain) { fbSyncAgain = false; fbScheduleSync(1000); }
+        return ok;
+    });
+
+    return fbSyncing;
+}
+
+/* مزامنة مؤجّلة قليلاً بعد كل حفظ (تُجمع عدة حفظات في رفع واحد) */
+function fbScheduleSync(delay) {
+    if (!fbUser) return;
+    clearTimeout(fbTimer);
+    fbTimer = setTimeout(function () { fbSync("auto"); }, delay == null ? 4000 : delay);
+}
+
+function fbSignIn() {
+    fbConnect();
+    fbLoadBackend().then(function (b) {
+        return b.signIn();
+    }).catch(function (error) {
+        console.error("Firebase sign-in failed:", error);
+        const code = String(error && error.code || "");
+        if (/popup-closed-by-user|cancelled-popup-request/.test(code)) return;
+        notify("<strong>تعذر الدخول بحساب Google</strong><span>" + escapeHTML(/unauthorized-domain/.test(code)
+            ? "أضف hussein199800.github.io إلى Authorized domains في إعدادات Authentication."
+            : (error && error.message || error)) + "</span>", "error", 10000, true);
+    });
+}
+
+function fbSignOut() {
+    appConfirm({
+        title: "إيقاف المزامنة على هذا الجهاز",
+        message: "تبقى بياناتك كاملة على هذا الجهاز وعلى Firebase. فقط يتوقف هذا الجهاز عن المزامنة حتى تدخل مرة أخرى.",
+        confirmText: "إيقاف",
+        cancelText: "إلغاء"
+    }).then(function (ok) {
+        if (!ok || !fbBackend) return;
+        fbBackend.signOut().then(function () {
+            fbState.firstSyncDone = false;
+            saveFbState();
+            renderFirebasePanel();
+        });
+    });
+}
+
+function renderFirebasePanel(mode) {
+    const status = document.getElementById("fbStatus");
+    const box = document.getElementById("fbActions");
+    if (!status || !box) return;
+    const r = fbState.lastResult;
+    let text;
+    if (!fbUser) {
+        text = fbState.lastError ? fbState.lastError : "غير متصل";
+    } else if (mode === "syncing") {
+        text = "جارٍ المزامنة…";
+    } else if (fbState.lastError) {
+        text = fbState.lastError;
+    } else {
+        text = "متصل: " + (fbUser.email || "") + (fbState.lastSyncAt ? " — آخر مزامنة " + new Date(fbState.lastSyncAt).toLocaleString(NUMBER_LOCALE, { hour: "2-digit", minute: "2-digit", day: "numeric", month: "numeric" }) : "") +
+            (r && (r.pulled || r.pushed) ? " (رُفع " + r.pushed + "، وصل " + r.pulled + ")" : "");
+    }
+    status.textContent = text;
+    status.classList.toggle("is-ok", !!fbUser && !fbState.lastError && mode !== "syncing");
+    status.classList.toggle("is-error", !!fbState.lastError);
+    box.innerHTML = fbUser
+        ? '<button type="button" class="primary-btn" data-fb="sync"' + (mode === "syncing" ? " disabled" : "") + '><i class="ti ti-refresh" aria-hidden="true"></i> مزامنة الآن</button>' +
+          '<button type="button" class="secondary-btn" data-fb="out"><i class="ti ti-logout" aria-hidden="true"></i> إيقاف المزامنة على هذا الجهاز</button>'
+        : '<button type="button" class="primary-btn" data-fb="in"><i class="ti ti-brand-google" aria-hidden="true"></i> الدخول بحساب Google وبدء المزامنة</button>';
+}
+
+document.getElementById("fbActions")?.addEventListener("click", function (event) {
+    const btn = event.target.closest("[data-fb]");
+    if (!btn) return;
+    if (btn.dataset.fb === "in") fbSignIn();
+    else if (btn.dataset.fb === "out") fbSignOut();
+    else if (btn.dataset.fb === "sync") fbSync("manual");
+});
+
+/* بدء الاتصال: فقط إن سبق الدخول على هذا الجهاز (لا تحميل لمكتبات Firebase دون حاجة) */
+function fbStart() {
+    renderFirebasePanel();
+    if (!fbState.signedIn && !window.__FB_TEST_BACKEND) return;
+    fbConnect();
+}
+
+let fbConnected = false;
+function fbConnect() {
+    if (fbConnected) return;
+    fbConnected = true;
+    fbLoadBackend().then(function (b) {
+        b.onUser(function (user) {
+            fbUser = user || null;
+            fbState.signedIn = !!user;
+            saveFbState();
+            renderFirebasePanel();
+            if (user) fbSync("start");
+        });
+    }).catch(function (error) {
+        fbConnected = false;
+        fbState.lastError = "تعذر تحميل Firebase — تحقق من الاتصال.";
+        console.error("Firebase load failed:", error);
+        renderFirebasePanel();
+    });
+}
+
+window.addEventListener("online", function () { fbScheduleSync(2000); });
+document.addEventListener("visibilitychange", function () {
+    /* العودة إلى الصفحة: جلب تغييرات الأجهزة الأخرى (مرة كل دقيقة على الأكثر) */
+    if (document.visibilityState === "visible" && fbUser && (!fbState.lastSyncAt || Date.now() - Date.parse(fbState.lastSyncAt) > 60000)) {
+        fbScheduleSync(500);
+    }
+});
+
+onReady(fbStart);
 
 /* =========================================================
 تبديل الملاحظات السريعة (لا تؤثر على أي حساب مالي)
