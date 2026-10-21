@@ -94,7 +94,9 @@ check("الحصص حسب التاريخ ومبلغ الفترة المحدد", b
 /* 2) أداة تسعير السجلات المحفوظة: استثناء سجل، تنفيذ، تراجع */
 await ev(function () { switchSection("pricesSection"); });
 await page.waitForTimeout(300);
-const original = await ev(function () { return JSON.stringify(records); });
+/* updatedAt يتغير عمداً عند التطبيق والتراجع (لتعرف المزامنة أن هذه النسخة أحدث) */
+const snapshot = function () { return ev(function () { return JSON.stringify(records.map(function (r) { const x = Object.assign({}, r); delete x.updatedAt; return x; })); }); };
+const original = await snapshot();
 await page.locator("#recordRepriceCard summary").click();
 await page.locator('[data-reprice-record="r2"]').uncheck();
 await page.click('[data-reprice="apply"]');
@@ -107,7 +109,7 @@ check("إعادة التسعير محفوظة", stored === 1900 || stored === "i
 await page.click('[data-reprice="undo"]');
 await page.locator("dialog[open] .app-dialog-ok").click();
 await page.waitForTimeout(600);
-check("التراجع يعيد السجلات كما كانت حرفياً", (await ev(function () { return JSON.stringify(records); })) === original);
+check("التراجع يعيد السجلات كما كانت حرفياً", (await snapshot()) === original);
 
 /* 3) سجل جديد بثلاثة أسعار */
 await ev(function () { switchSection("newRecordSection"); });
@@ -135,6 +137,28 @@ if (await page.locator("dialog[open] .app-dialog-ok").count()) await page.locato
 await page.waitForTimeout(300);
 const afterDate = await ev(function () { return pendingAgencies.map(function (a) { return a.basePrice; }).join(","); });
 check("تغيير التاريخ يعيد تسعير التلقائية فقط", afterDate === "1700,1050,1900", afterDate);
+
+/* 4) كل الصفحات تُفتح، والحاسبة تحسب، والتقارير تُبنى — دون أخطاء */
+const sections = ["dashboardSection", "recordsSection", "reportsSection", "committeesSection", "calculatorSection", "guideSection", "pricesSection", "usersSection", "devlogSection", "newRecordSection"];
+for (const id of sections) {
+    await ev(function (s) { switchSection(s); }, id);
+    await page.waitForTimeout(250);
+}
+const calc = await ev(function () {
+    switchSection("calculatorSection");
+    try { updateQuickCalc(); } catch (e) { return "error: " + e.message; }
+    const box = document.getElementById("qcResult");
+    return box && box.innerText.indexOf("لجنة الإسعاف") !== -1 ? "ok" : "no-output";
+});
+check("الحاسبة تعمل", calc === "ok", calc);
+const reports = await ev(function () {
+    try {
+        records.forEach(function (r) { buildFinalRecordReport(r, "summary"); buildFinalRecordReport(r, "detailed"); });
+        buildCommitteesDoc(false);
+        return "ok";
+    } catch (e) { return "error: " + e.message; }
+});
+check("التقارير (المختصر والمفصل واللجان) تُبنى", reports === "ok", reports);
 
 check("لا أخطاء JavaScript", errors.length === 0, errors.join(" | "));
 

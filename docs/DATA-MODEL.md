@@ -55,6 +55,8 @@
   notes, transportInAdditions, transportSettings,
   appliedPrices: { agency, representative, priceMonth, additions, transport, stamps },  // الأسعار وقت الحفظ
   pricePeriod,             // اختياري (20/10/2026): "" أو غائب = حسب تاريخ السجل؛ "YYYY-MM-DD" = جدول فترة بعينه؛ "base" = الأسعار الأساسية
+  customPrice,             // اختياري (21/10/2026): سعر محدد من «تغيير سعر وكالات محفوظة» — يغلب الفترة
+  customRepresentative,    // اختياري: حصة الفرع المحددة معه
   priceHistory             // اختياري: [{batch, at, basePrice, representativeBase, representativeAmount, hadApplied, appliedAgency, appliedRepresentative, priceMonth}] — للتراجع عن إعادة التسعير
 }
 ```
