@@ -6623,3 +6623,22 @@ html.theme-switching *::after {
 @media print {
     .chip-key { display: none; }
 }
+
+/* تغيير سعر وكالات محفوظة */
+.bp-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px 14px;
+    margin: 10px 0 14px;
+}
+#bulkPriceBox[data-scope="date"] .bp-record,
+#bulkPriceBox[data-scope="record"] .bp-date,
+#bulkPriceBox:not(.is-custom) .bp-custom {
+    display: none;
+}
+#bulkPriceBox .bp-record:has(#bpRecord) {
+    grid-column: span 2;
+}
+@media (max-width: 640px) {
+    #bulkPriceBox .bp-record:has(#bpRecord) { grid-column: auto; }
+}

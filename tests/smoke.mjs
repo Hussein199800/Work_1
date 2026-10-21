@@ -94,7 +94,9 @@ check("الحصص حسب التاريخ ومبلغ الفترة المحدد", b
 /* 2) أداة تسعير السجلات المحفوظة: استثناء سجل، تنفيذ، تراجع */
 await ev(function () { switchSection("pricesSection"); });
 await page.waitForTimeout(300);
-const original = await ev(function () { return JSON.stringify(records); });
+/* updatedAt يتغير عمداً عند التطبيق والتراجع (لتعرف المزامنة أن هذه النسخة أحدث) */
+const snapshot = function () { return ev(function () { return JSON.stringify(records.map(function (r) { const x = Object.assign({}, r); delete x.updatedAt; return x; })); }); };
+const original = await snapshot();
 await page.locator("#recordRepriceCard summary").click();
 await page.locator('[data-reprice-record="r2"]').uncheck();
 await page.click('[data-reprice="apply"]');
@@ -107,7 +109,7 @@ check("إعادة التسعير محفوظة", stored === 1900 || stored === "i
 await page.click('[data-reprice="undo"]');
 await page.locator("dialog[open] .app-dialog-ok").click();
 await page.waitForTimeout(600);
-check("التراجع يعيد السجلات كما كانت حرفياً", (await ev(function () { return JSON.stringify(records); })) === original);
+check("التراجع يعيد السجلات كما كانت حرفياً", (await snapshot()) === original);
 
 /* 3) سجل جديد بثلاثة أسعار */
 await ev(function () { switchSection("newRecordSection"); });

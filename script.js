@@ -1677,6 +1677,7 @@ if (
     renderPrices();
 
     if (typeof renderRecordReprice === "function") renderRecordReprice();
+    if (typeof renderBulkPrice === "function") renderBulkPrice();
 
 }
 
@@ -1990,7 +1991,7 @@ function priceTableForDay(day) {
 */
 function pendingAgenciesNeedingReprice(day) {
     return pendingAgencies.filter(function (agency) {
-        if (agency.status === "cancelled" || agency.pricePeriod) return false;
+        if (agency.status === "cancelled" || agency.pricePeriod || number(agency.customPrice) > 0) return false;
         const p = getPricingForType(agency.type, day);
         const applied = agency.appliedPrices || {};
         return number(applied.agency !== undefined ? applied.agency : agency.basePrice) !== number(p.agency) ||
@@ -2000,8 +2001,8 @@ function pendingAgenciesNeedingReprice(day) {
 
 function repricePendingAgencies(day) {
     pendingAgencies = pendingAgencies.map(function (agency) {
-        /* وكالة لها فترة سعر مختارة تبقى على سعرها */
-        if (agency.pricePeriod) return agency;
+        /* وكالة لها فترة سعر مختارة أو سعر محدد تبقى على سعرها */
+        if (agency.pricePeriod || number(agency.customPrice) > 0) return agency;
         return buildAgency(agencyInputsOf(agency), getPricingForType(agency.type, day), agency.id);
     });
     renderPendingAgencies();
@@ -2106,9 +2107,12 @@ function setAgencyPricePeriod(value) {
 /* تغيير فترة سعر وكالة مضافة من سطرها */
 function changePendingPeriod(index, period) {
     const agency = pendingAgencies[index];
-    if (!agency || (agency.pricePeriod || "") === (period || "")) return;
+    if (!agency || (period !== "__custom" && (agency.pricePeriod || "") === (period || "") && !(number(agency.customPrice) > 0))) return;
+    if (period === "__custom") return;
     const inputs = agencyInputsOf(agency);
     inputs.pricePeriod = period || "";
+    inputs.customPrice = 0;
+    inputs.customRepresentative = null;
     const updated = buildAgency(inputs, pricingForAgency(inputs.type, inputs.pricePeriod), agency.id);
     pendingAgencies[index] = updated;
     lastAddedAgencyId = updated.id;
@@ -2593,6 +2597,8 @@ function agencyInputsOf(agency) {
         status: agency.status || "active",
         duplicate: !!agency.duplicate,
         pricePeriod: agency.pricePeriod || "",
+        customPrice: number(agency.customPrice),
+        customRepresentative: agency.customRepresentative === undefined ? null : agency.customRepresentative,
         notes: agency.notes || "",
         additions: {
             save: number(ad.save), signature: number(ad.signature), inheritance: number(ad.inheritance),
@@ -2608,6 +2614,14 @@ function agencyInputsOf(agency) {
     السابقة تماماً). تُستخدم للنموذج ولإعادة التسعير حسب الشهر.
 */
 function buildAgency(inputs, pricing, keepId) {
+
+    /* سعر محدد للوكالة (من «تغيير سعر وكالات محفوظة») يبقى عند تغيير نوعها أو بنودها */
+    if (number(inputs.customPrice) > 0) {
+        pricing = Object.assign({}, pricing, {
+            agency: number(inputs.customPrice),
+            representative: inputs.customRepresentative !== null && inputs.customRepresentative !== undefined ? number(inputs.customRepresentative) : pricing.representative
+        });
+    }
 
     const status = inputs.status || "active";
     const cancelled = status === "cancelled";
@@ -2641,6 +2655,8 @@ function buildAgency(inputs, pricing, keepId) {
         status: status,
         duplicate: !!inputs.duplicate,
         pricePeriod: inputs.pricePeriod || undefined,
+        customPrice: number(inputs.customPrice) > 0 ? number(inputs.customPrice) : undefined,
+        customRepresentative: number(inputs.customPrice) > 0 && inputs.customRepresentative !== null && inputs.customRepresentative !== undefined ? number(inputs.customRepresentative) : undefined,
         transportInAdditions: true,
         basePrice: basePrice,
         representativeBase: cancelled ? 0 : number(pricing.representative),
@@ -3941,10 +3957,11 @@ container.innerHTML =
                                 </select>
                             </label>
 
-                            ${agency.status === "cancelled" ? "" : `<label class="type-select period-select${agency.pricePeriod ? " is-override" : ""}" title="سعر هذه الوكالة: حسب تاريخ السجل أو فترة أخرى">
+                            ${agency.status === "cancelled" ? "" : `<label class="type-select period-select${agency.pricePeriod || number(agency.customPrice) > 0 ? " is-override" : ""}" title="سعر هذه الوكالة: حسب تاريخ السجل أو فترة أخرى">
                                 السعر
                                 <select onchange="changePendingPeriod(${index}, this.value)" aria-label="فترة سعر الوكالة رقم ${escapeHTML(agency.number)}">
-                                    ${pricePeriodOptionsHTML(agency.pricePeriod || "", agency.type)}
+                                    ${number(agency.customPrice) > 0 ? '<option value="__custom" selected>سعر محدد — ' + money(agency.customPrice) + "</option>" : ""}
+                                    ${pricePeriodOptionsHTML(number(agency.customPrice) > 0 ? "__none" : (agency.pricePeriod || ""), agency.type)}
                                 </select>
                             </label>`}
 
@@ -6148,7 +6165,8 @@ function getAgencyCommittee(agency, day) {
     let price =
         number(agency.basePrice) ||
         number(prices[agency.type] && prices[agency.type].agency);
-    const row = agencyCommitteeRow(agency, day);
+    /* سعر محدد للوكالة: الحصة من سعرها هي، لا من جدول الفترة */
+    const row = number(agency.customPrice) > 0 ? null : agencyCommitteeRow(agency, day);
     if (row && number(row.agency) > 0) price = number(row.agency);
     const amb = explicitShare(row, "ambulance");
     const coop = explicitShare(row, "cooperation");
@@ -10676,7 +10694,7 @@ function collectRecordReprice() {
         if (!day) return;
         (record.agencies || []).forEach(function (agency) {
             /* الملغاة، والوكالة التي اختير لها سعر فترة بعينها، تبقى كما هي */
-            if (!agency || agency.status === "cancelled" || agency.pricePeriod) return;
+            if (!agency || agency.status === "cancelled" || agency.pricePeriod || number(agency.customPrice) > 0) return;
             const p = getPricingForType(agency.type, day);
             const dA = number(p.agency) - number(agency.basePrice);
             const dR = number(p.representative) - number(agency.representativeBase);
@@ -10847,28 +10865,12 @@ function applyRecordReprice() {
         const at = new Date().toISOString();
 
         items.forEach(function (it) {
-            const a = it.agency;
-            const applied = a.appliedPrices || {};
-            if (!Array.isArray(a.priceHistory)) a.priceHistory = [];
-            a.priceHistory.push({
-                batch: batch,
-                at: at,
-                basePrice: number(a.basePrice),
-                representativeBase: number(a.representativeBase),
-                representativeAmount: number(a.representativeAmount),
-                hadApplied: !!a.appliedPrices,
-                appliedAgency: applied.agency,
-                appliedRepresentative: applied.representative,
-                priceMonth: applied.priceMonth === undefined ? null : applied.priceMonth
-            });
-            a.basePrice = number(it.pricing.agency);
-            a.representativeBase = number(it.pricing.representative);
-            a.representativeAmount = number(a.representativeAmount) + it.dR;
-            a.appliedPrices = Object.assign({}, applied, {
-                agency: a.basePrice,
-                representative: a.representativeBase,
+            applyAgencyPriceChange(it.agency, {
+                agency: it.pricing.agency,
+                representative: it.pricing.representative,
                 priceMonth: it.pricing.priceMonth || null
-            });
+            }, batch, at);
+            it.record.updatedAt = at;
         });
 
         persistRecords().then(function () {
@@ -10895,7 +10897,7 @@ function undoRecordReprice() {
 
     appConfirm({
         title: "التراجع عن إعادة التسعير",
-        message: "تعود الوكالات التي أُعيد تسعيرها في " + formatDay(String(last.at).slice(0, 10)) + " إلى أسعارها السابقة تماماً. متابعة؟",
+        message: "تعود الوكالات التي تغيّر سعرها في " + formatDay(String(last.at).slice(0, 10)) + " (آخر عملية) إلى أسعارها السابقة تماماً. متابعة؟",
         confirmText: "تراجع",
         cancelText: "إلغاء"
     }).then(function (ok) {
@@ -10920,8 +10922,14 @@ function undoRecordReprice() {
                     if (h.appliedRepresentative === undefined) delete a.appliedPrices.representative; else a.appliedPrices.representative = h.appliedRepresentative;
                     a.appliedPrices.priceMonth = h.priceMonth;
                 }
+                /* الفترة والسعر المحدد (تغيير أسعار وكالات محددة) */
+                ["pricePeriod", "customPrice", "customRepresentative"].forEach(function (field) {
+                    if (!(field in h)) return;
+                    if (h[field] === null || h[field] === undefined) delete a[field]; else a[field] = h[field];
+                });
                 hist.pop();
                 if (!hist.length) delete a.priceHistory;
+                record.updatedAt = new Date().toISOString();
                 count++;
             });
         });
@@ -10940,7 +10948,7 @@ function undoRecordReprice() {
 
 /* تحديث الواجهات بعد الحفظ؛ خطأ في عرضٍ ما لا يُلغي ما حُفظ */
 function refreshAfterReprice() {
-    [renderRecordReprice, renderRecords, updateDashboard, renderReports].forEach(function (step) {
+    [renderRecordReprice, renderBulkPrice, renderRecords, updateDashboard, renderReports].forEach(function (step) {
         try { step(); } catch (error) { console.error("Refresh after reprice failed:", error); }
     });
 }
@@ -10965,6 +10973,292 @@ document.getElementById("recordRepriceBox")?.addEventListener("change", function
 });
 
 renderRecordReprice();
+
+/* =========================================================
+تغيير سعر وكالات محفوظة (حسب التاريخ، أو من وكالة إلى وكالة في سجل)
+========================================================= */
+
+/*
+    يغيّر سعر الوكالة وحصة الفرع لوكالات محفوظة محددة: إلى سعر فترة من «أسعار حسب الفترات»
+    (تُعلَّم الوكالة بتلك الفترة pricePeriod)، أو إلى مبلغ محدد (customPrice — لا تغيّره أي
+    إعادة تسعير لاحقة). نفس ضمانات «تسعير السجلات المحفوظة»: معاينة، نسخة احتياطية، تأكيد،
+    تغيير حقول السعر فقط، وتراجع كامل من priceHistory.
+*/
+
+function bulkPriceOptions() {
+    const val = function (id) { return document.getElementById(id)?.value || ""; };
+    return {
+        scope: val("bpScope") || "date",
+        from: val("bpFrom"),
+        to: val("bpTo"),
+        recordId: val("bpRecord"),
+        agFrom: String(val("bpAgFrom")).trim(),
+        agTo: String(val("bpAgTo")).trim(),
+        type: val("bpType"),
+        price: val("bpPrice"),
+        amount: String(val("bpAmount")).trim(),
+        rep: String(val("bpRep")).trim()
+    };
+}
+
+/* السعر الجديد لوكالة حسب الخيار: فترة، أو مبلغ محدد */
+function bulkPriceChange(agency, o) {
+    if (o.price === "custom") {
+        if (!o.amount || number(o.amount) <= 0) return null;
+        return {
+            agency: number(o.amount),
+            representative: o.rep !== "" ? number(o.rep) : number(agency.representativeBase),
+            priceMonth: agency.appliedPrices ? agency.appliedPrices.priceMonth : null,
+            pricePeriod: agency.pricePeriod || "",
+            customPrice: number(o.amount),
+            customRepresentative: o.rep !== "" ? number(o.rep) : null
+        };
+    }
+    if (!o.price) return null;
+    const p = getPricingForType(agency.type, o.price === "base" ? "0000-01-01" : o.price);
+    return {
+        agency: number(p.agency),
+        representative: number(p.representative),
+        priceMonth: p.priceMonth || null,
+        pricePeriod: o.price,
+        customPrice: 0,
+        customRepresentative: null
+    };
+}
+
+function collectBulkPrice(o) {
+    const items = [];
+    const inRange = function (n) {
+        const v = number(n);
+        return (o.agFrom === "" || v >= number(o.agFrom)) && (o.agTo === "" || v <= number(o.agTo));
+    };
+    records.forEach(function (record) {
+        const day = getRecordDay(record);
+        if (o.scope === "record") {
+            if (!o.recordId || String(record.id) !== o.recordId) return;
+        } else {
+            if (!o.from && !o.to) return;
+            if ((o.from && day < o.from) || (o.to && day > o.to)) return;
+        }
+        (record.agencies || []).forEach(function (agency) {
+            if (!agency || agency.status === "cancelled") return;
+            if (o.type && agency.type !== o.type) return;
+            if (o.scope === "record" && !inRange(agency.number)) return;
+            const change = bulkPriceChange(agency, o);
+            if (!change) return;
+            const same = number(change.agency) === number(agency.basePrice) &&
+                number(change.representative) === number(agency.representativeBase) &&
+                (change.pricePeriod || "") === (agency.pricePeriod || "") &&
+                number(change.customPrice) === number(agency.customPrice);
+            if (same) return;
+            items.push({ record: record, agency: agency, day: day, change: change });
+        });
+    });
+    return items;
+}
+
+/* تطبيق تغيير سعر على وكالة محفوظة مع حفظ قيمها السابقة للتراجع (مشترك مع إعادة التسعير) */
+function applyAgencyPriceChange(agency, change, batch, at) {
+    const applied = agency.appliedPrices || {};
+    if (!Array.isArray(agency.priceHistory)) agency.priceHistory = [];
+    agency.priceHistory.push({
+        batch: batch,
+        at: at,
+        basePrice: number(agency.basePrice),
+        representativeBase: number(agency.representativeBase),
+        representativeAmount: number(agency.representativeAmount),
+        hadApplied: !!agency.appliedPrices,
+        appliedAgency: applied.agency,
+        appliedRepresentative: applied.representative,
+        priceMonth: applied.priceMonth === undefined ? null : applied.priceMonth,
+        pricePeriod: agency.pricePeriod === undefined ? null : agency.pricePeriod,
+        customPrice: agency.customPrice === undefined ? null : agency.customPrice,
+        customRepresentative: agency.customRepresentative === undefined ? null : agency.customRepresentative
+    });
+    const dR = number(change.representative) - number(agency.representativeBase);
+    agency.basePrice = number(change.agency);
+    agency.representativeBase = number(change.representative);
+    agency.representativeAmount = number(agency.representativeAmount) + dR;
+    agency.appliedPrices = Object.assign({}, applied, {
+        agency: agency.basePrice,
+        representative: agency.representativeBase,
+        priceMonth: change.priceMonth || null
+    });
+    if ("pricePeriod" in change) {
+        if (change.pricePeriod) agency.pricePeriod = change.pricePeriod; else delete agency.pricePeriod;
+    }
+    if ("customPrice" in change) {
+        if (number(change.customPrice) > 0) agency.customPrice = number(change.customPrice); else delete agency.customPrice;
+        if (change.customRepresentative !== null && change.customRepresentative !== undefined) agency.customRepresentative = number(change.customRepresentative);
+        else delete agency.customRepresentative;
+    }
+}
+
+function bulkPriceRecordOptions() {
+    return records.slice().sort(function (a, b) {
+        return getRecordDay(b).localeCompare(getRecordDay(a)) || String(b.recordNumber).localeCompare(String(a.recordNumber), undefined, { numeric: true });
+    }).map(function (r) {
+        return '<option value="' + escapeHTML(r.id) + '">' + escapeHTML(r.recordNumber) + " — " + escapeHTML(r.officeName || "") +
+            " — " + escapeHTML(formatDay(getRecordDay(r))) + " (" + (r.agencies || []).length + " وكالة)</option>";
+    }).join("");
+}
+
+/* بناء نموذج البطاقة (مرة واحدة)، ثم تحديث القوائم والمعاينة */
+function renderBulkPrice() {
+    const box = document.getElementById("bulkPriceBox");
+    if (!box) return;
+
+    if (!box.dataset.ready) {
+        box.dataset.ready = "1";
+        box.innerHTML =
+            '<p class="field-hint">اختر الوكالات ثم السعر الجديد. يتغير سعر الوكالة وحصة الفرع (والمطلوب من المندوب بنفس الفرق) فقط، وتُحسب حصتا الإسعاف والتعاون من السعر الجديد. البنود والإضافات والطوابع والبدل لا تتغير.</p>' +
+            '<div class="bp-grid">' +
+                '<label class="input-group"><span>الوكالات</span><select id="bpScope"><option value="date">حسب تاريخ السجل</option><option value="record">من سجل محدد (من وكالة إلى وكالة)</option></select></label>' +
+                '<label class="input-group bp-date"><span>من تاريخ</span><input type="date" id="bpFrom" lang="en-GB" dir="ltr"></label>' +
+                '<label class="input-group bp-date"><span>إلى تاريخ</span><input type="date" id="bpTo" lang="en-GB" dir="ltr"></label>' +
+                '<label class="input-group bp-record"><span>السجل</span><select id="bpRecord"></select></label>' +
+                '<label class="input-group bp-record"><span>من وكالة رقم</span><input type="text" inputmode="numeric" data-num="int" id="bpAgFrom" placeholder="الأولى"></label>' +
+                '<label class="input-group bp-record"><span>إلى وكالة رقم</span><input type="text" inputmode="numeric" data-num="int" id="bpAgTo" placeholder="الأخيرة"></label>' +
+                '<label class="input-group"><span>نوع الوكالة</span><select id="bpType"><option value="">كل الأنواع</option>' +
+                    Object.keys(AGENCY_NAMES).map(function (t) { return '<option value="' + t + '">' + AGENCY_NAMES[t] + "</option>"; }).join("") + "</select></label>" +
+                '<label class="input-group"><span>السعر الجديد</span><select id="bpPrice"></select></label>' +
+                '<label class="input-group bp-custom"><span>سعر الوكالة</span><input type="text" inputmode="numeric" data-num="int" id="bpAmount" placeholder="مثلاً 1800"></label>' +
+                '<label class="input-group bp-custom"><span>حصة الفرع (اختياري)</span><input type="text" inputmode="numeric" data-num="int" id="bpRep" placeholder="بدون تغيير"></label>' +
+            "</div>" +
+            '<div id="bpPreview" aria-live="polite"></div>';
+    }
+
+    /* قوائم تتغير مع السجلات والجداول */
+    const recSel = document.getElementById("bpRecord");
+    const keepRec = recSel.value;
+    recSel.innerHTML = bulkPriceRecordOptions();
+    if (keepRec && Array.prototype.some.call(recSel.options, function (op) { return op.value === keepRec; })) recSel.value = keepRec;
+
+    const priceSel = document.getElementById("bpPrice");
+    const keepPrice = priceSel.value;
+    priceSel.innerHTML = '<option value="">— اختر —</option>' +
+        pricePeriodChoices().map(function (c) { return '<option value="' + c.value + '">سعر فترة ' + escapeHTML(c.label) + "</option>"; }).join("") +
+        '<option value="custom">مبلغ محدد…</option>';
+    if (keepPrice && Array.prototype.some.call(priceSel.options, function (op) { return op.value === keepPrice; })) priceSel.value = keepPrice;
+
+    renderBulkPricePreview();
+}
+
+function renderBulkPricePreview() {
+    const box = document.getElementById("bpPreview");
+    if (!box) return;
+    const o = bulkPriceOptions();
+    document.getElementById("bulkPriceBox").dataset.scope = o.scope;
+    document.getElementById("bulkPriceBox").classList.toggle("is-custom", o.price === "custom");
+
+    const last = lastRepriceBatch();
+    const undoBtn = last
+        ? '<button type="button" class="secondary-btn" data-bp="undo"><i class="ti ti-arrow-back-up"></i> تراجع عن آخر تغيير أسعار (' + escapeHTML(formatDay(String(last.at).slice(0, 10))) + ")</button>"
+        : "";
+
+    if (!o.price || (o.price === "custom" && !(number(o.amount) > 0)) || (o.scope === "date" && !o.from && !o.to) || (o.scope === "record" && !o.recordId)) {
+        box.innerHTML = '<p class="field-hint">' + (o.scope === "date" ? "حدد تاريخاً واحداً على الأقل" : "اختر السجل") + " والسعر الجديد لتظهر المعاينة.</p>" +
+            (undoBtn ? '<div class="button-row">' + undoBtn + "</div>" : "");
+        return;
+    }
+
+    const items = collectBulkPrice(o);
+    if (!items.length) {
+        box.innerHTML = '<p class="field-hint"><i class="ti ti-circle-check"></i> لا توجد وكالات تحتاج تغييراً بهذه الاختيارات (الملغاة لا تُحتسب).</p>' +
+            (undoBtn ? '<div class="button-row">' + undoBtn + "</div>" : "");
+        return;
+    }
+
+    const groups = {};
+    const recs = new Set();
+    let ambB = 0, ambA = 0, coopB = 0, coopA = 0, dPrice = 0;
+    items.forEach(function (it) {
+        recs.add(it.record.id);
+        const key = it.agency.type + "|" + number(it.agency.basePrice) + "|" + number(it.change.agency) + "|" + number(it.agency.representativeBase) + "|" + number(it.change.representative);
+        if (!groups[key]) groups[key] = { type: it.agency.type, from: number(it.agency.basePrice), to: number(it.change.agency), repFrom: number(it.agency.representativeBase), repTo: number(it.change.representative), count: 0 };
+        groups[key].count++;
+        const before = getAgencyCommittee(it.agency, it.day);
+        const sim = Object.assign({}, it.agency, { basePrice: it.change.agency });
+        if (it.change.pricePeriod) sim.pricePeriod = it.change.pricePeriod; else delete sim.pricePeriod;
+        if (number(it.change.customPrice) > 0) sim.customPrice = it.change.customPrice; else delete sim.customPrice;
+        const after = getAgencyCommittee(sim, it.day);
+        ambB += before.ambulance; ambA += after.ambulance; coopB += before.cooperation; coopA += after.cooperation;
+        dPrice += number(it.change.agency) - number(it.agency.basePrice);
+    });
+
+    box.innerHTML =
+        '<p class="field-hint"><b>' + items.length + " وكالة في " + recs.size + " سجل</b> سيتغير سعرها:</p>" +
+        '<div class="table-wrapper"><table class="schedule-table"><thead><tr><th>النوع</th><th class="num">الوكالات</th><th class="num">سعر الوكالة</th><th class="num">حصة الفرع</th></tr></thead><tbody>' +
+        Object.keys(groups).map(function (k) {
+            const g = groups[k];
+            return "<tr><td>" + agencyTypeDot(g.type) + escapeHTML(AGENCY_NAMES[g.type] || g.type) + '</td><td class="num">' + g.count + "</td>" +
+                '<td class="num">' + money(g.from) + " ← <b>" + money(g.to) + "</b></td>" +
+                '<td class="num">' + money(g.repFrom) + " ← <b>" + money(g.repTo) + "</b></td></tr>";
+        }).join("") + "</tbody></table></div>" +
+        '<div class="reprice-totals">' +
+            "<span>فرق أسعار الوكالات: <b>" + money(dPrice) + "</b></span>" +
+            "<span>لجنة الإسعاف: " + money(ambB) + " ← <b>" + money(ambA) + "</b></span>" +
+            "<span>لجنة التعاون: " + money(coopB) + " ← <b>" + money(coopA) + "</b></span>" +
+        "</div>" +
+        '<div class="button-row"><button type="button" class="primary-btn" data-bp="apply"><i class="ti ti-check"></i> تنزيل نسخة احتياطية ثم تطبيق السعر على ' + items.length + " وكالة</button>" + undoBtn + "</div>";
+}
+
+function applyBulkPrice() {
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("هذه العملية للمدير فقط.", "error");
+        return;
+    }
+    if (recordsLoadFailed) {
+        notify("تعذر قراءة السجلات عند فتح الصفحة، لذلك أُوقف الحفظ حمايةً للبيانات. حدّث الصفحة.", "error");
+        return;
+    }
+    const o = bulkPriceOptions();
+    const items = collectBulkPrice(o);
+    if (!items.length) { renderBulkPricePreview(); return; }
+
+    try { downloadBackup(); } catch (e) {}
+
+    appConfirm({
+        title: "تغيير سعر " + items.length + " وكالة",
+        message: "نُزّلت نسخة احتياطية الآن — تأكد أنها حُفظت على جهازك. يتغير سعر الوكالة وحصة الفرع لهذه الوكالات فقط، ويمكنك التراجع لاحقاً. متابعة؟",
+        confirmText: "تطبيق السعر",
+        cancelText: "إلغاء"
+    }).then(function (ok) {
+        if (!ok) return;
+        const before = JSON.stringify(records);
+        const batch = "bulk-" + Date.now();
+        const at = new Date().toISOString();
+        const touched = new Set();
+        items.forEach(function (it) {
+            applyAgencyPriceChange(it.agency, it.change, batch, at);
+            touched.add(it.record);
+        });
+        /* السجل تغيّر الآن (لحسم المزامنة بين الأجهزة لصالح هذا التعديل) */
+        touched.forEach(function (r) { r.updatedAt = at; });
+        persistRecords().then(function () {
+            refreshAfterReprice();
+            notify("<strong>تغيّر سعر " + items.length + " وكالة</strong><span>حصص اللجنتين محسوبة من السعر الجديد.</span>", "success", 7000, true);
+        }, function (error) {
+            records = JSON.parse(before);
+            refreshAfterReprice();
+            notify("<strong>لم يُحفظ تغيير الأسعار</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        });
+    });
+}
+
+/* «input» يكفي (القوائم والتواريخ تطلقه أيضاً). لا نعيد العرض عند «change»: ترك خانة نصية
+   بالضغط على «تطبيق» يطلقه، فيُستبدل الزر تحت المؤشر ولا تصل النقرة. */
+document.getElementById("bulkPriceBox")?.addEventListener("input", function (event) {
+    if (event.target.matches("input, select")) renderBulkPricePreview();
+});
+document.getElementById("bulkPriceBox")?.addEventListener("click", function (event) {
+    const btn = event.target.closest("[data-bp]");
+    if (!btn) return;
+    if (btn.dataset.bp === "apply") applyBulkPrice();
+    else if (btn.dataset.bp === "undo") undoRecordReprice();
+});
+
+renderBulkPrice();
 
 /* =========================================================
 أسعار الإضافات
