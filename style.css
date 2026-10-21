@@ -6642,3 +6642,22 @@ html.theme-switching *::after {
 @media (max-width: 640px) {
     #bulkPriceBox .bp-record:has(#bpRecord) { grid-column: auto; }
 }
+
+/* الوكالة المفتوحة للتعديل في النموذج */
+.agency-item.is-editing {
+    position: relative;
+    outline: 2px dashed var(--grp-add);
+    outline-offset: 2px;
+}
+.agency-item.is-editing::after {
+    content: "قيد التعديل في النموذج";
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--grp-add);
+    color: var(--on-grp, #fff);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+}
