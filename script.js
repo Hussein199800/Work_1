@@ -392,10 +392,18 @@ if (recordsInIDB) {
         records = window.__AUDIT_IDB_RECORDS;
     }
 } else {
-    records = loadData(
-        "audit_records",
-        []
-    );
+    /* نص السجلات موجود لكنه تالف: لا نبدأ بقائمة فارغة قابلة للحفظ فوقه (يبقى قابلاً للاسترجاع) */
+    let rawRecords = null;
+    try { rawRecords = localStorage.getItem("audit_records"); } catch (e) {}
+    let parsedRecords = null;
+    try { parsedRecords = rawRecords === null ? [] : JSON.parse(rawRecords); } catch (e) { parsedRecords = null; }
+    if (Array.isArray(parsedRecords)) {
+        records = parsedRecords;
+    } else {
+        console.error("audit_records is not a readable list; saving is blocked to protect it.");
+        records = [];
+        recordsLoadFailed = true;
+    }
 }
 
 function idbOpen() {
@@ -501,7 +509,38 @@ function persistRecords() {
     });
 }
 
+/*
+    نافذتان مفتوحتان للبرنامج: كل نافذة تحفظ قائمتها كاملة، فتكتب فوق ما حفظته الأخرى.
+    كل حفظ يترك علامة (audit_ui_records_rev)؛ النافذة التي ترى أن غيرها حفظ تتوقف عن الحفظ
+    وتطلب إعادة التحميل بدل كتابة نسخة قديمة.
+*/
+const RECORDS_REV_KEY = "audit_ui_records_rev";
+const TAB_ID = Math.random().toString(36).slice(2, 10);
+let recordsStaleTab = false;
+
+window.addEventListener("storage", function (event) {
+    if (event.key !== RECORDS_REV_KEY && event.key !== RECORDS_STORE_KEY && event.key !== "audit_records") return;
+    if (event.key === RECORDS_REV_KEY && String(event.newValue || "").indexOf(TAB_ID + ":") === 0) return;
+    if (recordsStaleTab) return;
+    recordsStaleTab = true;
+    try {
+        notify("<strong>السجلات تغيّرت في نافذة أخرى من البرنامج</strong>" +
+            "<span>أُوقف الحفظ في هذه النافذة حتى لا تُكتب نسخة قديمة فوقها. أعد تحميلها، أو اعمل من نافذة واحدة.</span>" +
+            '<span class="toast-actions"><button type="button" class="act-btn" onclick="reloadApp()">إعادة التحميل</button></span>', "warning", 600000, true);
+    } catch (e) {}
+});
+
 function persistRecordsNow() {
+    if (recordsStaleTab) {
+        return Promise.reject(new Error("السجلات تغيّرت في نافذة أخرى من البرنامج. أعد تحميل هذه الصفحة قبل الحفظ."));
+    }
+    return persistRecordsRaw().then(function (value) {
+        try { localStorage.setItem(RECORDS_REV_KEY, TAB_ID + ":" + Date.now()); } catch (e) {}
+        return value;
+    });
+}
+
+function persistRecordsRaw() {
 
     /* نقل جارٍ: ننتظره ثم نحفظ آخر نسخة من السجلات في مكانها الجديد */
     if (recordsMoving) {
@@ -2036,7 +2075,20 @@ document.getElementById("recordDate")?.addEventListener("change", function () {
     }).then(function (ok) {
         if (ok) {
             repricePendingAgencies(day);
-            notify("أُعيد تسعير " + pendingAgencies.length + " وكالة حسب أسعار الشهر.", "success");
+            notify("أُعيد تسعير " + changed.length + " وكالة حسب أسعار الشهر.", "success");
+        } else {
+            /* إبقاء الأسعار: تُثبَّت كل وكالة على فترتها السابقة، فتبقى حصص اللجان متوافقة مع سعرها
+               (وإلا تتبع الحصص فترة التاريخ الجديد والسعر قديم) */
+            changed.forEach(function (agency) {
+                const month = agency.appliedPrices && agency.appliedPrices.priceMonth;
+                if (month) {
+                    agency.pricePeriod = scheduleStart(month);
+                } else {
+                    agency.customPrice = number(agency.basePrice);
+                    agency.customRepresentative = number(agency.representativeBase);
+                }
+            });
+            renderPendingAgencies();
         }
         updatePreview();
     });
@@ -2634,7 +2686,8 @@ function buildAgency(inputs, pricing, keepId) {
 
     const missing = inputs.missing;
 
-    const additionResult = calculateAdditions(additions, pricing);
+    /* الملغاة: الأعداد تبقى كما أُدخلت، لكن بلا قيمة (كما في التقارير) */
+    const additionResult = calculateAdditions(cancelled ? {} : additions, pricing);
     const stampResult = calculateStamps(additionResult, missing, cancelled);
 
     const representativeAmount = calculateRepresentativeAmount(
@@ -2686,6 +2739,20 @@ function getAgencyFromForm() {
     return buildAgency(inputs, pricingForAgency(inputs.type, inputs.pricePeriod));
 }
 
+/* وكالة معدّلة من النموذج: المعرّف نفسه، والسعر المحدد وسجل الأسعار كما كانا */
+function getEditedAgencyFromForm(source) {
+    const inputs = readAgencyInputs();
+    if (number(source.customPrice) > 0 && (inputs.pricePeriod || "") === (source.pricePeriod || "")) {
+        inputs.customPrice = number(source.customPrice);
+        inputs.customRepresentative = source.customRepresentative === undefined ? null : source.customRepresentative;
+    }
+    const agency = buildAgency(inputs, pricingForAgency(inputs.type, inputs.pricePeriod), source.id);
+    if (Array.isArray(source.priceHistory) && source.priceHistory.length) {
+        agency.priceHistory = JSON.parse(JSON.stringify(source.priceHistory));
+    }
+    return agency;
+}
+
 /* =========================================================
 نوع المندوب (داخلي / خارجي) وبدل الانتقال على الوكالات
 ========================================================= */
@@ -2728,6 +2795,9 @@ function setAgencyTransportCount(agency, newCount) {
         }
     }
 
+    /* وكالات قديمة قد تخلو من هذه الكائنات */
+    if (!agency.additions) agency.additions = {};
+    if (!agency.additionValues) agency.additionValues = {};
     const settings = agency.transportSettings;
     const oldCount = number(agency.additions.transport);
     const diff = newCount - oldCount;
@@ -3063,6 +3133,7 @@ document.addEventListener("keydown", function (event) {
 
     if (
         !isAddShortcut ||
+        event.repeat ||
         document.querySelector("dialog[open]") ||
         !document.getElementById("newRecordSection")?.classList.contains("active-section")
     ) {
@@ -3214,8 +3285,39 @@ addAgencyBtn.addEventListener(
         }, 700);
 
 
+        const editIndex = editingAgencyIndex();
+
         const agency =
-            getAgencyFromForm();
+            editIndex !== -1
+                ? getEditedAgencyFromForm(editingAgency.source)
+                : getAgencyFromForm();
+
+        /* تعديل وكالة موجودة: تُستبدل في مكانها بالمعرّف نفسه */
+        if (editIndex !== -1) {
+            const clash = pendingAgencies.some(function (item, i) {
+                return i !== editIndex && String(item.number).trim() === String(agency.number).trim();
+            });
+            const replace = function () {
+                pendingAgencies[editIndex] = agency;
+                lastAddedAgencyId = agency.id;
+                renderPendingAgencies();
+                clearAgencyForm();
+                announceAgencyAdded(agency);
+            };
+            if (clash && !agency.duplicate) {
+                appConfirm({
+                    title: "رقم الوكالة " + agency.number + " مستخدم في هذا السجل",
+                    message: "غيّرت رقم الوكالة إلى رقم موجود. هل تريد حفظها كمكررة بهذا الرقم؟",
+                    confirmText: "حفظها كمكررة",
+                    cancelText: "رجوع للتعديل"
+                }).then(function (ok) {
+                    if (ok) { agency.duplicate = true; replace(); }
+                });
+                return;
+            }
+            replace();
+            return;
+        }
 
 
         /*
@@ -3280,12 +3382,15 @@ addAgencyBtn.addEventListener(
 
                 if (choice === "insert") {
 
+                    const shiftedIds = [];
                     pendingAgencies.forEach(function (item) {
                         const v = parseInt(item.number, 10);
                         if (Number.isFinite(v) && String(v) === String(item.number).trim() && v >= n) {
                             item.number = String(v + 1);
+                            shiftedIds.push(item.id);
                         }
                     });
+                    lastInsertShift = { agencyId: agency.id, shiftedIds: shiftedIds };
 
                     /* إدراجها في مكانها حسب الترتيب */
                     const at = pendingAgencies.findIndex(function (item) {
@@ -3684,6 +3789,15 @@ Ctrl + Z: إلغاء آخر وكالة مضافة (صفحة إنشاء السج�
 
 let removedAgencyUndo = null;
 
+/* الوكالة المفتوحة في النموذج للتعديل (انظر startAgencyEdit) */
+let editingAgency = null;
+
+/* بصمة السجل المحفوظ لحظة فتحه للتعديل (تُحفظ مع المسودة لكشف تغيّره لاحقاً) */
+let editingBaseHash = null;
+
+/* آخر «إدراج وإزاحة»: الوكالة المدرجة والوكالات التي زاد رقمها، ليعيدها Ctrl + Z كما كانت */
+let lastInsertShift = null;
+
 function undoLastAgency() {
 
     if (!pendingAgencies.length) {
@@ -3695,7 +3809,16 @@ function undoLastAgency() {
     if (index === -1) index = pendingAgencies.length - 1;
 
     const agency = pendingAgencies.splice(index, 1)[0];
-    removedAgencyUndo = { agency: agency, index: index };
+    /* إلغاء وكالة أُدرجت بإزاحة: تعود أرقام ما بعدها كما كانت */
+    let unshifted = null;
+    if (lastInsertShift && lastInsertShift.agencyId === agency.id) {
+        unshifted = lastInsertShift.shiftedIds;
+        pendingAgencies.forEach(function (item) {
+            if (unshifted.indexOf(item.id) !== -1) item.number = String(number(item.number) - 1);
+        });
+        lastInsertShift = null;
+    }
+    removedAgencyUndo = { agency: agency, index: index, unshifted: unshifted };
     lastAddedAgencyId = pendingAgencies.length ? pendingAgencies[pendingAgencies.length - 1].id : null;
 
     renderPendingAgencies();
@@ -3714,6 +3837,12 @@ function restoreRemovedAgency() {
     if (!removedAgencyUndo) return;
     const item = removedAgencyUndo;
     removedAgencyUndo = null;
+    if (item.unshifted) {
+        pendingAgencies.forEach(function (a) {
+            if (item.unshifted.indexOf(a.id) !== -1) a.number = String(number(a.number) + 1);
+        });
+        lastInsertShift = { agencyId: item.agency.id, shiftedIds: item.unshifted };
+    }
     pendingAgencies.splice(Math.min(item.index, pendingAgencies.length), 0, item.agency);
     lastAddedAgencyId = item.agency.id;
     renderPendingAgencies();
@@ -3861,7 +3990,7 @@ container.innerHTML =
                 return `
 
                     <div
-                        class="agency-item cls-card cls-${agency.status || "active"}${agency.id && agency.id === lastAddedAgencyId ? " is-new" : ""}"
+                        class="agency-item cls-card cls-${agency.status || "active"}${agency.id && agency.id === lastAddedAgencyId ? " is-new" : ""}${editingAgency && agency.id === editingAgency.id ? " is-editing" : ""}"
                         style="--cls-color:${getAgencyClass(agency).color};--cls-tint:${hexToRgba(getAgencyClass(agency).color, getAgencyClass(agency).tint)}"
                     >
 
@@ -4049,6 +4178,7 @@ document.getElementById(
 ).value =
     agency.status;
 
+startAgencyEdit(agency);
 setAgencyPricePeriod(agency.pricePeriod || "");
 
 
@@ -4057,37 +4187,37 @@ ensureAgencyPriceControls();
 document.getElementById(
     "saveCount"
 ).value =
-    agency.additions.save;
+    (agency.additions || {}).save;
 
 
 document.getElementById(
     "signatureCount"
 ).value =
-    agency.additions.signature;
+    (agency.additions || {}).signature;
 
 
 document.getElementById(
     "inheritanceCount"
 ).value =
-    agency.additions.inheritance;
+    (agency.additions || {}).inheritance;
 
 
 document.getElementById(
     "childrenCount"
 ).value =
-    agency.additions.children;
+    (agency.additions || {}).children;
 
 
 document.getElementById(
     "agentsCount"
 ).value =
-    agency.additions.agents;
+    (agency.additions || {}).agents;
 
 
 document.getElementById(
     "originalityCount"
 ).value =
-    agency.additions.originality || 0;
+    (agency.additions || {}).originality || 0;
 
 
 const editTransportInput =
@@ -4096,10 +4226,10 @@ const editTransportInput =
     );
 
 editTransportInput.value =
-    number(agency.additions.transport);
+    number((agency.additions || {}).transport);
 
 /* الحفاظ على اختيار «بدون بدل» المحفوظ للوكالة */
-if (number(agency.additions.transport) === 0) {
+if (number((agency.additions || {}).transport) === 0) {
     editTransportInput.dataset.userZero = "1";
 } else {
     delete editTransportInput.dataset.userZero;
@@ -4111,19 +4241,19 @@ syncTransportField();
 document.getElementById(
     "missingPleading"
 ).value =
-    agency.stamps.pleading;
+    (agency.stamps || agency.missingStamps || {}).pleading;
 
 
 document.getElementById(
     "missingAmbulance"
 ).value =
-    agency.stamps.ambulance;
+    (agency.stamps || agency.missingStamps || {}).ambulance;
 
 
 document.getElementById(
     "missingAid"
 ).value =
-    agency.stamps.aid;
+    (agency.stamps || agency.missingStamps || {}).aid;
 
 
 document.getElementById(
@@ -4166,15 +4296,14 @@ if (noteNoBondCheckbox) {
 }
 
 
-pendingAgencies.splice(
-    index,
-    1
-);
-
-
+/* لا تُحذف من القائمة: تُستبدل في مكانها عند «إضافة الوكالة» (بدأ التعديل أعلاه) */
 renderPendingAgencies();
 
 updatePreview();
+
+document.getElementById("agencyNumber")?.focus();
+
+notify("<strong>تعديل الوكالة رقم " + escapeHTML(agency.number) + "</strong><span>عدّل ثم اضغط «إضافة الوكالة» لتُستبدل في مكانها، أو «مسح بيانات الوكالة» للإلغاء.</span>", "info", 5000, true);
 
 }
 
@@ -4211,6 +4340,10 @@ appConfirm({
         pendingAgencies.splice(position, 1);
     }
 
+    if (editingAgency && editingAgency.id === agency.id) {
+        clearAgencyForm();
+    }
+
     renderPendingAgencies();
 
     notify("تم حذف الوكالة رقم " + escapeHTML(agency.number) + ".", "info", 2500);
@@ -4221,11 +4354,41 @@ appConfirm({
 window.removePendingAgency =
 removePendingAgency;
 
+/*
+    وكالة مفتوحة في النموذج للتعديل: تبقى في القائمة بمكانها حتى يُضغط «إضافة الوكالة»
+    فتُستبدل في مكانها بالمعرّف نفسه، مع سعرها المحدد وسجل أسعارها. إن حُفظ السجل
+    أو أُغلقت الصفحة قبل ذلك تبقى الوكالة كما كانت (لا تضيع).
+*/
+
+function startAgencyEdit(agency) {
+    const select = document.getElementById("agencyPricePeriod");
+    editingAgency = {
+        id: agency.id,
+        source: agency,
+        /* فترة السعر المختارة للسجل قبل فتح الوكالة: تعود بعد انتهاء التعديل */
+        stickyPeriod: editingAgency ? editingAgency.stickyPeriod : (select ? select.value : "")
+    };
+}
+
+function endAgencyEdit() {
+    if (!editingAgency) return;
+    const sticky = editingAgency.stickyPeriod;
+    editingAgency = null;
+    setAgencyPricePeriod(sticky || "");
+}
+
+function editingAgencyIndex() {
+    if (!editingAgency) return -1;
+    return pendingAgencies.findIndex(function (a) { return a.id === editingAgency.id; });
+}
+
 /* =========================================================
 تنظيف نموذج الوكالة
 ========================================================= */
 
 function clearAgencyForm() {
+
+endAgencyEdit();
 
 const numberInput =
     document.getElementById(
@@ -4424,7 +4587,9 @@ const additions = {
             )?.value
         ),
 
+    /* مثل الوكالة المحفوظة: لا بدل انتقال على الملغاة */
     transport:
+        !cancelled &&
         isTransportEligible(
             document.getElementById("agencyType")?.value || DEFAULT_AGENCY_TYPE
         )
@@ -4470,7 +4635,7 @@ const pricing =
 
 const additionsResult =
     calculateAdditions(
-        additions,
+        cancelled ? {} : additions,
         pricing
     );
 
@@ -4711,6 +4876,18 @@ document.getElementById(
 
 if (recordForm) {
 
+/*
+    Enter وحده لا يحفظ السجل ولا يضيف وكالة (المتصفح يرسل النموذج عند Enter في أي حقل).
+    الحفظ بزر «حفظ السجل» فقط، والإضافة بزرها أو Ctrl + Enter / Ctrl + S.
+*/
+recordForm.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter" || event.ctrlKey || event.metaKey) return;
+    const t = event.target;
+    if (t && t.tagName === "INPUT" && !/^(submit|button|checkbox|radio)$/i.test(t.type || "")) {
+        event.preventDefault();
+    }
+});
+
 recordForm.addEventListener(
     "submit",
     function (event) {
@@ -4728,6 +4905,15 @@ recordForm.addEventListener(
 
             return;
 
+        }
+
+
+        /* وكالة مفتوحة للتعديل لم تُعتمد تعديلاتها بعد */
+        if (editingAgencyIndex() !== -1) {
+            notify("<strong>الوكالة رقم " + escapeHTML(editingAgency.source.number) + " مفتوحة للتعديل</strong>" +
+                "<span>اضغط «إضافة الوكالة» لاعتماد تعديلها، أو «مسح بيانات الوكالة» لإلغائه، ثم احفظ السجل.</span>", "warning", 8000, true);
+            document.getElementById("agencyNumber")?.focus();
+            return;
         }
 
 
@@ -4986,6 +5172,12 @@ recordForm.addEventListener(
 ========================================================= */
 
 function resetRecordForm() {
+
+/* لا شيء معلّق من السجل السابق */
+editingAgency = null;
+removedAgencyUndo = null;
+lastInsertShift = null;
+editingBaseHash = null;
 
 const form =
     document.getElementById(
@@ -5688,7 +5880,7 @@ function getRecordBaseTotal(
 record
 ) {
 
-return record.agencies.reduce(
+return (record.agencies || []).reduce(
     function (sum, agency) {
 
         return (
@@ -5712,7 +5904,7 @@ function getRecordRepresentativeTotal(
 record
 ) {
 
-return record.agencies.reduce(
+return (record.agencies || []).reduce(
     function (sum, agency) {
 
         return (
@@ -5732,7 +5924,53 @@ return record.agencies.reduce(
 تعديل سجل
 ========================================================= */
 
-function editRecord(id) {
+/*
+    تغييرات غير محفوظة في نموذج السجل؟ سجل جديد فيه وكالات، أو سجل مفتوح للتعديل
+    تغيّرت وكالاته عن المحفوظ.
+*/
+function hasUnsavedRecordForm() {
+    if (!pendingAgencies.length) return false;
+    const editingId = document.getElementById("editingRecordId")?.value;
+    if (!editingId) return true;
+    const saved = records.find(function (r) { return r.id === editingId; });
+    return !saved || JSON.stringify(saved.agencies || []) !== JSON.stringify(pendingAgencies);
+}
+
+/* تأكيد قبل ترك نموذج فيه تغييرات غير محفوظة */
+function confirmDiscardRecordForm(next) {
+    if (!hasUnsavedRecordForm()) { next(); return; }
+    appConfirm({
+        title: "تغييرات غير محفوظة",
+        message: "في نموذج السجل " + pendingAgencies.length + " وكالة لم تُحفظ تغييراتها. إن تابعت فستضيع هذه التغييرات.",
+        confirmText: "متابعة دون حفظ",
+        cancelText: "رجوع",
+        danger: true
+    }).then(function (ok) { if (ok) next(); });
+}
+
+/* then: ما يُنفَّذ بعد فتح السجل فعلاً (بعد التأكيد إن لزم) */
+function editRecord(id, then) {
+    const open = function () {
+        editRecordNow(id);
+        if (typeof then === "function") then();
+    };
+    const editingId = document.getElementById("editingRecordId")?.value;
+    /* فتح السجل نفسه وهو مفتوح دون تغيير: لا سؤال */
+    if (editingId === id && !hasUnsavedRecordForm()) { open(); return; }
+    confirmDiscardRecordForm(open);
+}
+
+function recordVersionHash(record) {
+    return record ? fbHash(JSON.stringify(record)) : null;
+}
+
+function editRecordNow(id) {
+
+/* بداية نظيفة: لا وكالة قيد التعديل، ولا تراجع معلّق من سجل آخر، وفترة السعر حسب التاريخ */
+editingAgency = null;
+removedAgencyUndo = null;
+lastInsertShift = null;
+setAgencyPricePeriod("");
 
 const record =
     records.find(
@@ -5753,6 +5991,8 @@ if (!record) {
     return;
 
 }
+
+editingBaseHash = recordVersionHash(record);
 
 
 document.getElementById(
@@ -6026,6 +6266,25 @@ function formatNotesHTML(value) {
     تجميع ملاحظات الوكالات: كل سطر ملاحظة (والعبارتان السريعتان حتى لو كُتبتا في سطر واحد)
     مع أرقام الوكالات التي تحمله، بترتيب أول وكالة.
 */
+/*
+    قيمة نوع واحد من الطوابع الناقصة بأسعارها المحفوظة مع كل وكالة (لا بالسعر الحالي)،
+    حتى يساوي مجموع الصفوف إجماليها (missingStampsValue المحفوظ).
+*/
+function missingStampTypeValue(agencies, key) {
+    return (agencies || []).reduce(function (sum, a) {
+        if (!a || a.status === "cancelled") return sum;
+        const ms = a.stamps || a.missingStamps || {};
+        const count = number(ms[key]);
+        if (!count) return sum;
+        const saved = a.appliedPrices && a.appliedPrices.stamps && a.appliedPrices.stamps[key];
+        if (saved !== undefined && saved !== null) return sum + count * number(saved);
+        /* وكالة قديمة بلا أسعار محفوظة وفيها نوع واحد: قيمتها المحفوظة هي قيمة هذا النوع */
+        const types = ["pleading", "ambulance", "aid"].filter(function (k) { return number(ms[k]) > 0; });
+        if (types.length === 1 && number(a.missingStampsValue) > 0) return sum + number(a.missingStampsValue);
+        return sum + count * number(stampPrices[key]);
+    }, 0);
+}
+
 function groupAgencyNotes(agencies) {
     const groups = [];
     const byText = {};
@@ -6093,6 +6352,8 @@ function getRecordFinalStats(record) {
         representativeTotal += number(agency.representativeAmount);
 
         Object.keys(ADDITION_NAMES).forEach(function (key) {
+            /* بدل الانتقال له بند مستقل، ولا يُعدّ ضمن «عدد الإضافات» (كما في جدول الإضافات) */
+            if (key === "transport") return;
             const count = number(agency.additions && agency.additions[key]);
             additionsCount += count;
             if (key === "signature") signatureCount += count;
@@ -6208,7 +6469,7 @@ function sumCommittees(agencies, day) {
         if (!agency || agency.status === "cancelled") {
             return;
         }
-        const d = day || (index || (index = agencyDayIndex())).get(agency) || "";
+        const d = day || agency.recordDay || (index || (index = agencyDayIndex())).get(agency) || "";
         const c = getAgencyCommittee(agency, d);
         if (!result.byType[agency.type]) {
             result.byType[agency.type] = blank();
@@ -6497,7 +6758,7 @@ function buildFinalRecordReport(record, mode) {
                 const names = { pleading: "مرافعة", ambulance: "إسعاف", aid: "معونة" };
                 return "<tr" + auditRowAttrs(record, "missing:" + k, mode, stats.missing[k]) + "><td>" + names[k] +
                     (stats.missing[k] ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
-                    '</td><td class="num">' + stats.missing[k] + '</td><td class="num">' + money(stats.missing[k] * number(stampPrices[k])) + "</td></tr>";
+                    '</td><td class="num">' + stats.missing[k] + '</td><td class="num">' + money(missingStampTypeValue(stats.agencies, k)) + "</td></tr>";
             }).join("") +
             '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(stats.missingValue) + "</td></tr></tfoot></table></section>";
 
@@ -7343,9 +7604,9 @@ function buildGeneralReportDoc() {
 
     html += '<section class="doc-section">' + secTitle("الطوابع الناقصة") +
         '<table class="doc-table"><thead><tr><th>الطابع</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
-        "<tr><td>مرافعة</td><td class=\"num\">" + pseudo.missing.pleading + '</td><td class="num">' + money(pseudo.missing.pleading * number(stampPrices.pleading)) + "</td></tr>" +
-        "<tr><td>إسعاف</td><td class=\"num\">" + pseudo.missing.ambulance + '</td><td class="num">' + money(pseudo.missing.ambulance * number(stampPrices.ambulance)) + "</td></tr>" +
-        "<tr><td>معونة</td><td class=\"num\">" + pseudo.missing.aid + '</td><td class="num">' + money(pseudo.missing.aid * number(stampPrices.aid)) + "</td></tr>" +
+        "<tr><td>مرافعة</td><td class=\"num\">" + pseudo.missing.pleading + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "pleading")) + "</td></tr>" +
+        "<tr><td>إسعاف</td><td class=\"num\">" + pseudo.missing.ambulance + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "ambulance")) + "</td></tr>" +
+        "<tr><td>معونة</td><td class=\"num\">" + pseudo.missing.aid + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "aid")) + "</td></tr>" +
         '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(pseudo.missingValue) + "</td></tr></tfoot></table></section>";
 
     html += '<section class="doc-section">' + secTitle("بدل الانتقال") + transportTableHTML(pseudo.transport) + "</section>";
@@ -7660,8 +7921,13 @@ let totalMissingStamps = 0;
 let totalRepresentative = 0;
 
 
-record.agencies.forEach(
+/* مثل تقرير السجل: الملغاة لا تُحتسب، والإضافات النقدية بدون حصة الفرع من بدل الانتقال */
+(record.agencies || []).forEach(
     function (agency) {
+
+        if (!agency || agency.status === "cancelled") {
+            return;
+        }
 
         totalBase +=
             number(
@@ -7669,9 +7935,7 @@ record.agencies.forEach(
             );
 
         totalAdditions +=
-            number(
-                agency.additionsTotal
-            );
+            Math.max(0, number(agency.additionsTotal) - getAgencyTransport(agency).cash);
 
         totalMissingStamps +=
             number(
@@ -7942,21 +8206,21 @@ record.agencies
 
                         مرافعة:
                         ${number(
-                            agency.stamps.pleading
+                            (agency.stamps || agency.missingStamps || {}).pleading
                         )}
 
                         <br>
 
                         إسعاف:
                         ${number(
-                            agency.stamps.ambulance
+                            (agency.stamps || agency.missingStamps || {}).ambulance
                         )}
 
                         <br>
 
                         معونة:
                         ${number(
-                            agency.stamps.aid
+                            (agency.stamps || agency.missingStamps || {}).aid
                         )}
 
                         <br>
@@ -8072,7 +8336,7 @@ Object.keys(
 
         const count =
             number(
-                agency.additions[key]
+                (agency.additions || {})[key]
             );
 
 
@@ -8190,7 +8454,7 @@ Object.keys(
 */
 
 if (
-    agency.additions.transport > 0 &&
+    (agency.additions || {}).transport > 0 &&
     agency.transportSettings
 ) {
 
@@ -8207,7 +8471,7 @@ if (
         حصة المندوب من بدل الانتقال:
         ${money(
             share *
-            agency.additions.transport
+            (agency.additions || {}).transport
         )}
         — لا تدخل في المبلغ المطلوب
 
@@ -8624,21 +8888,22 @@ function openAgencyForEdit(recordId, index) {
     }
 
     closeRecordModal();
-    editRecord(recordId);
+    editRecord(recordId, function () {
 
-    if (pendingAgencies[index]) {
-        editPendingAgency(index);
-    }
+        if (pendingAgencies[index]) {
+            editPendingAgency(index);
+        }
 
-    setTimeout(function () {
-        document.getElementById("agencyNumber")?.closest(".content-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 80);
+        setTimeout(function () {
+            document.getElementById("agencyNumber")?.closest(".content-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 80);
 
-    showToast(
-        "<strong>تعديل الوكالة</strong>" +
-        "<span>عدّل بيانات الوكالة ثم اضغط «إضافة الوكالة»، وبعدها «حفظ السجل» لحفظ التعديل.</span>",
-        8000
-    );
+        showToast(
+            "<strong>تعديل الوكالة</strong>" +
+            "<span>عدّل بيانات الوكالة ثم اضغط «إضافة الوكالة»، وبعدها «حفظ السجل» لحفظ التعديل.</span>",
+            8000
+        );
+    });
 }
 
 window.openAgencyForEdit = openAgencyForEdit;
@@ -9454,7 +9719,11 @@ const allAgencies =
                     m.record.representativeName,
 
                 officeName:
-                    m.record.officeName
+                    m.record.officeName,
+
+                /* تاريخ السجل: حصص اللجان تُحسب حسب تاريخ الوكالة (هذه نسخ لا تُوجد في فهرس السجلات) */
+                recordDay:
+                    getRecordDay(m.record)
 
             };
 
@@ -9905,7 +10174,7 @@ Object.keys(
                     return (
                         sum +
                         number(
-                            agency.additions[key]
+                            (agency.additions || {})[key]
                         )
                     );
 
@@ -9921,7 +10190,7 @@ Object.keys(
                     return (
                         sum +
                         number(
-                            agency.additionValues[key]
+                            (agency.additionValues || {})[key]
                         )
                     );
 
@@ -9947,7 +10216,7 @@ Object.keys(
                             settings &&
                             settings.isPleading
                                 ? number(
-                                    agency.additions[key]
+                                    (agency.additions || {})[key]
                                 )
                                 : 0
                         )
@@ -10086,7 +10355,7 @@ stampTypes.forEach(
                     return (
                         sum +
                         number(
-                            agency.stamps[
+                            (agency.stamps || agency.missingStamps || {})[
                                 stamp.key
                             ]
                         )
@@ -10125,7 +10394,7 @@ stampTypes.forEach(
 
                 <td>
                     ${money(
-                        count * price
+                        missingStampTypeValue(activeAgencies, stamp.key)
                     )}
                 </td>
 
@@ -10225,8 +10494,9 @@ const representativeMap = {};
 allAgencies.forEach(
     function (agency) {
 
+        /* مثل نسخة PDF وExcel: الاسم بلا مسافات زائدة حتى لا يظهر المندوب نفسه مرتين */
         const name =
-            agency.representativeName;
+            String(agency.representativeName || "-").trim() || "-";
 
 
         if (
@@ -10842,7 +11112,7 @@ function applyRecordReprice() {
         return;
     }
 
-    const items = collectRecordReprice().filter(function (it) { return !repriceExcluded.has(it.record.id); });
+    let items = collectRecordReprice().filter(function (it) { return !repriceExcluded.has(it.record.id); });
     if (!items.length) {
         renderRecordReprice();
         return;
@@ -10859,6 +11129,10 @@ function applyRecordReprice() {
     }).then(function (ok) {
 
         if (!ok) return;
+
+        /* من جديد بعد التأكيد: قد تكون المزامنة استبدلت السجلات أثناء النافذة */
+        items = collectRecordReprice().filter(function (it) { return !repriceExcluded.has(it.record.id); });
+        if (!items.length) { renderRecordReprice(); return; }
 
         const before = JSON.stringify(records);
         const batch = "reprice-" + Date.now();
@@ -10920,7 +11194,7 @@ function undoRecordReprice() {
                 } else if (a.appliedPrices) {
                     if (h.appliedAgency === undefined) delete a.appliedPrices.agency; else a.appliedPrices.agency = h.appliedAgency;
                     if (h.appliedRepresentative === undefined) delete a.appliedPrices.representative; else a.appliedPrices.representative = h.appliedRepresentative;
-                    a.appliedPrices.priceMonth = h.priceMonth;
+                    if (h.hadPriceMonth === false) delete a.appliedPrices.priceMonth; else a.appliedPrices.priceMonth = h.priceMonth;
                 }
                 /* الفترة والسعر المحدد (تغيير أسعار وكالات محددة) */
                 ["pricePeriod", "customPrice", "customRepresentative"].forEach(function (field) {
@@ -11071,6 +11345,7 @@ function applyAgencyPriceChange(agency, change, batch, at) {
         appliedAgency: applied.agency,
         appliedRepresentative: applied.representative,
         priceMonth: applied.priceMonth === undefined ? null : applied.priceMonth,
+        hadPriceMonth: "priceMonth" in applied,
         pricePeriod: agency.pricePeriod === undefined ? null : agency.pricePeriod,
         customPrice: agency.customPrice === undefined ? null : agency.customPrice,
         customRepresentative: agency.customRepresentative === undefined ? null : agency.customRepresentative
@@ -11213,7 +11488,7 @@ function applyBulkPrice() {
         return;
     }
     const o = bulkPriceOptions();
-    const items = collectBulkPrice(o);
+    let items = collectBulkPrice(o);
     if (!items.length) { renderBulkPricePreview(); return; }
 
     try { downloadBackup(); } catch (e) {}
@@ -11225,6 +11500,9 @@ function applyBulkPrice() {
         cancelText: "إلغاء"
     }).then(function (ok) {
         if (!ok) return;
+        /* من جديد بعد التأكيد: قد تكون المزامنة استبدلت السجلات أثناء النافذة */
+        items = collectBulkPrice(o);
+        if (!items.length) { renderBulkPricePreview(); return; }
         const before = JSON.stringify(records);
         const batch = "bulk-" + Date.now();
         const at = new Date().toISOString();
@@ -11915,7 +12193,7 @@ savePricesBtn.addEventListener(
 
         flashNotify("تم حفظ جميع الأسعار والإعدادات بنجاح.", "success");
 
-        window.location.reload();
+        reloadApp();
 
     }
 );
@@ -11978,6 +12256,9 @@ tbody.innerHTML =
                                 "admin"
 
                                     ? "الحساب الأساسي"
+
+                                    : user.id === currentUser.id
+                                    ? "حسابك الحالي"
 
                                     : `
 
@@ -12177,6 +12458,18 @@ if (
 
 }
 
+/* لا يحذف المستخدم نفسه وهو داخل (يُقفل خارج البرنامج فوراً) */
+if (user.id === currentUser.id || user.username === currentUser.username) {
+    notify("لا يمكنك حذف حسابك وأنت داخل به. ادخل بحساب مدير آخر لحذفه.", "error");
+    return;
+}
+
+/* يبقى مدير واحد على الأقل، وإلا لا أحد يستطيع إدارة الأسعار والمستخدمين */
+if (user.role === "manager" && users.filter(function (u) { return u.role === "manager"; }).length <= 1) {
+    notify("لا يمكن حذف آخر مدير في البرنامج. أضف مديراً آخر أولاً.", "error");
+    return;
+}
+
 
 appConfirm({
     title: "حذف المستخدم",
@@ -12220,6 +12513,65 @@ window.deleteUser =
 deleteUser;
 
 /* =========================================================
+حماية الجلسات: الجلسة المحفوظة تُطابَق مع قائمة المستخدمين
+- مستخدم حُذف: تُغلق جلسته فوراً.
+- صلاحية تغيّرت (أو وصلت قائمة أحدث من جهاز آخر): تُطبَّق الصلاحية الجديدة فوراً.
+يُفحص عند فتح الصفحة، وعند تغيّر المستخدمين في نافذة أخرى.
+========================================================= */
+
+function signOutWithMessage(message) {
+    currentUser = null;
+    try { localStorage.removeItem("currentUser"); } catch (e) {}
+    try { sessionStorage.removeItem("currentUser"); } catch (e) {}
+    appPage.classList.add("hidden");
+    loginPage.classList.remove("hidden");
+    loginUsername.value = "";
+    loginPassword.value = "";
+    if (loginError) loginError.textContent = message;
+}
+
+function validateSession() {
+    if (!currentUser) return;
+    const user = users.find(function (u) { return u.id === currentUser.id; }) ||
+        users.find(function (u) { return u.username === currentUser.username; });
+    if (!user) {
+        signOutWithMessage("حُذف حسابك من البرنامج، أو لم يعد موجوداً على هذا الجهاز. ادخل بحساب آخر.");
+        return;
+    }
+    if (user.role === currentUser.role && user.id === currentUser.id && user.username === currentUser.username) return;
+
+    const oldRole = currentUser.role;
+    currentUser = { id: user.id, username: user.username, role: user.role };
+    const saved = JSON.stringify(currentUser);
+    try { if (localStorage.getItem("currentUser")) localStorage.setItem("currentUser", saved); } catch (e) {}
+    try { if (sessionStorage.getItem("currentUser")) sessionStorage.setItem("currentUser", saved); } catch (e) {}
+
+    try { updateProfileCard(); } catch (e) {}
+    try { applyPermissions(); } catch (e) {}
+    /* صفحة للمدير فقط وصلاحيته لم تعد مدير: إلى الرئيسية */
+    const active = document.querySelector(".section.active-section");
+    if (user.role !== "manager" && active && active.classList.contains("manager-section")) {
+        switchSection("dashboardSection");
+    }
+    if (oldRole !== user.role) {
+        notify("<strong>تغيّرت صلاحيتك</strong><span>من «" + escapeHTML(getRoleName(oldRole)) + "» إلى «" + escapeHTML(getRoleName(user.role)) + "».</span>", "info", 7000, true);
+    }
+}
+
+/* المستخدمون تغيّروا في نافذة أخرى من البرنامج */
+window.addEventListener("storage", function (event) {
+    if (event.key !== "audit_users") return;
+    users = loadData("audit_users", users);
+    validateSession();
+    try { renderUsers(); } catch (e) {}
+});
+
+onReady(function () {
+    /* بعد استعادة الجلسة المحفوظة عند فتح الصفحة */
+    setTimeout(validateSession, 0);
+});
+
+/* =========================================================
 البحث
 ========================================================= */
 
@@ -12255,11 +12607,15 @@ cancelEditBtn.addEventListener(
     "click",
     function () {
 
-        resetRecordForm();
+        confirmDiscardRecordForm(function () {
 
-        switchSection(
-            "recordsSection"
-        );
+            resetRecordForm();
+
+            switchSection(
+                "recordsSection"
+            );
+
+        });
 
     }
 );
@@ -12307,7 +12663,8 @@ function activityRanges(period) {
         bucket = "day";
     } else if (period === "quarter") {
         from = new Date(y, m - 2, 1); to = now;
-        prevFrom = new Date(y, m - 5, 1); prevTo = new Date(y, m - 2, 0);
+        /* الفترة السابقة حتى اليوم نفسه من شهرها الأخير (مقارنة متساوية، لا جزئية مقابل كاملة) */
+        prevFrom = new Date(y, m - 5, 1); prevTo = new Date(y, m - 3, Math.min(now.getDate(), new Date(y, m - 2, 0).getDate()));
         bucket = "month";
     } else if (period === "year") {
         from = new Date(y, 0, 1); to = now;
@@ -12731,6 +13088,7 @@ const editingId =
 
 if (
     !editingId &&
+    editingAgencyIndex() === -1 &&
     numberInput
 ) {
 
@@ -12967,7 +13325,16 @@ function (event) {
 النسخ الاحتياطي والاستعادة
 ========================================================= */
 
+/* السجلات لم تُقرأ عند فتح الصفحة: أي نسخة الآن ستكون بلا سجلات وتكتب فوق نسخة اليوم السليمة */
+function backupBlockedByLoadFailure() {
+    if (!recordsLoadFailed) return false;
+    notify("<strong>لم تُنشأ نسخة احتياطية</strong><span>تعذر قراءة السجلات عند فتح الصفحة، والنسخة الآن ستكون بلا سجلات. حدّث الصفحة (Ctrl + F5).</span>", "error", 10000, true);
+    return true;
+}
+
 function downloadBackup() {
+
+    if (backupBlockedByLoadFailure()) return;
 
     const backup = {
         appName: "نظام تدقيق السجلات والوكالات",
@@ -13170,6 +13537,7 @@ function backupFileName() {
 
 /* كتابة نسخة اليوم في المجلد (تحلّ محل نسخة اليوم السابقة: الأحدث تحوي كل شيء) */
 function writeBackupToFolder(interactive) {
+    if (recordsLoadFailed) return Promise.resolve(false);
     return ensureFolderPermission(interactive).then(function (ok) {
         if (!ok) return false;
         const name = backupFileName();
@@ -13187,6 +13555,7 @@ function writeBackupToFolder(interactive) {
 
 /* تنزيل عادي (بدون مجلد): يحسب كنسخة */
 function downloadBackupFile(auto) {
+    if (backupBlockedByLoadFailure()) return;
     const blob = new Blob([buildBackupJSON()], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -13325,8 +13694,17 @@ function renderBackupStatus() {
 document.getElementById("chooseBackupFolderBtn")?.addEventListener("click", chooseBackupFolder);
 
 /* عند المغادرة: تنبيه المتصفح إذا وُجدت تغييرات لم تُنسخ */
+/* إعادة تحميل يقصدها البرنامج (بعد حفظ الأسعار أو الاستعادة أو وصول إعدادات من جهاز آخر)
+   لا يُسأل عنها: لو بقيت الصفحة لعملت بإعدادات قديمة في الذاكرة. */
+let appReloading = false;
+
+function reloadApp() {
+    appReloading = true;
+    location.reload();
+}
+
 window.addEventListener("beforeunload", function (event) {
-    if (!currentUser || !hasUnbackedChanges()) return;
+    if (appReloading || !currentUser || !hasUnbackedChanges()) return;
     event.preventDefault();
     event.returnValue = "";
 });
@@ -13667,6 +14045,12 @@ function readBackupFileText(file) {
 
 function restoreBackupFromFile(file) {
 
+    /* الاستعادة تستبدل كل البيانات: للمدير فقط */
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("استعادة النسخة الاحتياطية للمدير فقط.", "error");
+        return;
+    }
+
     readBackupFileText(file).then(function (text) {
 
         let data;
@@ -13686,7 +14070,9 @@ function restoreBackupFromFile(file) {
         appConfirm({
             title: "استعادة نسخة احتياطية",
             message: "سيتم استبدال كل البيانات الحالية (" + records.length + " سجل، الأسعار، المستخدمين) بالبيانات الموجودة في هذا الملف (" +
-                data.records.length + " سجل). ننصح بتحميل نسخة احتياطية من البيانات الحالية أولاً. هل تريد المتابعة؟",
+                data.records.length + " سجل). ننصح بتحميل نسخة احتياطية من البيانات الحالية أولاً." +
+                (fbState && fbState.signedIn ? " المزامنة مع Firebase مفعّلة: بعد الاستعادة تُدمج النسخة مع النسخة المشتركة (لا يُحذف شيء من الأجهزة الأخرى، والأحدث من كل سجل يبقى)." : "") +
+                " هل تريد المتابعة؟",
             confirmText: "استبدال البيانات",
             cancelText: "إلغاء",
             danger: true
@@ -13709,12 +14095,17 @@ function applyBackupData(data) {
             وبقية الإعدادات لا تُكتب إلا بعد نجاحها.
             الاستعادة مقصودة لاستبدال السجلات، فهي تعمل حتى لو تعذرت قراءتها.
         */
+        const recordsBefore = records;
+        const loadFailedBefore = recordsLoadFailed;
         recordsLoadFailed = false;
         records = data.records || [];
 
         persistRecords().then(function () {
             applyBackupSettings(data);
         }).catch(function (error) {
+            /* لم يُحفظ شيء: الذاكرة تعود كما كانت (والحماية كما كانت) */
+            records = recordsBefore;
+            recordsLoadFailed = loadFailedBefore;
             console.error("Restore records failed:", error);
             notify("<strong>لم تكتمل الاستعادة</strong><span>تعذر حفظ السجلات: " + escapeHTML(error && error.message || error) +
                 " — لم يتغير شيء. حدّث الصفحة.</span>", "error", 15000, true);
@@ -13767,7 +14158,10 @@ function applyBackupSettings(data) {
 
         flashNotify("تم استيراد النسخة الاحتياطية بنجاح (" + records.length + " سجل).", "success");
 
-        location.reload();
+        /* المزامنة بعد الاستعادة: دمج أول من جديد، لا «حذف» لما ليس في الملف */
+        fbResetAfterRestore();
+
+        reloadApp();
 
 }
 
@@ -14086,7 +14480,9 @@ function fbSync(reason) {
         };
 
         const toPush = [];
-        const apply = [];      /* {id, record|null} */
+        const apply = [];      /* {id, record|null, local} */
+        /* بصمات السجلات المطبَّقة هنا: تُعتمد في base بعد نجاح الحفظ المحلي فقط */
+        const appliedBase = {};
         let conflicts = 0, lostLocal = false, maxSynced = fbState.lastPull || 0;
         const conflictNums = [];
         const seen = {};
@@ -14103,21 +14499,21 @@ function fbSync(reason) {
             const remoteChanged = B === undefined ? true : R !== B;
             if (!remoteChanged) return;               /* الرفع أدناه */
             if (!localChanged) {
-                apply.push({ id: id, record: rem.deleted ? null : JSON.parse(rem.json) });
+                apply.push({ id: id, record: rem.deleted ? null : JSON.parse(rem.json), local: L });
                 if (rem.deleted) lostLocal = true;
-                base[id] = R;
+                appliedBase[id] = R;
                 return;
             }
             /* تعارض: الحذف لا يغلب تعديلاً، وإلا فالأحدث */
             conflicts++;
             if (localById[id]) conflictNums.push(localById[id].recordNumber);
             if (rem.deleted) return;                  /* يبقى المحلي ويُرفع */
-            if (L === null) { apply.push({ id: id, record: JSON.parse(rem.json) }); base[id] = R; return; }
+            if (L === null) { apply.push({ id: id, record: JSON.parse(rem.json), local: L }); appliedBase[id] = R; return; }
             const remoteRecord = JSON.parse(rem.json);
             if (fbRecordUpdatedAt(remoteRecord) > fbRecordUpdatedAt(localById[id])) {
-                apply.push({ id: id, record: remoteRecord });
+                apply.push({ id: id, record: remoteRecord, local: L });
                 lostLocal = true;
-                base[id] = R;
+                appliedBase[id] = R;
             }
         });
 
@@ -14167,6 +14563,9 @@ function fbSync(reason) {
             let localChangedNow = false;
             apply.forEach(function (a) {
                 const idx = records.findIndex(function (r) { return String(r.id) === a.id; });
+                /* حُفظ هذا السجل هنا أثناء انتظار النسخة الاحتياطية: لا نكتب فوقه (يُرفع في المزامنة التالية) */
+                const nowHash = idx === -1 ? null : fbRecordHash(records[idx]);
+                if (nowHash !== a.local) { delete appliedBase[a.id]; return; }
                 if (a.record === null) {
                     if (idx !== -1) { records.splice(idx, 1); localChangedNow = true; }
                 } else if (idx !== -1) {
@@ -14179,6 +14578,7 @@ function fbSync(reason) {
             /* حفظ مباشر (لا persistRecords حتى لا تُطلب مزامنة جديدة)، مع تعليم التغيير للنسخ الاحتياطي */
             const save = localChangedNow ? persistRecordsNow().then(function () { try { markDataChanged(); } catch (e) {} }) : Promise.resolve();
             return save.then(function () {
+                Object.keys(appliedBase).forEach(function (id) { base[id] = appliedBase[id]; });
                 return toPush.length ? fbBackend.pushRecords(uid, toPush) : null;
             }).then(function () {
                 toPush.forEach(function (p) { base[p.id] = p.hash; });
@@ -14230,7 +14630,7 @@ function fbSync(reason) {
                     fbState.settingsChangedAt = number(applySettings.changedAt);
                     saveFbState();
                     notify("<strong>وصلت أسعار وإعدادات أحدث من جهاز آخر</strong><span>يُعاد تحميل الصفحة الآن.</span>", "info", 4000, true);
-                    setTimeout(function () { location.reload(); }, 1500);
+                    setTimeout(reloadApp, 1500);
                 }
                 return true;
             });
@@ -14254,6 +14654,23 @@ function fbSync(reason) {
 }
 
 /* مزامنة مؤجّلة قليلاً بعد كل حفظ (تُجمع عدة حفظات في رفع واحد) */
+/*
+    بعد استعادة نسخة احتياطية: مزامنة أولى من جديد (دمج من الطرفين، الأحدث من كل سجل يبقى)،
+    بدل اعتبار كل سجل غائب عن الملف «محذوفاً» ورفع علامات حذف تصل إلى الأجهزة الأخرى.
+    والإعدادات المستعادة لا تُعدّ تعديلاً جديداً يغلب الإعدادات المشتركة.
+*/
+function fbResetAfterRestore() {
+    try {
+        fbState.firstSyncDone = false;
+        fbState.base = {};
+        fbState.lastPull = 0;
+        fbState.settingsBase = null;
+        fbState.settingsChangedAt = 0;
+        fbState.settingsLocalHash = fbSettingsHash(fbSettingsJSON());
+        saveFbState();
+    } catch (e) {}
+}
+
 function fbScheduleSync(delay) {
     if (!fbUser) return;
     clearTimeout(fbTimer);
@@ -14696,9 +15113,10 @@ function exportRecordToExcel(id) {
             transport.total,
             agencyAdditionsToText(agency, true),
             add,
-            number(ms.pleading),
-            number(ms.ambulance),
-            number(ms.aid),
+            /* الملغاة لا طوابع ناقصة عليها (كما في سطر الإجمالي) */
+            agency.status === "cancelled" ? 0 : number(ms.pleading),
+            agency.status === "cancelled" ? 0 : number(ms.ambulance),
+            agency.status === "cancelled" ? 0 : number(ms.aid),
             miss,
             rep,
             grand,
@@ -14847,7 +15265,7 @@ function exportAllRecordsToExcel() {
             String(m.record.recordNumber), m.day, m.record.representativeName,
             String(a.number), AGENCY_NAMES[a.type] || a.type, getAgencyStatusName(a.status),
             base, t.total, agencyAdditionsToText(a, true), agencyAdditionsCount(a),
-            number(ms.pleading) + number(ms.ambulance) + number(ms.aid), rep, grand, a.notes || ""
+            a.status === "cancelled" ? 0 : number(ms.pleading) + number(ms.ambulance) + number(ms.aid), rep, grand, a.notes || ""
         ];
     });
 
@@ -14908,11 +15326,25 @@ function saveRecordDraft() {
             savedAt: new Date().toISOString()
         };
 
+        /* سجل مفتوح للتعديل دون أي تغيير: لا مسودة (حتى لا تُستعاد لاحقاً نسخة قديمة منه) */
+        let unchangedEdit = false;
+        if (draft.editingRecordId) {
+            const saved = records.find(function (r) { return r.id === draft.editingRecordId; });
+            draft.baseHash = editingBaseHash;
+            unchangedEdit = !!saved && !hasUnsavedRecordForm() &&
+                String(saved.recordNumber || "") === String(draft.recordNumber || "") &&
+                String(saved.officeName || "") === String(draft.officeName || "") &&
+                String(saved.representativeName || "") === String(draft.representativeName || "") &&
+                (saved.representativeType === "external" ? "external" : "internal") === (draft.representativeType === "external" ? "external" : "internal") &&
+                getRecordDay(saved) === String(draft.recordDate || "");
+        }
+
         const isEmpty =
-            !draft.recordNumber &&
+            unchangedEdit ||
+            (!draft.recordNumber &&
             !draft.officeName &&
             !draft.representativeName &&
-            pendingAgencies.length === 0;
+            pendingAgencies.length === 0);
 
         if (isEmpty) {
             localStorage.removeItem(DRAFT_KEY);
@@ -15055,6 +15487,36 @@ function restoreRecordDraft() {
     if (pendingAgencies.length > 0) {
         return;
     }
+
+    /* مسودة تعديل سجل: هل ما زال السجل كما كان عند بدء التعديل؟ */
+    if (draft.editingRecordId) {
+        const saved = records.find(function (r) { return r.id === draft.editingRecordId; });
+        if (!saved) {
+            notify("<strong>لم تُستعد مسودة التعديل</strong><span>السجل رقم " + escapeHTML(draft.recordNumber || "") +
+                " لم يعد موجوداً (حُذف)، فلم يُعَد إنشاؤه من المسودة.</span>", "warning", 10000, true);
+            try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+            return;
+        }
+        if (draft.baseHash && draft.baseHash !== recordVersionHash(saved)) {
+            appConfirm({
+                title: "السجل " + (draft.recordNumber || "") + " تغيّر بعد بدء تعديلك",
+                message: "لديك تعديل غير محفوظ على هذا السجل، لكن السجل نفسه تغيّر بعد ذلك (من جهاز آخر أو من أدوات الأسعار). إن استعدت تعديلك وحفظته فسيُكتب فوق التغيير الأحدث.",
+                confirmText: "استعادة تعديلي",
+                cancelText: "تجاهل تعديلي (يبقى الأحدث)"
+            }).then(function (ok) {
+                if (ok) applyRecordDraft(draft);
+                else { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
+            });
+            return;
+        }
+    }
+
+    applyRecordDraft(draft);
+}
+
+function applyRecordDraft(draft) {
+
+    editingBaseHash = draft.baseHash || null;
 
     const setValue = function (id, value) {
         const el = document.getElementById(id);
