@@ -79,6 +79,18 @@ const shares = await ev(function () {
 });
 check("الحصص تتبع سعر الوكالة", shares === "1700:300/250 1900:335/279 1050:185/154", shares);
 
+/* 1ب) حسب التاريخ: سعر الفترة × النسبة، أو مبلغ محدد في جدول الفترة */
+const byDate = await ev(function () {
+    const a = { type: "general", status: "active", basePrice: 1700 };
+    const auto = getAgencyCommittee(a, "2026-03-07");                 /* فترة 5 آذار: 1070 */
+    const entry = priceSchedule.find(function (e) { return e.from === "2026-03-05"; });
+    entry.prices.general.ambulance = 500;
+    const fixed = getAgencyCommittee(a, "2026-03-07");
+    delete entry.prices.general.ambulance;                            /* في الذاكرة فقط، لا حفظ */
+    return auto.ambulance + "/" + auto.cooperation + " " + fixed.ambulance + "/" + fixed.cooperation;
+});
+check("الحصص حسب التاريخ ومبلغ الفترة المحدد", byDate === "189/157 500/157", byDate);
+
 /* 2) أداة تسعير السجلات المحفوظة: استثناء سجل، تنفيذ، تراجع */
 await ev(function () { switchSection("pricesSection"); });
 await page.waitForTimeout(300);

@@ -6496,3 +6496,130 @@ html.theme-switching *::after {
 /* المزامنة مع Firebase */
 .tg-status.is-ok { color: var(--accent); }
 .tg-status.is-error { color: var(--danger); }
+
+/* حصص اللجان في جدول الفترة: الفارغ تلقائي (نص باهت) */
+.schedule-table .share-input::placeholder { color: var(--text-3); font-size: var(--fs-xs); }
+.schedule-table .share-input:not(:placeholder-shown) { border-color: var(--grp-add); font-weight: 600; }
+
+/* ملاحظات الوكالات مجمّعة: الملاحظة مرة واحدة وتحتها أرقام وكالاتها */
+.doc-notes-grouped li {
+    display: block;
+}
+.doc-notes-grouped .note-agencies {
+    display: block;
+    margin-top: 2px;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--brand-700);
+}
+
+/* طباعة التقرير المختصر مضغوطة: صفحتان بدل ثلاث أو أربع */
+@media print {
+    #printRoot .doc-summary .doc-section {
+        margin-bottom: 10px;
+    }
+    #printRoot .doc-summary .doc-notes-section {
+        break-inside: auto;
+    }
+    #printRoot .doc-summary .doc-section h3 {
+        font-size: 13px;
+        margin-bottom: 5px;
+    }
+    #printRoot .doc-summary .sec-no {
+        width: 20px;
+        height: 20px;
+        font-size: 11px;
+    }
+    #printRoot .doc-summary .doc-table {
+        font-size: 10.5px;
+    }
+    #printRoot .doc-summary .doc-table th,
+    #printRoot .doc-summary .doc-table td {
+        padding: 3px 6px;
+    }
+    #printRoot .doc-summary .doc-table small,
+    #printRoot .doc-summary .rate-amount {
+        font-size: 9px;
+    }
+    /* صفوف الصفر لا تُطبع في المختصر (تبقى على الشاشة) */
+    #printRoot .doc-summary .row-zero {
+        display: none;
+    }
+    #printRoot .doc-summary .doc-two-col {
+        gap: 12px;
+    }
+    #printRoot .doc-summary .doc-head {
+        padding-bottom: 6px;
+        margin-bottom: 8px;
+    }
+    #printRoot .doc-summary .doc-meta td {
+        padding: 5px 8px;
+    }
+    #printRoot .doc-summary .doc-summary-row {
+        gap: 6px;
+        margin-bottom: 10px;
+    }
+    #printRoot .doc-summary .doc-due {
+        padding: 8px 14px;
+    }
+    #printRoot .doc-summary .doc-due strong {
+        font-size: 19px;
+    }
+    #printRoot .doc-summary .doc-kpis > div {
+        padding: 4px 8px;
+    }
+    #printRoot .doc-summary .doc-kpis dt {
+        font-size: 9.5px;
+        margin-bottom: 1px;
+    }
+    #printRoot .doc-summary .doc-kpis dd {
+        font-size: 12px;
+    }
+    #printRoot .doc-summary .doc-notes li {
+        padding: 4px 10px;
+        font-size: 10.5px;
+        line-height: 1.5;
+    }
+    #printRoot .doc-summary .doc-notes-grouped .note-agencies {
+        font-size: 10px;
+    }
+    #printRoot .doc-summary .doc-sign {
+        margin-top: 12px;
+        padding-top: 8px;
+        gap: 60px;
+    }
+    #printRoot .doc-summary .doc-sign i {
+        height: 26px;
+    }
+}
+
+/* مفتاح اختصار نوع الوكالة داخل الزر */
+.chip-key {
+    min-width: 18px;
+    padding: 0 4px;
+    border-radius: 5px;
+    border: 1px solid var(--line-strong);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font: 600 10px/16px var(--font-body);
+    text-align: center;
+    direction: ltr;
+}
+.choice-chip.is-on .chip-key {
+    border-color: color-mix(in srgb, #fff 45%, transparent);
+    background: color-mix(in srgb, #fff 18%, transparent);
+    color: inherit;
+}
+.choice-chip.flash {
+    animation: chip-flash 0.4s ease-out;
+}
+@keyframes chip-flash {
+    from { box-shadow: 0 0 0 4px color-mix(in srgb, var(--chip-color) 45%, transparent); }
+    to { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .choice-chip.flash { animation: none; }
+}
+@media print {
+    .chip-key { display: none; }
+}

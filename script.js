@@ -2839,7 +2839,21 @@ const AGENCY_STATUS_COLORS = {
     cancelled: "#a8352c"
 };
 
-function buildChoiceChips(selectId, containerId, colors, minor) {
+/*
+    مفاتيح أنواع الوكالة (حرف واحد بلا Alt، صفحة إنشاء السجل): متجاورة على لوحة المفاتيح —
+    F G H للعامة والخاصة والشرعية، و V B N تحتها للأقل استخداماً.
+    تُقرأ بموقع المفتاح (event.code) فتعمل واللوحة عربية أيضاً.
+*/
+const AGENCY_TYPE_KEYS = {
+    general: "F",
+    special: "G",
+    legal: "H",
+    executive: "V",
+    certified_general_special: "B",
+    certified_legal: "N"
+};
+
+function buildChoiceChips(selectId, containerId, colors, minor, keys) {
 
     const select = document.getElementById(selectId);
     const box = document.getElementById(containerId);
@@ -2850,8 +2864,11 @@ function buildChoiceChips(selectId, containerId, colors, minor) {
 
     const chipHTML = function (option) {
         const color = colors[option.value] || "#45577c";
-        return '<button type="button" role="radio" class="choice-chip" data-value="' + option.value + '" style="--chip-color:' + color + '">' +
-            '<span class="chip-dot" aria-hidden="true"></span>' + escapeHTML(option.textContent.trim()) + "</button>";
+        const key = keys && keys[option.value];
+        return '<button type="button" role="radio" class="choice-chip" data-value="' + option.value + '" style="--chip-color:' + color + '"' +
+            (key ? ' aria-keyshortcuts="' + key + '" title="اختصار: ' + key + '"' : "") + ">" +
+            '<span class="chip-dot" aria-hidden="true"></span>' + escapeHTML(option.textContent.trim()) +
+            (key ? '<kbd class="chip-key" aria-hidden="true">' + key + "</kbd>" : "") + "</button>";
     };
 
     const options = Array.from(select.options);
@@ -2917,7 +2934,7 @@ function syncChoiceChips() {
 document.getElementById("agencyStatus")?.addEventListener("change", syncChoiceChips);
 
 onReady(function () {
-    buildChoiceChips("agencyType", "agencyTypeChips", AGENCY_TYPE_COLORS, ["executive", "certified_general_special", "certified_legal"]);
+    buildChoiceChips("agencyType", "agencyTypeChips", AGENCY_TYPE_COLORS, ["executive", "certified_general_special", "certified_legal"], AGENCY_TYPE_KEYS);
     buildChoiceChips("agencyStatus", "agencyStatusChips", AGENCY_STATUS_COLORS);
 });
 
@@ -3451,6 +3468,54 @@ document.addEventListener("keydown", function (event) {
         wrap.classList.remove("flash");
         void wrap.offsetWidth;
         wrap.classList.add("flash");
+    }
+});
+
+/*
+    نوع الوكالة بحرف واحد (F G H / V B N). يعمل حين يكون التركيز على رقم الوكالة أو خانات البنود
+    الرقمية أو خارج أي حقل كتابة — لا داخل الملاحظات أو اسم المكتب والمندوب.
+    التركيز يبقى مكانه حتى يتابع المستخدم الإدخال.
+*/
+document.addEventListener("keydown", function (event) {
+
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat) {
+        return;
+    }
+
+    if (
+        document.querySelector("dialog[open]") ||
+        !document.getElementById("newRecordSection")?.classList.contains("active-section")
+    ) {
+        return;
+    }
+
+    const letter = /^Key([A-Z])$/.exec(event.code || "");
+    if (!letter) return;
+    const type = Object.keys(AGENCY_TYPE_KEYS).find(function (t) { return AGENCY_TYPE_KEYS[t] === letter[1]; });
+    if (!type) return;
+
+    const target = event.target;
+    const editable = target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+    const numericAgencyField = target && (target.id === "agencyNumber" || (target.matches && target.matches("#agencyItems input[data-num]")));
+    if (editable && !numericAgencyField) return;
+
+    const select = document.getElementById("agencyType");
+    if (!select) return;
+
+    event.preventDefault();
+
+    if (select.value !== type) {
+        select.value = type;
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        syncChoiceChips();
+    }
+
+    const chip = document.querySelector('#agencyTypeChips .choice-chip[data-value="' + type + '"]');
+    if (chip) {
+        chip.classList.remove("flash");
+        void chip.offsetWidth;
+        chip.classList.add("flash");
     }
 });
 
@@ -5940,6 +6005,39 @@ function formatNotesHTML(value) {
         .replace(/\r?\n/g, "<br>");
 }
 
+/*
+    تجميع ملاحظات الوكالات: كل سطر ملاحظة (والعبارتان السريعتان حتى لو كُتبتا في سطر واحد)
+    مع أرقام الوكالات التي تحمله، بترتيب أول وكالة.
+*/
+function groupAgencyNotes(agencies) {
+    const groups = [];
+    const byText = {};
+    const known = [NOTE_NO_RECEIPT, NOTE_NO_BOND];
+    agencies.slice().sort(function (a, b) { return number(a.number) - number(b.number); }).forEach(function (agency) {
+        if (!agency.notes) return;
+        const items = [];
+        String(agency.notes).split(/\r?\n|<br\s*\/?>/i).forEach(function (line) {
+            let rest = line;
+            known.forEach(function (phrase) {
+                if (rest.indexOf(phrase) !== -1) {
+                    items.push(phrase);
+                    rest = rest.split(phrase).join(" ");
+                }
+            });
+            rest = rest.replace(/^[\s،,.\-]+|[\s،,.\-]+$/g, "").replace(/\s*[،,]\s*[،,]+\s*/g, "، ");
+            if (rest) items.push(rest);
+        });
+        items.forEach(function (text) {
+            if (!byText[text]) {
+                byText[text] = { text: text, numbers: [] };
+                groups.push(byText[text]);
+            }
+            if (byText[text].numbers.indexOf(String(agency.number)) === -1) byText[text].numbers.push(String(agency.number));
+        });
+    });
+    return groups;
+}
+
 /* =========================================================
 التقرير النهائي للسجل
 ========================================================= */
@@ -6010,7 +6108,7 @@ function getRecordFinalStats(record) {
         signatureCount: signatureCount,
         representativeTotal: representativeTotal,
         transport: transport,
-        committees: sumCommittees(active)
+        committees: sumCommittees(active, getRecordDay(record))
     };
 }
 
@@ -6018,19 +6116,56 @@ function getRecordFinalStats(record) {
 حصص لجنتي الإسعاف والتعاون
 ========================================================= */
 
-/* حصة كل لجنة = سعر الوكالة المسجّل في السجل × نسبة نوعها */
-function getAgencyCommittee(agency) {
+/*
+    حصة كل لجنة حسب تاريخ الوكالة:
+    1. مبلغ محدد في جدول فترة الوكالة («أسعار حسب الفترات»: حصة الإسعاف / حصة التعاون) إن كُتب؛
+    2. وإلا سعر الوكالة في تلك الفترة × نسبة نوعها (فالسجل القديم المحفوظ بسعر واحد تُحسب حصصه بسعر تاريخه)؛
+    3. وإن لم تكن له فترة: سعر الوكالة المسجّل × النسبة.
+    فترة الوكالة: فترتها المختارة (pricePeriod)، وإلا تاريخ سجلها، وإلا فترة أسعارها المحفوظة.
+*/
+function agencyCommitteeRow(agency, day) {
+    let d = "";
+    if (agency.pricePeriod === "base") d = "0000-01-01";
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(agency.pricePeriod || "")) d = agency.pricePeriod;
+    else if (day) d = String(day).slice(0, 10);
+    else if (agency.appliedPrices && agency.appliedPrices.priceMonth) d = scheduleStart(agency.appliedPrices.priceMonth);
+    if (!d) return null;
+    const table = priceTableForDay(d);
+    return (table.prices && table.prices[agency.type]) || null;
+}
+
+/* مبلغ محدد في الجدول، أو null إن تُرك فارغاً (= تلقائي بالنسبة) */
+function explicitShare(row, field) {
+    if (!row || row[field] === undefined || row[field] === null || row[field] === "") return null;
+    return number(row[field]);
+}
+
+function getAgencyCommittee(agency, day) {
     if (!agency || agency.status === "cancelled") {
         return { ambulance: 0, cooperation: 0 };
     }
     const rate = committeeRates[agency.type] || { ambulance: 0, cooperation: 0 };
-    const price =
+    let price =
         number(agency.basePrice) ||
         number(prices[agency.type] && prices[agency.type].agency);
+    const row = agencyCommitteeRow(agency, day);
+    if (row && number(row.agency) > 0) price = number(row.agency);
+    const amb = explicitShare(row, "ambulance");
+    const coop = explicitShare(row, "cooperation");
     return {
-        ambulance: committeeAmount(price, rate.ambulance),
-        cooperation: committeeAmount(price, rate.cooperation)
+        ambulance: amb !== null ? amb : committeeAmount(price, rate.ambulance),
+        cooperation: coop !== null ? coop : committeeAmount(price, rate.cooperation)
     };
+}
+
+/* يوم السجل لكل وكالة محفوظة (للتقارير التي تجمع وكالات من عدة سجلات) */
+function agencyDayIndex() {
+    const map = new WeakMap();
+    records.forEach(function (record) {
+        const d = getRecordDay(record);
+        (record.agencies || []).forEach(function (a) { if (a && typeof a === "object") map.set(a, d); });
+    });
+    return map;
 }
 
 /* نسبة اللجنة مع مبلغها بسعر الوكالة الحالي (للعرض) */
@@ -6040,46 +6175,61 @@ function committeeRateHTML(type, field) {
     return formatRate(rate) + '<small class="rate-amount">' + money(committeeAmount(price, rate)) + "</small>";
 }
 
-function sumCommittees(agencies) {
+/* day: تاريخ السجل إن كانت الوكالات من سجل واحد؛ وإلا يُعرف من سجل كل وكالة */
+function sumCommittees(agencies, day) {
 
     const result = { count: 0, ambulance: 0, cooperation: 0, byType: {} };
+    const blank = function () { return { count: 0, ambulance: 0, cooperation: 0, ambAmounts: {}, coopAmounts: {} }; };
+    let index = null;
 
     Object.keys(AGENCY_NAMES).forEach(function (type) {
-        result.byType[type] = { count: 0, ambulance: 0, cooperation: 0 };
+        result.byType[type] = blank();
     });
 
     (agencies || []).forEach(function (agency) {
         if (!agency || agency.status === "cancelled") {
             return;
         }
-        const c = getAgencyCommittee(agency);
+        const d = day || (index || (index = agencyDayIndex())).get(agency) || "";
+        const c = getAgencyCommittee(agency, d);
         if (!result.byType[agency.type]) {
-            result.byType[agency.type] = { count: 0, ambulance: 0, cooperation: 0 };
+            result.byType[agency.type] = blank();
         }
+        const t = result.byType[agency.type];
         result.count += 1;
         result.ambulance += c.ambulance;
         result.cooperation += c.cooperation;
-        result.byType[agency.type].count += 1;
-        result.byType[agency.type].ambulance += c.ambulance;
-        result.byType[agency.type].cooperation += c.cooperation;
+        t.count += 1;
+        t.ambulance += c.ambulance;
+        t.cooperation += c.cooperation;
+        t.ambAmounts[c.ambulance] = (t.ambAmounts[c.ambulance] || 0) + 1;
+        t.coopAmounts[c.cooperation] = (t.coopAmounts[c.cooperation] || 0) + 1;
     });
 
     return result;
 }
 
+/* الحصة المستخدمة للوكالة الواحدة: مبلغ واحد، أو عدة مبالغ إن اختلفت الفترات (300 × 4 / 335 × 2) */
+function shareAmountsText(amounts) {
+    const keys = Object.keys(amounts || {}).map(Number).sort(function (a, b) { return a - b; });
+    if (!keys.length) return "—";
+    if (keys.length === 1) return money(keys[0]);
+    return keys.map(function (k) { return money(k) + " × " + amounts[k]; }).join(" / ");
+}
+
 function committeesByTypeTableHTML(c) {
 
     let html = '<table class="doc-table"><thead><tr><th>نوع الوكالة</th><th class="num">العدد</th>' +
-        '<th class="num">نسبة الإسعاف</th><th class="num">لجنة الإسعاف</th>' +
-        '<th class="num">نسبة التعاون</th><th class="num">لجنة التعاون</th><th class="num">المجموع</th></tr></thead><tbody>';
+        '<th class="num">حصة الإسعاف للوكالة</th><th class="num">لجنة الإسعاف</th>' +
+        '<th class="num">حصة التعاون للوكالة</th><th class="num">لجنة التعاون</th><th class="num">المجموع</th></tr></thead><tbody>';
 
     Object.keys(AGENCY_NAMES).forEach(function (type) {
         const item = c.byType[type] || { count: 0, ambulance: 0, cooperation: 0 };
         html += "<tr" + (item.count === 0 ? ' class="row-zero"' : "") + "><td>" + AGENCY_NAMES[type] + "</td>" +
             '<td class="num">' + item.count + "</td>" +
-            '<td class="num">' + committeeRateHTML(type, "ambulance") + "</td>" +
+            '<td class="num">' + shareAmountsText(item.ambAmounts) + "</td>" +
             '<td class="num">' + money(item.ambulance) + "</td>" +
-            '<td class="num">' + committeeRateHTML(type, "cooperation") + "</td>" +
+            '<td class="num">' + shareAmountsText(item.coopAmounts) + "</td>" +
             '<td class="num">' + money(item.cooperation) + "</td>" +
             '<td class="num">' + money(item.ambulance + item.cooperation) + "</td></tr>";
     });
@@ -6228,7 +6378,10 @@ function buildFinalRecordReport(record, mode) {
     /* أزرار التدقيق السريع: كل بند موجود في السجل بضغطة واحدة */
     html += quickAuditHTML(record, mode);
 
-    /* الوكالات حسب النوع */
+    /* الوكالات حسب النوع، وبدل الانتقال بجانبها في المختصر (يوفّر صفحة) */
+    const pairTypesTransport = !detailed && stats.transport.count > 0;
+    if (pairTypesTransport) html += '<div class="doc-two-col">';
+
     html += '<section class="doc-section">' + secTitle("الوكالات حسب النوع") +
         '<div class="table-wrapper"><table class="doc-table"><thead><tr><th>نوع الوكالة</th><th class="num">العدد</th><th class="num">إجمالي السعر</th></tr></thead><tbody>';
 
@@ -6256,6 +6409,8 @@ function buildFinalRecordReport(record, mode) {
             '<i class="ti ti-list-search" aria-hidden="true"></i> عرض الوكالات التي عليها بدل انتقال (' + stats.transport.count + ')</button>' +
             '<div class="table-wrapper">' + transportTableHTML(stats.transport) + "</div></section>";
     }
+
+    if (pairTypesTransport) html += "</div>";
 
     if (detailed) {
 
@@ -6346,13 +6501,15 @@ function buildFinalRecordReport(record, mode) {
 
         html += "</div>";
 
-        const withNotes = stats.agencies.filter(function (a) { return a.notes; });
+        /* الملاحظة الواحدة مرة واحدة مع أرقام وكالاتها (بدل تكرارها لكل وكالة) */
+        const noteGroups = groupAgencyNotes(stats.agencies);
 
-        html += '<section class="doc-section">' + secTitle("ملاحظات الوكالات") +
-            (withNotes.length === 0
+        html += '<section class="doc-section doc-notes-section">' + secTitle("ملاحظات الوكالات") +
+            (noteGroups.length === 0
                 ? '<p class="doc-empty">لا توجد ملاحظات مسجلة على وكالات هذا السجل.</p>'
-                : '<ul class="doc-notes">' + withNotes.map(function (a) {
-                    return "<li><b>وكالة " + escapeHTML(a.number) + "</b><span>" + formatNotesHTML(a.notes) + "</span></li>";
+                : '<ul class="doc-notes doc-notes-grouped">' + noteGroups.map(function (g) {
+                    return "<li><span>" + escapeHTML(g.text) + '</span><b class="note-agencies">' +
+                        (g.numbers.length > 1 ? "الوكالات (" + g.numbers.length + "): " : "وكالة ") + g.numbers.map(escapeHTML).join("، ") + "</b></li>";
                 }).join("") + "</ul>") +
             "</section>";
     }
@@ -7320,7 +7477,7 @@ function buildCommitteesDoc(forPrint) {
     }
 
     list.forEach(function (record) {
-        const c = sumCommittees(record.agencies);
+        const c = sumCommittees(record.agencies, getRecordDay(record));
         const date = formatDay(getRecordDay(record));
         html += "<tr><td>" + escapeHTML(record.recordNumber) + "</td><td>" + escapeHTML(record.officeName) + "</td><td>" +
             escapeHTML(record.representativeName) + "</td><td>" + date + '</td><td class="num">' + c.count + '</td><td class="num">' +
@@ -7377,14 +7534,13 @@ function exportCommitteesToExcel() {
 
     const typeRows = Object.keys(AGENCY_NAMES).map(function (type) {
         const item = totals.byType[type];
-        const rate = committeeRates[type] || { ambulance: 0, cooperation: 0 };
-        return [AGENCY_NAMES[type], item.count, formatRate(rate.ambulance), item.ambulance, formatRate(rate.cooperation), item.cooperation, item.ambulance + item.cooperation];
+        return [AGENCY_NAMES[type], item.count, shareAmountsText(item.ambAmounts), item.ambulance, shareAmountsText(item.coopAmounts), item.cooperation, item.ambulance + item.cooperation];
     });
 
     const typesSheet = buildStyledTableSheet({
         title: "حصص لجنتي الإسعاف والتعاون — حسب نوع الوكالة",
         subtitle: subtitle,
-        headers: ["نوع الوكالة", "العدد", "نسبة الإسعاف", "لجنة الإسعاف", "نسبة التعاون", "لجنة التعاون", "المجموع"],
+        headers: ["نوع الوكالة", "العدد", "حصة الإسعاف للوكالة", "لجنة الإسعاف", "حصة التعاون للوكالة", "لجنة التعاون", "المجموع"],
         rows: typeRows,
         moneyCols: [3, 5, 6],
         totalRow: ["الإجمالي", totals.count, "", totals.ambulance, "", totals.cooperation, totals.ambulance + totals.cooperation],
@@ -7392,7 +7548,7 @@ function exportCommitteesToExcel() {
     });
 
     const recordRows = result.list.map(function (record) {
-        const c = sumCommittees(record.agencies);
+        const c = sumCommittees(record.agencies, getRecordDay(record));
         return [String(record.recordNumber), record.officeName, record.representativeName, getRecordDay(record), c.count, c.ambulance, c.cooperation, c.ambulance + c.cooperation];
     });
 
@@ -8868,11 +9024,8 @@ function updateQuickCalc() {
     const grand = number(pricing.agency) + otherAdditions + stampAdditionsValue + tTotal;
 
     /* حصص اللجان: النسبة الثابتة لنوع الوكالة × سعر الوكالة، تلقائياً */
-    const rate = committeeRates[type] || { ambulance: 0, cooperation: 0 };
-    const committee = {
-        ambulance: committeeAmount(pricing.agency, rate.ambulance),
-        cooperation: committeeAmount(pricing.agency, rate.cooperation)
-    };
+    /* بأسعار اليوم: المبلغ المحدد في جدول الفترة السارية إن وُجد، وإلا النسبة */
+    const committee = getAgencyCommittee({ type: type, status: "active", basePrice: pricing.agency }, todayDay());
 
     const tile = function (label, value, cls) {
         return '<div class="' + (cls || "") + '"><span>' + label + "</span><strong>" + value + "</strong></div>";
@@ -10381,15 +10534,29 @@ function renderPriceSchedule() {
             '<div class="schedule-head"><strong><i class="ti ti-calendar-event" aria-hidden="true"></i> من ' + escapeHTML(monthLabel(entry.from)) + "</strong>" +
             (scheduleStart(entry.from) === active ? '<span class="badge badge-success">السارية الآن</span>' : scheduleStart(entry.from) > today ? '<span class="badge badge-warning">قادمة</span>' : "") +
             '<button type="button" class="act-btn act-danger" data-remove-schedule="' + entry.from + '" aria-label="حذف جدول ' + entry.from + '"><i class="ti ti-trash" aria-hidden="true"></i> حذف</button></div>' +
-            '<div class="table-wrapper"><table class="schedule-table"><thead><tr><th>نوع الوكالة</th><th class="num">سعر الوكالة</th><th class="num">المطلوب من المندوب</th></tr></thead><tbody>' +
+            '<div class="table-wrapper"><table class="schedule-table"><thead><tr><th>نوع الوكالة</th><th class="num">سعر الوكالة</th><th class="num">المطلوب من المندوب</th>' +
+            '<th class="num">حصة الإسعاف</th><th class="num">حصة التعاون</th></tr></thead><tbody>' +
             Object.keys(AGENCY_NAMES).map(function (type) {
                 const p = (entry.prices && entry.prices[type]) || prices[type] || { agency: 0, representative: 0 };
                 return "<tr><td>" + agencyTypeDot(type) + AGENCY_NAMES[type] + "</td>" +
                     '<td class="num"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" data-sch-type="' + type + '" data-sch-field="agency" value="' + number(p.agency) + '" aria-label="سعر ' + AGENCY_NAMES[type] + '"></td>' +
-                    '<td class="num"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" data-sch-type="' + type + '" data-sch-field="representative" value="' + number(p.representative) + '" aria-label="المطلوب من المندوب ' + AGENCY_NAMES[type] + '"></td></tr>';
+                    '<td class="num"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" data-sch-type="' + type + '" data-sch-field="representative" value="' + number(p.representative) + '" aria-label="المطلوب من المندوب ' + AGENCY_NAMES[type] + '"></td>' +
+                    scheduleShareCell(type, p, "ambulance", "حصة الإسعاف") +
+                    scheduleShareCell(type, p, "cooperation", "حصة التعاون") + "</tr>";
             }).join("") +
             "</tbody></table></div></div>";
     }).join("");
+}
+
+/*
+    خانة حصة لجنة في جدول الفترة: فارغة = تلقائي (سعر الوكالة × النسبة، يظهر باهتاً)،
+    أو مبلغ محدد لهذه الفترة.
+*/
+function scheduleShareCell(type, p, field, label) {
+    const explicit = explicitShare(p, field);
+    const auto = committeeAmount(p.agency, (committeeRates[type] || {})[field]);
+    return '<td class="num"><input type="text" inputmode="numeric" data-num="int" autocomplete="off" class="share-input" data-sch-type="' + type + '" data-sch-field="' + field + '"' +
+        ' value="' + (explicit === null ? "" : explicit) + '" placeholder="' + auto + ' تلقائي" aria-label="' + label + " " + AGENCY_NAMES[type] + ' (فارغ = تلقائي)"></td>';
 }
 
 /* قيم الحقول تُنقل إلى نسخة العمل عند الكتابة */
@@ -10401,7 +10568,20 @@ document.getElementById("priceScheduleList")?.addEventListener("input", function
     if (!entry) return;
     entry.prices = entry.prices || {};
     entry.prices[input.dataset.schType] = entry.prices[input.dataset.schType] || {};
-    entry.prices[input.dataset.schType][input.dataset.schField] = number(input.value);
+    const row = entry.prices[input.dataset.schType];
+    const field = input.dataset.schField;
+    /* حصة فارغة = تلقائي (يُحذف المبلغ المحدد) */
+    if ((field === "ambulance" || field === "cooperation") && !String(input.value).trim()) {
+        delete row[field];
+    } else {
+        row[field] = number(input.value);
+    }
+    /* تغيّر سعر الوكالة: تتحدث الحصة التلقائية المعروضة */
+    if (field === "agency") {
+        input.closest("tr").querySelectorAll(".share-input").forEach(function (cell) {
+            cell.placeholder = committeeAmount(row.agency, (committeeRates[input.dataset.schType] || {})[cell.dataset.schField]) + " تلقائي";
+        });
+    }
 });
 
 document.getElementById("priceScheduleList")?.addEventListener("click", function (event) {
@@ -10443,6 +10623,10 @@ document.getElementById("addScheduleBtn")?.addEventListener("click", function ()
     Object.keys(AGENCY_NAMES).forEach(function (type) {
         const p = (base && base[type]) || prices[type] || { agency: 0, representative: 0 };
         copy[type] = { agency: number(p.agency), representative: number(p.representative) };
+        ["ambulance", "cooperation"].forEach(function (field) {
+            const v = explicitShare(p, field);
+            if (v !== null) copy[type][field] = v;
+        });
     });
 
     scheduleWorkingCopy().push({ id: generateId(), from: from, prices: copy, createdAt: new Date().toISOString() });
