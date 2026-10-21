@@ -12257,6 +12257,9 @@ tbody.innerHTML =
 
                                     ? "الحساب الأساسي"
 
+                                    : user.id === currentUser.id
+                                    ? "حسابك الحالي"
+
                                     : `
 
                                         <button
@@ -12455,6 +12458,18 @@ if (
 
 }
 
+/* لا يحذف المستخدم نفسه وهو داخل (يُقفل خارج البرنامج فوراً) */
+if (user.id === currentUser.id || user.username === currentUser.username) {
+    notify("لا يمكنك حذف حسابك وأنت داخل به. ادخل بحساب مدير آخر لحذفه.", "error");
+    return;
+}
+
+/* يبقى مدير واحد على الأقل، وإلا لا أحد يستطيع إدارة الأسعار والمستخدمين */
+if (user.role === "manager" && users.filter(function (u) { return u.role === "manager"; }).length <= 1) {
+    notify("لا يمكن حذف آخر مدير في البرنامج. أضف مديراً آخر أولاً.", "error");
+    return;
+}
+
 
 appConfirm({
     title: "حذف المستخدم",
@@ -12496,6 +12511,65 @@ appConfirm({
 
 window.deleteUser =
 deleteUser;
+
+/* =========================================================
+حماية الجلسات: الجلسة المحفوظة تُطابَق مع قائمة المستخدمين
+- مستخدم حُذف: تُغلق جلسته فوراً.
+- صلاحية تغيّرت (أو وصلت قائمة أحدث من جهاز آخر): تُطبَّق الصلاحية الجديدة فوراً.
+يُفحص عند فتح الصفحة، وعند تغيّر المستخدمين في نافذة أخرى.
+========================================================= */
+
+function signOutWithMessage(message) {
+    currentUser = null;
+    try { localStorage.removeItem("currentUser"); } catch (e) {}
+    try { sessionStorage.removeItem("currentUser"); } catch (e) {}
+    appPage.classList.add("hidden");
+    loginPage.classList.remove("hidden");
+    loginUsername.value = "";
+    loginPassword.value = "";
+    if (loginError) loginError.textContent = message;
+}
+
+function validateSession() {
+    if (!currentUser) return;
+    const user = users.find(function (u) { return u.id === currentUser.id; }) ||
+        users.find(function (u) { return u.username === currentUser.username; });
+    if (!user) {
+        signOutWithMessage("حُذف حسابك من البرنامج، أو لم يعد موجوداً على هذا الجهاز. ادخل بحساب آخر.");
+        return;
+    }
+    if (user.role === currentUser.role && user.id === currentUser.id && user.username === currentUser.username) return;
+
+    const oldRole = currentUser.role;
+    currentUser = { id: user.id, username: user.username, role: user.role };
+    const saved = JSON.stringify(currentUser);
+    try { if (localStorage.getItem("currentUser")) localStorage.setItem("currentUser", saved); } catch (e) {}
+    try { if (sessionStorage.getItem("currentUser")) sessionStorage.setItem("currentUser", saved); } catch (e) {}
+
+    try { updateProfileCard(); } catch (e) {}
+    try { applyPermissions(); } catch (e) {}
+    /* صفحة للمدير فقط وصلاحيته لم تعد مدير: إلى الرئيسية */
+    const active = document.querySelector(".section.active-section");
+    if (user.role !== "manager" && active && active.classList.contains("manager-section")) {
+        switchSection("dashboardSection");
+    }
+    if (oldRole !== user.role) {
+        notify("<strong>تغيّرت صلاحيتك</strong><span>من «" + escapeHTML(getRoleName(oldRole)) + "» إلى «" + escapeHTML(getRoleName(user.role)) + "».</span>", "info", 7000, true);
+    }
+}
+
+/* المستخدمون تغيّروا في نافذة أخرى من البرنامج */
+window.addEventListener("storage", function (event) {
+    if (event.key !== "audit_users") return;
+    users = loadData("audit_users", users);
+    validateSession();
+    try { renderUsers(); } catch (e) {}
+});
+
+onReady(function () {
+    /* بعد استعادة الجلسة المحفوظة عند فتح الصفحة */
+    setTimeout(validateSession, 0);
+});
 
 /* =========================================================
 البحث

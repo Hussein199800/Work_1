@@ -83,7 +83,7 @@ Arabic (RTL) single-page web app for auditing records and agencies. Plain HTML/C
 - Dashboard «نشاط الفترة» (`renderActivity`): period presets (this month / last month / 3 months / year / all, by record date), 5 stat tiles with % change vs the previous equal period, a single-series column chart (pure SVG, y-axis on the right for RTL, hover/focus tooltip, table toggle). UI pref key `audit_ui_activity_period` (not data).
 - Global search (`openGlobalSearch`, Ctrl+K, sidebar/mobile button): records by number/office/rep and agencies by number (Arabic-Indic digits accepted); Enter opens the report / type view, «تعديل» opens the agency for editing.
 - Quick audit (التدقيق السريع): in the record summary report every item — transport, missing stamps, each addition — opens `showAgencyAudit(recordId, filter)` listing only the agencies that contain it (any type), with their numbers in a strip for matching against the paper register and an edit button per agency. Filters: `transport`, `missing:<pleading|ambulance|aid>`, `add:<key>`.
-- Roles: `manager`, `auditor`, `viewer`.
+- Roles: `manager`, `auditor`, `viewer`. User protection (2026-10-21): a user can't delete their own account or the last manager (`deleteUser`); `validateSession()` checks the saved `currentUser` against `users` on page open and when `audit_users` changes in another tab — a deleted user is signed out (`signOutWithMessage`), a changed role is applied at once (manager-only page → dashboard). Changing an agency's type keeps the current behaviour (the user decided: leave it as it is).
 - Persistence: `localStorage` + IndexedDB on the device (source of truth), optional Firebase sync; backup/restore via the users section. Excel export via `xlsx-js-style` (CDN).
 
 ## Conventions
