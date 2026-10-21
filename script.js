@@ -9042,8 +9042,8 @@ function updateQuickCalc() {
             tile("قيمة الطوابع الناقصة", money(stamps.missingValue * qty)) +
             tile("طوابع المرافعة المطلوبة", stamps.requiredPleading * qty) +
             tile("حصة المندوب من الانتقال", money(tShare * qty)) +
-            tile("لجنة الإسعاف (" + formatRate(rate.ambulance) + ")", money(committee.ambulance * qty)) +
-            tile("لجنة التعاون (" + formatRate(rate.cooperation) + ")", money(committee.cooperation * qty)) +
+            tile("لجنة الإسعاف (" + money(committee.ambulance) + " للوكالة)", money(committee.ambulance * qty)) +
+            tile("لجنة التعاون (" + money(committee.cooperation) + " للوكالة)", money(committee.cooperation * qty)) +
             tile("الإجمالي (السعر + الإضافات + الانتقال)", money(grand * qty)) +
             tile("المطلوب من المندوب", money(rep * qty), "calc-kpi-main") +
         "</div>" +

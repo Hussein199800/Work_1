@@ -136,6 +136,28 @@ await page.waitForTimeout(300);
 const afterDate = await ev(function () { return pendingAgencies.map(function (a) { return a.basePrice; }).join(","); });
 check("تغيير التاريخ يعيد تسعير التلقائية فقط", afterDate === "1700,1050,1900", afterDate);
 
+/* 4) كل الصفحات تُفتح، والحاسبة تحسب، والتقارير تُبنى — دون أخطاء */
+const sections = ["dashboardSection", "recordsSection", "reportsSection", "committeesSection", "calculatorSection", "guideSection", "pricesSection", "usersSection", "devlogSection", "newRecordSection"];
+for (const id of sections) {
+    await ev(function (s) { switchSection(s); }, id);
+    await page.waitForTimeout(250);
+}
+const calc = await ev(function () {
+    switchSection("calculatorSection");
+    try { updateQuickCalc(); } catch (e) { return "error: " + e.message; }
+    const box = document.getElementById("qcResult");
+    return box && box.innerText.indexOf("لجنة الإسعاف") !== -1 ? "ok" : "no-output";
+});
+check("الحاسبة تعمل", calc === "ok", calc);
+const reports = await ev(function () {
+    try {
+        records.forEach(function (r) { buildFinalRecordReport(r, "summary"); buildFinalRecordReport(r, "detailed"); });
+        buildCommitteesDoc(false);
+        return "ok";
+    } catch (e) { return "error: " + e.message; }
+});
+check("التقارير (المختصر والمفصل واللجان) تُبنى", reports === "ok", reports);
+
 check("لا أخطاء JavaScript", errors.length === 0, errors.join(" | "));
 
 await browser.close();
