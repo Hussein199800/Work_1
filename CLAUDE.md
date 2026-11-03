@@ -79,7 +79,7 @@ Arabic (RTL) single-page web app for auditing records and agencies. Plain HTML/C
 ## Design system («الجواهر», 2026-10-16)
 - The user asked to move away from white/blue: emerald (actions, `--accent`), royal plum (structure), burgundy (`--danger`, money gradient), muted gold (totals). Tokens at the top of `style.css` are semantic (`--heading`, `--text*`, `--surface*`, `--field`, `--accent*`, `--panel`, `--grad-money`…); legacy `--seal-*`/`--ink-*` are aliases. Use semantic tokens in new CSS.
 - Light + dark themes: `[data-theme="dark"]` on `<html>`, set before render by an inline script in `index.html`, toggled by `toggleTheme()`, persisted in `audit_ui_theme` (UI pref). `.doc` / `#printRoot` re-declare light tokens so reports stay paper-white in dark mode and print.
-- Fonts: IBM Plex Sans Arabic for everything; Noto Kufi Arabic only for page titles and the brand.
+- Fonts: IBM Plex Sans Arabic for everything, titles and brand included (2026-11-03: the user liked the font of their portfolio site «أعمالي» (Hussein199800/Website), so Noto Kufi was dropped; `--font-display` = Plex). Base text 16px. Radii 10/14/20/24 and a soft `--sh-1`, like the portfolio site; the «الجواهر» colors stay.
 - Three breakpoints only: 1280 / 1024 / 640 px.
 - Agency type colors (`AGENCY_TYPE_COLORS`) and the colored row stripes are an established convention the user relies on — keep them.
 - Agency type/status are picked with colored chips (`buildChoiceChips`); the original `<select>` stays (visually hidden) as the value source — set `.value` then call `syncChoiceChips()` (already done inside `syncTransportField()`).
