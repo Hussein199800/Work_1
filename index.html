@@ -21,7 +21,7 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <meta name="theme-color" content="#121e33">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='17' fill='%23121e33'/%3E%3Cg fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M32 21C26.5 17 19 16.5 13 18.5V43.5C19 41.5 26.5 42 32 46Z'/%3E%3Cpath d='M32 21C37.5 17 45 16.5 51 18.5V35'/%3E%3Cpath d='M32 46C34.5 44.2 37.2 43.1 40 42.6'/%3E%3C/g%3E%3Ccircle cx='47' cy='45.5' r='10.5' fill='%234f60bf' stroke='%23121e33' stroke-width='3'/%3E%3Cpath d='M42.3 45.6L45.6 48.9L51.8 42.4' fill='none' stroke='%23fff' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
@@ -617,7 +617,7 @@
                                 </label>
 
                                 <input
-                                    type="number"
+                                    type="text" inputmode="numeric" data-num="int" autocomplete="off"
                                     id="recordNumber"
                                     required
                                 >
@@ -707,6 +707,15 @@
 
                         </div>
 
+                        <!-- ملاحظة على السجل كاملاً: تظهر في مربع بالتقرير تحت بيانات السجل -->
+                        <div class="input-group record-note-group">
+                            <label for="recordNote">
+                                <i class="ti ti-notes"></i> ملاحظة على السجل كاملاً
+                                <small class="label-note">(اختياري — تظهر في التقرير)</small>
+                            </label>
+                            <textarea id="recordNote" rows="2" placeholder="مثال: السجل ناقص التوقيع، أو سُلّم على دفعتين…"></textarea>
+                        </div>
+
                         <!-- إعادة سجل غير محفوظ من ملف (مثلاً بعد امتلاء مساحة المتصفح) -->
                         <div class="import-draft-row">
                             <button type="button" class="link-btn" id="importDraftBtn">
@@ -738,7 +747,7 @@
                                 </label>
 
                                 <input
-                                    type="number"
+                                    type="text" inputmode="numeric" data-num="int" autocomplete="off"
                                     id="agencyNumber"
                                 >
 
@@ -890,9 +899,10 @@
                                 id="similarAgencyBtn"
                                 class="secondary-btn"
                                 onclick="addSimilarAgency()"
-                                title="نفس نوع وحالة وإضافات آخر وكالة، بالرقم التالي"
+                                title="نفس نوع وحالة وإضافات آخر وكالة، بالرقم التالي (Ctrl + D)"
+                                aria-keyshortcuts="Control+D"
                             >
-                                <i class="ti ti-copy"></i> وكالة مماثلة للأخيرة
+                                <i class="ti ti-copy"></i> وكالة مماثلة للأخيرة <kbd class="kbd-hint kbd-hint-soft">Ctrl + D</kbd>
                             </button>
 
                             <button
@@ -985,7 +995,7 @@
                         </div>
 
                         <div class="item-group grp-missing" role="group" aria-label="نقص الطوابع">
-                            <h4 class="item-group-title"><i class="ti ti-receipt" aria-hidden="true"></i> نقص الطوابع</h4>
+                            <h4 class="item-group-title"><i class="ti ti-receipt" aria-hidden="true"></i> نقص الطوابع والإيصال</h4>
                             <div class="input-group item-row grp-missing" data-qi-item="missingPleading">
                                 <label for="missingPleading">نقص مرافعة</label>
                                 <div class="number-control">
@@ -1012,6 +1022,15 @@
                                     <button type="button" class="number-btn plus-btn" data-target="missingAid" aria-label="زيادة نقص معونة">+</button>
                                 </div>
                                 <kbd class="qi-key" title="Alt + 3 للزيادة، Alt + Shift + 3 للإنقاص">Alt+3</kbd>
+                            </div>
+                            <div class="input-group item-row grp-missing" data-qi-item="missingReceipt">
+                                <label for="missingReceipt">إيصال حد أدنى أتعاب</label>
+                                <div class="number-control">
+                                    <button type="button" class="number-btn minus-btn" data-target="missingReceipt" aria-label="إنقاص إيصال حد أدنى أتعاب">−</button>
+                                    <input type="text" inputmode="numeric" data-num="int" autocomplete="off" id="missingReceipt" min="0" value="0">
+                                    <button type="button" class="number-btn plus-btn" data-target="missingReceipt" aria-label="زيادة إيصال حد أدنى أتعاب">+</button>
+                                </div>
+                                <kbd class="qi-key" title="Alt + 4 للزيادة، Alt + Shift + 4 للإنقاص">Alt+4</kbd>
                             </div>
                         </div>
 
@@ -1498,7 +1517,7 @@
                             <h3>هوية «الجواهر» وأدوات الإدخال الذكية</h3>
                             <ul class="devlog-list">
                                 <li>ألوان جديدة بتدرجات الزمردي والبنفسجي والعنابي والذهبي، مع وضع فاتح ووضع داكن يُحفظ اختيارهما.</li>
-                                <li>«وكالة مماثلة»: نسخ آخر وكالة برقم جديد بضغطة واحدة، و Ctrl + S لإضافة الوكالة.</li>
+                                <li>«وكالة مماثلة»: نسخ آخر وكالة برقم جديد بضغطة واحدة أو بـ Ctrl + D، و Ctrl + S لإضافة الوكالة.</li>
                                 <li>الوكالة المنسية: إدراجها برقمها مع إزاحة أرقام ما بعدها +1، أو إضافتها كمكررة.</li>
                                 <li>تغيير نوع الوكالة من سطرها مباشرة، وعرض آخر وكالة مضافة في الشريط السفلي.</li>
                                 <li>تنبيه عند حفظ سجل برقم موجود مسبقاً.</li>
@@ -1549,6 +1568,24 @@
                                 <li>اختصارات أنواع الوكالة بحرف واحد: F عامة، G خاصة، H شرعية، و V B N للأنواع الأقل استخداماً.</li>
                                 <li>«تغيير سعر وكالات محفوظة»: سعر فترة أو مبلغ محدد لوكالات حسب التاريخ، أو من وكالة إلى وكالة في سجل معيّن، مع معاينة ونسخة احتياطية وتراجع.</li>
                                 <li>مراجعة شاملة للموقع وإصلاح أخطائه: Enter لا يحفظ السجل، تعديل الوكالة في مكانها دون أن تضيع، حماية من نافذتين مفتوحتين ومن مسودات قديمة، استعادة آمنة مع Firebase، وتوحيد أرقام التقارير.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-bolt"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">3 تشرين الثاني 2026</p>
+                            <h3>ملاحظة السجل، إيصال حد أدنى أتعاب، وموقع أخف</h3>
+                            <ul class="devlog-list">
+                                <li>ملاحظة على السجل كاملاً (لا على وكالة واحدة): تُكتب في بيانات السجل وتظهر في مربع مميز تحت بيانات السجل في التقرير والطباعة وExcel.</li>
+                                <li>«إيصال حد أدنى أتعاب» مع بنود النقص في صفحة إنشاء السجل (Alt+4): يُحمَّل على المندوب مثل نقص الطابع ولا يغيّر قيمة الوكالة، وسعره 150 ل.س قابل للتعديل في «أسعار الطوابع».</li>
+                                <li>Ctrl + D: وكالة مماثلة للأخيرة بضغطة واحدة.</li>
+                                <li>إشعار إضافة الوكالة بلون نوعها ورقمها بخط كبير، مع اهتزاز خفيف على الموبايل، وتنبيه داخله إذا قفز الرقم (مثلاً 90 ثم 92 دون 91).</li>
+                                <li>رقم السجل ورقم الوكالة أرقام فقط (لوحة الأرقام على الموبايل، والحروف لا تُقبل).</li>
+                                <li>التدقيق السريع في التقرير: كل بند بلون مجموعته بتدرّج (النقص عنابي، الإضافات ذهبي، بدل الانتقال أزرق).</li>
+                                <li>خط واحد في كل الموقع (IBM Plex Sans Arabic مثل موقع «أعمالي»)، نص أكبر قليلاً، وزوايا وظلال أنعم.</li>
+                                <li>أداء: صفحة التقارير لا تُبنى إلا عند فتحها وتعرض أول 200 وكالة مع «عرض المزيد» (كانت تتجمد مع آلاف الوكالات)، والفحص الدوري لـ Firebase لا يعيد حساب كل السجلات كل دقيقة.</li>
                             </ul>
                         </div>
                     </li>
