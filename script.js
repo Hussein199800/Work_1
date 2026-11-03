@@ -208,6 +208,10 @@ ambulance:
     300,
 
 aid:
+    150,
+
+/* إيصال حد أدنى أتعاب: يُحمَّل على المندوب مثل نقص الطابع (لا يغيّر قيمة الوكالة) */
+receipt:
     150
 
 };
@@ -530,7 +534,11 @@ window.addEventListener("storage", function (event) {
     } catch (e) {}
 });
 
+/* يزداد مع كل حفظ للسجلات: بصمات المزامنة المحفوظة مؤقتاً (fbLocalHashCache) تصلح ما دام لم يتغير */
+let recordsWriteSeq = 0;
+
 function persistRecordsNow() {
+    recordsWriteSeq++;
     if (recordsStaleTab) {
         return Promise.reject(new Error("السجلات تغيّرت في نافذة أخرى من البرنامج. أعد تحميل هذه الصفحة قبل الحفظ."));
     }
@@ -1704,7 +1712,9 @@ if (
     id === "reportsSection"
 ) {
 
-    renderReports();
+    /* فتح الصفحة من جديد: أول 200 وكالة في الجدول */
+    reportRowsLimit = REPORT_ROWS_STEP;
+    renderReports(true);
 
 }
 
@@ -1827,6 +1837,8 @@ document.addEventListener("keydown", function (event) {
 
     if (
         !input || !input.matches || !input.matches('input[data-num="int"]') ||
+        /* رقم السجل ورقم الوكالة: لا يتغيران بالأسهم دون انتباه */
+        input.id === "recordNumber" || input.id === "agencyNumber" ||
         (event.key !== "ArrowUp" && event.key !== "ArrowDown")
     ) {
         return;
@@ -2522,6 +2534,17 @@ const missingValue =
         number(
             stampPrices.aid
         )
+    )
+
+    +
+
+    (
+        number(
+            missing.receipt
+        ) *
+        number(
+            stampPrices.receipt
+        )
     );
 
 
@@ -2634,7 +2657,8 @@ function readAgencyInputs() {
         missing: {
             pleading: number(val("missingPleading")),
             ambulance: number(val("missingAmbulance")),
-            aid: number(val("missingAid"))
+            aid: number(val("missingAid")),
+            receipt: number(val("missingReceipt"))
         }
     };
 }
@@ -2657,7 +2681,7 @@ function agencyInputsOf(agency) {
             children: number(ad.children), agents: number(ad.agents), originality: number(ad.originality),
             transport: number(ad.transport)
         },
-        missing: { pleading: number(ms.pleading), ambulance: number(ms.ambulance), aid: number(ms.aid) }
+        missing: { pleading: number(ms.pleading), ambulance: number(ms.ambulance), aid: number(ms.aid), receipt: number(ms.receipt) }
     };
 }
 
@@ -3099,6 +3123,7 @@ function addSimilarAgency() {
     set("missingPleading", number(ms.pleading));
     set("missingAmbulance", number(ms.ambulance));
     set("missingAid", number(ms.aid));
+    set("missingReceipt", number(ms.receipt));
     set("agencyNotes", "");
 
     const dup = document.getElementById("agencyDuplicate");
@@ -3142,6 +3167,37 @@ document.addEventListener("keydown", function (event) {
 
     event.preventDefault();
     document.getElementById("addAgencyBtn")?.click();
+});
+
+/*
+    Ctrl + D: «وكالة مماثلة للأخيرة» في صفحة الإنشاء (D = Duplicate، بجانب S).
+    بـ event.code حتى يعمل مع لوحة المفاتيح العربية، ويمنع إضافة المتصفح للمفضلة.
+    لا يعمل أثناء تعديل وكالة (حتى لا يضيع التعديل).
+*/
+document.addEventListener("keydown", function (event) {
+
+    const isSimilar =
+        (event.ctrlKey || event.metaKey) &&
+        !event.shiftKey && !event.altKey &&
+        (event.code === "KeyD" || event.key === "d" || event.key === "D" || event.key === "ي");
+
+    if (
+        !isSimilar ||
+        event.repeat ||
+        document.querySelector("dialog[open]") ||
+        !document.getElementById("newRecordSection")?.classList.contains("active-section")
+    ) {
+        return;
+    }
+
+    event.preventDefault();
+
+    if (editingAgencyIndex() !== -1) {
+        notify("أنهِ تعديل الوكالة أولاً، ثم استخدم «وكالة مماثلة».", "warning");
+        return;
+    }
+
+    addSimilarAgency();
 });
 
 /* إذا صفّر المستخدم البدل يدوياً لا نعيده تلقائياً حتى الوكالة التالية */
@@ -3330,6 +3386,9 @@ addAgencyBtn.addEventListener(
 
         const commit = function () {
 
+            /* قبل الإضافة: هل قفز الرقم عن أكبر رقم مضاف؟ (90 ثم 92 = نسيت 91) */
+            const gap = agencyNumberGap(agency.number);
+
             pendingAgencies.push(
                 agency
             );
@@ -3340,7 +3399,7 @@ addAgencyBtn.addEventListener(
 
             clearAgencyForm();
 
-            announceAgencyAdded(agency);
+            announceAgencyAdded(agency, gap);
         };
 
         /*
@@ -3424,20 +3483,60 @@ addAgencyBtn.addEventListener(
     }
 );
 
-/* رسالة واضحة بعد كل إضافة، مع وميض عدّاد الوكالات */
-function announceAgencyAdded(agency) {
+/*
+    رقم وكالة جديد يقفز عن أكبر رقم مضاف في السجل (مثلاً 90 ثم 92):
+    يرجع الأرقام الناقصة بينهما (حتى 5 أرقام للعرض) أو null.
+    تنبيه فقط — لا يمنع الإضافة.
+*/
+function agencyNumberGap(numberText) {
+    const n = parseInt(numberText, 10);
+    if (!Number.isFinite(n) || String(n) !== String(numberText).trim()) return null;
+    let max = -Infinity;
+    pendingAgencies.forEach(function (item) {
+        const v = parseInt(item.number, 10);
+        if (Number.isFinite(v) && v > max) max = v;
+    });
+    if (!Number.isFinite(max) || n <= max + 1) return null;
+    const missing = [];
+    for (let v = max + 1; v < n && missing.length < 5; v++) missing.push(v);
+    return { last: max, count: n - max - 1, missing: missing };
+}
+
+/*
+    رسالة واضحة بعد كل إضافة: بلون نوع الوكالة (تدرّج) ورقمها بخط كبير،
+    مع اهتزاز خفيف على الموبايل ووميض عدّاد الوكالات.
+    gap: أرقام ناقصة قبلها (agencyNumberGap) فيظهر تنبيه داخل الرسالة نفسها.
+*/
+function announceAgencyAdded(agency, gap) {
 
     focusNextAgencyNumber();
 
-    notify(
-        "<strong>تمت إضافة الوكالة رقم " + escapeHTML(agency.number) + "</strong>" +
-        "<span>" + escapeHTML(AGENCY_NAMES[agency.type] || agency.typeName || "") +
+    const typeName = AGENCY_NAMES[agency.type] || agency.typeName || "";
+    const gapHTML = gap
+        ? '<span class="toast-gap"><i class="ti ti-alert-triangle" aria-hidden="true"></i> انتبه: آخر رقم كان ' + gap.last +
+            " — " + (gap.count === 1 ? "الرقم " + gap.missing[0] + " ناقص" : "ناقص " + gap.count + " أرقام (" + gap.missing.join("، ") + (gap.count > gap.missing.length ? "…" : "") + ")") + "</span>"
+        : "";
+
+    showToast(
+        '<div class="toast-agency-head"><b class="toast-agency-no">' + escapeHTML(agency.number) + "</b>" +
+        "<strong>تمت إضافة الوكالة</strong></div>" +
+        "<span>" + escapeHTML(typeName) +
         " — " + getAgencyStatusName(agency.status) +
-        " — عدد الوكالات الآن: " + pendingAgencies.length + "</span>",
-        "success",
-        3500,
-        true
+        " — عدد الوكالات الآن: " + pendingAgencies.length + "</span>" + gapHTML,
+        gap ? 6000 : 3500,
+        "agency"
     );
+
+    const toast = document.getElementById("appToast");
+    if (toast) {
+        toast.style.setProperty("--agency-color", AGENCY_TYPE_COLORS[agency.type] || "#137a64");
+        toast.classList.toggle("has-gap", !!gap);
+    }
+
+    /* اهتزاز خفيف على الموبايل (أطول عند وجود رقم ناقص) */
+    try {
+        if (navigator.vibrate) navigator.vibrate(gap ? [60, 80, 60] : 35);
+    } catch (e) {}
 
     const counter = document.getElementById("agencyCounter");
 
@@ -3461,6 +3560,7 @@ const QUICK_ITEMS = [
     { id: "missingPleading", group: "missing", label: "نقص مرافعة", key: "1", code: "Digit1" },
     { id: "missingAmbulance", group: "missing", label: "نقص إسعاف", key: "2", code: "Digit2" },
     { id: "missingAid", group: "missing", label: "نقص معونة", key: "3", code: "Digit3" },
+    { id: "missingReceipt", group: "missing", label: "إيصال حد أدنى", key: "4", code: "Digit4" },
     { id: "signatureCount", group: "add", label: "توقيع إضافي", key: "G", code: "KeyG" },
     { id: "saveCount", group: "add", label: "حفظ", key: "H", code: "KeyH" },
     { id: "originalityCount", group: "add", label: "أصالة", key: "A", code: "KeyA" },
@@ -3547,7 +3647,7 @@ function agencyItemPillsHTML(agency) {
     const ad = agency.additions || {};
     const ms = agency.stamps || agency.missingStamps || {};
     const values = {
-        missingPleading: ms.pleading, missingAmbulance: ms.ambulance, missingAid: ms.aid,
+        missingPleading: ms.pleading, missingAmbulance: ms.ambulance, missingAid: ms.aid, missingReceipt: ms.receipt,
         signatureCount: ad.signature, saveCount: ad.save, originalityCount: ad.originality,
         inheritanceCount: ad.inheritance, childrenCount: ad.children, agentsCount: ad.agents,
         transportCount: ad.transport
@@ -4257,6 +4357,12 @@ document.getElementById(
 
 
 document.getElementById(
+    "missingReceipt"
+).value =
+    number((agency.stamps || agency.missingStamps || {}).receipt);
+
+
+document.getElementById(
     "agencyNotes"
 ).value =
     agency.notes || "";
@@ -4442,7 +4548,8 @@ if (statusInput) {
     "transportCount",
     "missingPleading",
     "missingAmbulance",
-    "missingAid"
+    "missingAid",
+    "missingReceipt"
 ].forEach(
     function (id) {
 
@@ -4623,6 +4730,13 @@ const missing = {
         number(
             document.getElementById(
                 "missingAid"
+            )?.value
+        ),
+
+    receipt:
+        number(
+            document.getElementById(
+                "missingReceipt"
             )?.value
         )
 
@@ -4843,7 +4957,8 @@ function (id) {
 "transportCount",
 "missingPleading",
 "missingAmbulance",
-"missingAid"
+"missingAid",
+"missingReceipt"
 ]
 .forEach(
 function (id) {
@@ -5022,6 +5137,10 @@ recordForm.addEventListener(
             /* مدقق السجل: داخل البرنامج فقط، لا يظهر في التقارير */
             auditors:
                 getFormAuditors(),
+
+            /* ملاحظة على السجل كاملاً (إضافي: يُحفظ فقط إن كُتب) */
+            recordNote:
+                getFormRecordNote() || undefined,
 
             createdAt:
                 oldRecord
@@ -5238,6 +5357,8 @@ if (recordDateField) {
 
 setFormAuditors(lastAuditors());
 
+setFormRecordNote("");
+
 setAgencyPricePeriod("");
 
 renderPendingAgencies();
@@ -5272,6 +5393,24 @@ function getFormAuditors() {
     });
     return out;
 }
+
+/* ملاحظة السجل كاملاً (record.recordNote): تظهر في مربع بالتقرير المختصر والمفصل */
+function getRecordNote(record) {
+    return String((record && record.recordNote) || "").trim();
+}
+
+function getFormRecordNote() {
+    return (document.getElementById("recordNote")?.value || "").trim();
+}
+
+function setFormRecordNote(text) {
+    const el = document.getElementById("recordNote");
+    if (el) el.value = text || "";
+}
+
+document.getElementById("recordNote")?.addEventListener("input", function () {
+    if (typeof saveRecordDraft === "function") saveRecordDraft();
+});
 
 function setFormAuditors(list) {
     const names = Array.isArray(list) ? list : [];
@@ -5933,7 +6072,8 @@ function hasUnsavedRecordForm() {
     const editingId = document.getElementById("editingRecordId")?.value;
     if (!editingId) return true;
     const saved = records.find(function (r) { return r.id === editingId; });
-    return !saved || JSON.stringify(saved.agencies || []) !== JSON.stringify(pendingAgencies);
+    return !saved || JSON.stringify(saved.agencies || []) !== JSON.stringify(pendingAgencies) ||
+        getRecordNote(saved) !== getFormRecordNote();
 }
 
 /* تأكيد قبل ترك نموذج فيه تغييرات غير محفوظة */
@@ -6049,6 +6189,8 @@ if (recordDateInput) {
 }
 
 setFormAuditors(getRecordAuditors(record));
+
+setFormRecordNote(getRecordNote(record));
 
 
 pendingAgencies =
@@ -6266,6 +6408,23 @@ function formatNotesHTML(value) {
     تجميع ملاحظات الوكالات: كل سطر ملاحظة (والعبارتان السريعتان حتى لو كُتبتا في سطر واحد)
     مع أرقام الوكالات التي تحمله، بترتيب أول وكالة.
 */
+/* بنود النقص: الطوابع الثلاثة + إيصال حد أدنى أتعاب (كلها تُحمَّل على المندوب ولا تغيّر قيمة الوكالة) */
+const MISSING_KEYS = ["pleading", "ambulance", "aid", "receipt"];
+const MISSING_NAMES = { pleading: "مرافعة", ambulance: "إسعاف", aid: "معونة", receipt: "إيصال حد أدنى أتعاب" };
+
+function missingCountOf(ms) {
+    ms = ms || {};
+    return MISSING_KEYS.reduce(function (sum, k) { return sum + number(ms[k]); }, 0);
+}
+
+/* «مرافعة 2، إيصال حد أدنى أتعاب 1» */
+function missingPartsOf(ms) {
+    ms = ms || {};
+    return MISSING_KEYS.filter(function (k) { return number(ms[k]) > 0; }).map(function (k) {
+        return MISSING_NAMES[k] + " " + number(ms[k]);
+    });
+}
+
 /*
     قيمة نوع واحد من الطوابع الناقصة بأسعارها المحفوظة مع كل وكالة (لا بالسعر الحالي)،
     حتى يساوي مجموع الصفوف إجماليها (missingStampsValue المحفوظ).
@@ -6279,7 +6438,7 @@ function missingStampTypeValue(agencies, key) {
         const saved = a.appliedPrices && a.appliedPrices.stamps && a.appliedPrices.stamps[key];
         if (saved !== undefined && saved !== null) return sum + count * number(saved);
         /* وكالة قديمة بلا أسعار محفوظة وفيها نوع واحد: قيمتها المحفوظة هي قيمة هذا النوع */
-        const types = ["pleading", "ambulance", "aid"].filter(function (k) { return number(ms[k]) > 0; });
+        const types = MISSING_KEYS.filter(function (k) { return number(ms[k]) > 0; });
         if (types.length === 1 && number(a.missingStampsValue) > 0) return sum + number(a.missingStampsValue);
         return sum + count * number(stampPrices[key]);
     }, 0);
@@ -6330,7 +6489,7 @@ function getRecordFinalStats(record) {
         byType[type] = { count: 0, total: 0 };
     });
 
-    const missing = { pleading: 0, ambulance: 0, aid: 0 };
+    const missing = { pleading: 0, ambulance: 0, aid: 0, receipt: 0 };
     let missingValue = 0;
     let additionsTotal = 0;
     let additionsCount = 0;
@@ -6347,6 +6506,7 @@ function getRecordFinalStats(record) {
         missing.pleading += number(ms.pleading);
         missing.ambulance += number(ms.ambulance);
         missing.aid += number(ms.aid);
+        missing.receipt += number(ms.receipt);
         missingValue += number(agency.missingStampsValue);
         additionsTotal += number(agency.additionsTotal);
         representativeTotal += number(agency.representativeAmount);
@@ -6599,7 +6759,7 @@ function buildFinalRecordReport(record, mode) {
 
     const stats = getRecordFinalStats(record);
     const detailed = mode === "detailed";
-    const missingTotalCount = stats.missing.pleading + stats.missing.ambulance + stats.missing.aid;
+    const missingTotalCount = missingCountOf(stats.missing);
     const baseTotal = Object.keys(stats.byType).reduce(function (s, t) { return s + stats.byType[t].total; }, 0);
 
     const createdAt = formatDay(getRecordDay(record));
@@ -6630,6 +6790,12 @@ function buildFinalRecordReport(record, mode) {
             (record.representativeType === "external" ? ' <small class="rep-type">خارجي</small>' : "") + "</td>" +
         "<td><span>تاريخ السجل</span><strong>" + createdAt + "</strong></td>" +
         "</tr></table>";
+
+    /* ملاحظة السجل كاملاً: مربع مميز تحت بيانات السجل */
+    if (getRecordNote(record)) {
+        html += '<div class="doc-record-note"><span><i class="ti ti-notes" aria-hidden="true"></i> ملاحظة على السجل</span>' +
+            "<p>" + formatNotesHTML(getRecordNote(record)) + "</p></div>";
+    }
 
     html += '<div class="doc-summary-row">' +
         '<div class="doc-due"><span>المبلغ المستحق على المندوب</span><strong>' + money(stats.representativeTotal) + "</strong>" +
@@ -6722,6 +6888,7 @@ function buildFinalRecordReport(record, mode) {
             if (number(ms.pleading)) stampParts.push("مرافعة " + number(ms.pleading));
             if (number(ms.ambulance)) stampParts.push("إسعاف " + number(ms.ambulance));
             if (number(ms.aid)) stampParts.push("معونة " + number(ms.aid));
+            if (number(ms.receipt)) stampParts.push("إيصال حد أدنى " + number(ms.receipt));
 
             html += "<tr" + agencyRowAttrs(agency, isCancelled ? "row-cancelled" : "") + ">" +
                 "<td><strong>" + escapeHTML(agency.number) + "</strong>" + (agency.duplicate ? ' <span class="badge badge-warning">مكررة</span>' : "") + agencyMarksHTML(agency) + "</td>" +
@@ -6754,8 +6921,8 @@ function buildFinalRecordReport(record, mode) {
 
         html += '<section class="doc-section">' + secTitle("الطوابع الناقصة") +
             '<table class="doc-table"><thead><tr><th>الطابع</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
-            ["pleading", "ambulance", "aid"].map(function (k) {
-                const names = { pleading: "مرافعة", ambulance: "إسعاف", aid: "معونة" };
+            MISSING_KEYS.map(function (k) {
+                const names = MISSING_NAMES;
                 return "<tr" + auditRowAttrs(record, "missing:" + k, mode, stats.missing[k]) + "><td>" + names[k] +
                     (stats.missing[k] ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
                     '</td><td class="num">' + stats.missing[k] + '</td><td class="num">' + money(missingStampTypeValue(stats.agencies, k)) + "</td></tr>";
@@ -6857,6 +7024,7 @@ function buildTypeAgenciesDoc(record, type, backMode, forPrint) {
         if (number(ms.pleading)) stampParts.push("مرافعة " + number(ms.pleading));
         if (number(ms.ambulance)) stampParts.push("إسعاف " + number(ms.ambulance));
         if (number(ms.aid)) stampParts.push("معونة " + number(ms.aid));
+        if (number(ms.receipt)) stampParts.push("إيصال حد أدنى " + number(ms.receipt));
 
         const additionsList = Object.keys(ADDITION_NAMES)
             .filter(function (key) { return key !== "transport" && number(a.additions && a.additions[key]) > 0; })
@@ -6954,7 +7122,8 @@ filter: "transport" | "missing:pleading|ambulance|aid" | "add:<مفتاح الإ
 const AUDIT_STAMP_NAMES = {
     pleading: "نقص مرافعة",
     ambulance: "نقص إسعاف",
-    aid: "نقص معونة"
+    aid: "نقص معونة",
+    receipt: "إيصال حد أدنى أتعاب"
 };
 
 function auditFilterInfo(filter) {
@@ -7036,7 +7205,9 @@ function quickAuditHTML(record, mode) {
         const list = auditAgencies(record, filter);
         if (!list.length) return "";
         const total = list.reduce(function (s, item) { return s + item.count; }, 0);
-        return '<button type="button" class="audit-chip" onclick="showAgencyAudit(\'' + record.id + "', '" + filter + "', '" + mode + '\')">' +
+        /* كل بند بلون مجموعته: النقص عنابي، الإضافات ذهبي، البدل أزرق */
+        const grp = filter === "transport" ? "grp-transport" : filter.indexOf("missing:") === 0 ? "grp-missing" : "grp-add";
+        return '<button type="button" class="audit-chip ' + grp + '" onclick="showAgencyAudit(\'' + record.id + "', '" + filter + "', '" + mode + '\')">' +
             '<i class="ti ' + info.icon + '" aria-hidden="true"></i>' + info.label +
             "<b>" + total + "</b><small>" + list.length + " وكالة</small></button>";
     }).join("");
@@ -7105,6 +7276,7 @@ function buildAgencyAuditDoc(record, filter, backMode, forPrint) {
             if (number(ms.pleading)) stampParts.push("مرافعة " + number(ms.pleading));
             if (number(ms.ambulance)) stampParts.push("إسعاف " + number(ms.ambulance));
             if (number(ms.aid)) stampParts.push("معونة " + number(ms.aid));
+            if (number(ms.receipt)) stampParts.push("إيصال حد أدنى " + number(ms.receipt));
 
             const additionsText = agencyAdditionsToText(a, false);
 
@@ -7224,7 +7396,8 @@ const TOAST_ICONS = {
     success: "ti-circle-check",
     error: "ti-alert-circle",
     warning: "ti-alert-triangle",
-    info: "ti-info-circle"
+    info: "ti-info-circle",
+    agency: "ti-circle-check"
 };
 
 /*
@@ -7251,6 +7424,7 @@ function showToast(html, ms, variant) {
     variant = variant || "info";
 
     toast.className = "app-toast no-print toast-" + variant;
+    toast.style.removeProperty("--agency-color");
     toast.setAttribute("role", variant === "error" ? "alert" : "status");
     toast.innerHTML =
         '<i class="ti ' + (TOAST_ICONS[variant] || TOAST_ICONS.info) + ' toast-icon" aria-hidden="true"></i>' +
@@ -7561,7 +7735,7 @@ function buildGeneralReportDoc() {
 
     const pseudo = getRecordFinalStats({ agencies: all });
     const baseTotal = Object.keys(pseudo.byType).reduce(function (s, t) { return s + pseudo.byType[t].total; }, 0);
-    const missingTotalCount = pseudo.missing.pleading + pseudo.missing.ambulance + pseudo.missing.aid;
+    const missingTotalCount = missingCountOf(pseudo.missing);
 
     let sec = 0;
     const secTitle = function (text) {
@@ -7607,6 +7781,7 @@ function buildGeneralReportDoc() {
         "<tr><td>مرافعة</td><td class=\"num\">" + pseudo.missing.pleading + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "pleading")) + "</td></tr>" +
         "<tr><td>إسعاف</td><td class=\"num\">" + pseudo.missing.ambulance + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "ambulance")) + "</td></tr>" +
         "<tr><td>معونة</td><td class=\"num\">" + pseudo.missing.aid + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "aid")) + "</td></tr>" +
+        (pseudo.missing.receipt ? "<tr><td>إيصال حد أدنى أتعاب</td><td class=\"num\">" + pseudo.missing.receipt + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "receipt")) + "</td></tr>" : "") +
         '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(pseudo.missingValue) + "</td></tr></tfoot></table></section>";
 
     html += '<section class="doc-section">' + secTitle("بدل الانتقال") + transportTableHTML(pseudo.transport) + "</section>";
@@ -8225,6 +8400,10 @@ record.agencies
 
                         <br>
 
+                        ${number((agency.stamps || agency.missingStamps || {}).receipt)
+                            ? "إيصال حد أدنى: " + number((agency.stamps || agency.missingStamps || {}).receipt) + "<br>"
+                            : ""}
+
                         القيمة:
                         ${money(
                             agency.missingStampsValue
@@ -8532,7 +8711,7 @@ function agencyHasTransport(agency) {
 
 function agencyHasMissingStamps(agency) {
     const ms = (agency && (agency.stamps || agency.missingStamps)) || {};
-    return number(ms.pleading) + number(ms.ambulance) + number(ms.aid) > 0;
+    return missingCountOf(ms) > 0;
 }
 
 function additionsCountLabel(n) {
@@ -8822,13 +9001,32 @@ window.resetReportFilters = resetReportFilters;
 window.setReportTypeFilter = setReportTypeFilter;
 
 /* جدول الوكالات المطابقة (شاشة و PDF) */
-function filteredAgenciesTableHTML(matched, forPrint) {
+/*
+    جدول الوكالات في صفحة التقارير: على الشاشة أول REPORT_ROWS_STEP صف فقط
+    (آلاف الصفوف كانت تجمّد الصفحة على الموبايل)، مع «عرض المزيد» و«عرض الكل».
+    الإجمالي يُحسب دائماً على كل الوكالات المطابقة، والطباعة/PDF تعرض الكل.
+*/
+const REPORT_ROWS_STEP = 200;
+let reportRowsLimit = REPORT_ROWS_STEP;
+let reportTableMatched = [];
+
+function showMoreReportRows(all) {
+    reportRowsLimit = all ? Infinity : reportRowsLimit + 500;
+    const box = document.querySelector("#filteredAgenciesCard .table-wrapper");
+    if (box) box.innerHTML = filteredAgenciesTableHTML(reportTableMatched, false, reportRowsLimit);
+}
+
+window.showMoreReportRows = showMoreReportRows;
+
+function filteredAgenciesTableHTML(matched, forPrint, limit) {
 
     const canEdit = !forPrint && currentUser && currentUser.role !== "viewer";
 
     if (!matched.length) {
         return '<p class="doc-empty">لا توجد وكالات مطابقة للتصفية المختارة.</p>';
     }
+
+    const shown = forPrint || !limit ? matched.length : Math.min(matched.length, limit);
 
     let sumBase = 0, sumTransport = 0, sumRep = 0, sumGrand = 0;
 
@@ -8838,19 +9036,24 @@ function filteredAgenciesTableHTML(matched, forPrint) {
         '<th class="num">المطلوب من المندوب</th><th class="num total-col">الإجمالي</th>' + (canEdit ? "<th></th>" : "") +
         "</tr></thead><tbody>";
 
-    matched.forEach(function (m) {
+    matched.forEach(function (m, rowIndex) {
         const a = m.agency;
         const cancelled = a.status === "cancelled";
         const t = getAgencyTransport(a);
+        const base = cancelled ? 0 : number(a.basePrice);
+        const rep = cancelled ? 0 : number(a.representativeAmount);
+        const grand = getAgencyGrandTotal(a);
+        sumBase += base; sumTransport += t.total; sumRep += rep; sumGrand += grand;
+
+        /* بعد الحد: يدخل في الإجمالي فقط */
+        if (rowIndex >= shown) return;
+
         const ms = a.stamps || a.missingStamps || {};
         const stampParts = [];
         if (number(ms.pleading)) stampParts.push("مرافعة " + number(ms.pleading));
         if (number(ms.ambulance)) stampParts.push("إسعاف " + number(ms.ambulance));
         if (number(ms.aid)) stampParts.push("معونة " + number(ms.aid));
-        const base = cancelled ? 0 : number(a.basePrice);
-        const rep = cancelled ? 0 : number(a.representativeAmount);
-        const grand = getAgencyGrandTotal(a);
-        sumBase += base; sumTransport += t.total; sumRep += rep; sumGrand += grand;
+        if (number(ms.receipt)) stampParts.push("إيصال حد أدنى " + number(ms.receipt));
 
         const statusClass = cancelled ? "st-cancelled" : a.status === "missing" ? "st-missing" : "st-active";
 
@@ -8875,6 +9078,12 @@ function filteredAgenciesTableHTML(matched, forPrint) {
         '<td class="num">' + money(sumBase) + '</td><td class="num">' + money(sumTransport) + "</td><td></td><td></td>" +
         '<td class="num">' + money(sumRep) + '</td><td class="num total-col">' + money(sumGrand) + "</td>" + (canEdit ? "<td></td>" : "") +
         "</tr></tfoot></table>";
+
+    if (shown < matched.length) {
+        html += '<div class="report-more no-print"><span>معروض ' + shown + " من " + matched.length + " وكالة (الإجمالي أعلاه لكل الوكالات)</span>" +
+            '<button type="button" class="secondary-btn" onclick="showMoreReportRows(false)"><i class="ti ti-chevron-down"></i> عرض 500 أخرى</button>' +
+            '<button type="button" class="secondary-btn" onclick="showMoreReportRows(true)">عرض الكل</button></div>';
+    }
 
     return html;
 }
@@ -9018,6 +9227,7 @@ function calcShellHTML() {
                     '<div class="input-group"><label>نقص مرافعة</label>' + calcNumberControl("qcMissPleading", 0) + "</div>" +
                     '<div class="input-group"><label>نقص إسعاف</label>' + calcNumberControl("qcMissAmbulance", 0) + "</div>" +
                     '<div class="input-group"><label>نقص معونة</label>' + calcNumberControl("qcMissAid", 0) + "</div>" +
+                    '<div class="input-group"><label>إيصال حد أدنى أتعاب</label>' + calcNumberControl("qcMissReceipt", 0) + "</div>" +
                 "</div>" +
                 '<div class="button-row"><button type="button" class="secondary-btn" id="qcReset"><i class="ti ti-eraser"></i> تصفير</button></div>' +
             "</div>" +
@@ -9290,7 +9500,8 @@ function updateQuickCalc() {
     const missing = {
         pleading: calcValue("qcMissPleading"),
         ambulance: calcValue("qcMissAmbulance"),
-        aid: calcValue("qcMissAid")
+        aid: calcValue("qcMissAid"),
+        receipt: calcValue("qcMissReceipt")
     };
 
     const addRes = calculateAdditions(additions, pricing);
@@ -9575,7 +9786,7 @@ function renderGuide() {
         "</tbody></table></div>" +
         '<ul class="guide-list">' +
             "<li>الإضافات المعلّمة «طابع مرافعة» في قسم الأسعار لا تضيف مبلغاً، بل تزيد عدد طوابع المرافعة المطلوبة.</li>" +
-            "<li>الطوابع الناقصة: مرافعة " + money(stampPrices.pleading) + "، إسعاف " + money(stampPrices.ambulance) + "، معونة " + money(stampPrices.aid) + ".</li>" +
+            "<li>الطوابع الناقصة: مرافعة " + money(stampPrices.pleading) + "، إسعاف " + money(stampPrices.ambulance) + "، معونة " + money(stampPrices.aid) + "، إيصال حد أدنى أتعاب " + money(stampPrices.receipt) + " (يُحمَّل على المندوب ولا يغيّر قيمة الوكالة).</li>" +
             "<li>الوكالة <b>الملغاة</b> لا يُطلب عنها شيء، و<b>المفقودة</b> تُحسب مثل الفعالة.</li>" +
         "</ul>"
     );
@@ -9624,7 +9835,7 @@ function renderGuide() {
         '<ul class="guide-list">' +
             "<li><b>عرض نوع واحد:</b> في التقرير المختصر أو المفصل اضغط على نوع الوكالة لعرض وكالاته فقط، ومنها زر «تعديل» لكل وكالة.</li>" +
             "<li><b>بعد تعديل وكالة:</b> اضغط «إضافة الوكالة» ثم «حفظ السجل» حتى يُحفظ التعديل.</li>" +
-            "<li><b>إضافة سريعة:</b> <b>Ctrl + S</b> يضيف الوكالة من أي حقل في صفحة إنشاء السجل، و«وكالة مماثلة للأخيرة» يكرر آخر وكالة (نوعها وحالتها وإضافاتها وطوابعها) بالرقم التالي. رقم ونوع آخر وكالة يظهران في الشريط السفلي.</li>" +
+            "<li><b>إضافة سريعة:</b> <b>Ctrl + S</b> يضيف الوكالة من أي حقل في صفحة إنشاء السجل، و«وكالة مماثلة للأخيرة» (أو <b>Ctrl + D</b>) يكرر آخر وكالة (نوعها وحالتها وإضافاتها وطوابعها) بالرقم التالي. إذا قفز رقم الوكالة عن آخر رقم (مثلاً 90 ثم 92) يظهر تنبيه أصفر داخل إشعار الإضافة. رقم ونوع آخر وكالة يظهران في الشريط السفلي.</li>" +
             "<li><b>وكالة منسية:</b> اكتب رقمها الصحيح (مثلاً 116) ثم «إضافة الوكالة»، واختر «إدراجها وإزاحة الأرقام»: تأخذ رقمها، وكل وكالة بعدها يزداد رقمها 1 مع بقاء بياناتها.</li>" +
             "<li><b>تغيير النوع:</b> من قائمة «النوع» في سطر الوكالة المضافة؛ تُعاد حسابها بسعر النوع الجديد ويبقى رقمها.</li>" +
             "<li><b>أسعار حسب الفترات:</b> من قسم الأسعار ← «أسعار حسب الفترات». كل جدول يبدأ من تاريخ (يوم) محدد، وكل وكالة جديدة تأخذ أسعار فترة «تاريخ السجل»، والسجلات المحفوظة لا تتغير.</li>" +
@@ -9647,7 +9858,14 @@ window.renderGuide = renderGuide;
 التقارير
 ========================================================= */
 
-function renderReports() {
+/*
+    صفحة التقارير ثقيلة مع آلاف الوكالات: لا تُبنى إلا وهي مفتوحة.
+    أي استدعاء وهي مخفية (بعد حفظ سجل أو مزامنة) يعلّمها فقط، وتُبنى عند فتحها.
+    force: من switchSection عند فتح الصفحة.
+*/
+let reportsDirty = true;
+
+function renderReports(force) {
 
 const container =
     document.getElementById(
@@ -9658,6 +9876,13 @@ const container =
 if (!container) {
     return;
 }
+
+if (force !== true && !document.getElementById("reportsSection")?.classList.contains("active-section")) {
+    reportsDirty = true;
+    return;
+}
+
+reportsDirty = false;
 
 
 /* التصفية: كل الأرقام أدناه تُحسب على الوكالات المطابقة فقط */
@@ -9676,6 +9901,8 @@ const matchedAgencies =
     getFilteredAgencies(
         reportFilter
     );
+
+reportTableMatched = matchedAgencies;
 
 const matchedRecordIds =
     new Set(
@@ -10340,6 +10567,14 @@ const stampTypes = [
 
         name:
             "معونة"
+    },
+
+    {
+        key:
+            "receipt",
+
+        name:
+            "إيصال حد أدنى أتعاب"
     }
 
 ];
@@ -10656,7 +10891,7 @@ html += `
         </h3>
 
         <div class="table-wrapper">
-            ${filteredAgenciesTableHTML(matchedAgencies, false)}
+            ${filteredAgenciesTableHTML(matchedAgencies, false, reportRowsLimit)}
         </div>
 
     </div>
@@ -11679,6 +11914,23 @@ container.innerHTML = `
             min="0"
             data-stamp-price-key="aid"
             value="${stampPrices.aid}"
+        >
+
+    </div>
+
+
+    <div class="price-row">
+
+        <label>
+            سعر إيصال حد أدنى أتعاب
+            <small>يُحمَّل على المندوب مثل نقص الطابع</small>
+        </label>
+
+        <input
+            type="text" inputmode="numeric" data-num="int" autocomplete="off"
+            min="0"
+            data-stamp-price-key="receipt"
+            value="${stampPrices.receipt}"
         >
 
     </div>
@@ -14296,6 +14548,25 @@ function fbRecordHash(record) {
     return fbHash(fbCanonical(record));
 }
 
+/*
+    بصمات السجلات المحلية للمزامنة الدورية: حسابها لآلاف الوكالات كل دقيقة كان يثقل
+    الموبايل. تُحفظ مؤقتاً (في الذاكرة فقط) وتُعاد حسابها بعد أي حفظ للسجلات
+    (recordsWriteSeq) أو استبدال مصفوفة السجلات. تعديل لم يُحفظ بعد لا يُرفع أصلاً.
+*/
+let fbLocalHashCache = { seq: -1, list: null, hashes: {} };
+
+function fbCachedLocalHash(record) {
+    if (fbLocalHashCache.seq !== recordsWriteSeq || fbLocalHashCache.list !== records) {
+        fbLocalHashCache = { seq: recordsWriteSeq, list: records, hashes: {} };
+    }
+    const id = String(record.id);
+    const hit = fbLocalHashCache.hashes[id];
+    if (hit && hit.record === record) return hit.hash;
+    const hash = fbRecordHash(record);
+    fbLocalHashCache.hashes[id] = { record: record, hash: hash };
+    return hash;
+}
+
 function fbSettingsHash(json) {
     const data = JSON.parse(json);
     const canon = {};
@@ -14467,14 +14738,12 @@ function fbSync(reason) {
         const base = fbState.base;
         const localById = {};
         records.forEach(function (r) { localById[String(r.id)] = r; });
-        const localJSON = {};
         const localHashes = {};
         const localHash = function (id) {
             const r = localById[id];
             if (!r) return null;
             if (!(id in localHashes)) {
-                localJSON[id] = JSON.stringify(r);
-                localHashes[id] = fbRecordHash(r);
+                localHashes[id] = fbCachedLocalHash(r);
             }
             return localHashes[id];
         };
@@ -14522,7 +14791,7 @@ function fbSync(reason) {
             const id = String(r.id);
             if (apply.some(function (a) { return a.id === id; })) return;
             const L = localHash(id);
-            if (base[id] !== L) toPush.push({ id: id, json: localJSON[id], hash: L, updatedAt: fbRecordUpdatedAt(r) });
+            if (base[id] !== L) toPush.push({ id: id, json: JSON.stringify(r), hash: L, updatedAt: fbRecordUpdatedAt(r) });
         });
         /* سجلات حُذفت محلياً بعد مزامنتها */
         Object.keys(base).forEach(function (id) {
@@ -15064,7 +15333,8 @@ function exportRecordToExcel(id) {
     const summary = buildStyledSummarySheet("نقابة المحامين — فرع إدلب | ملخص السجل", subtitle, [
         { label: "رقم السجل", value: String(record.recordNumber) },
         { label: "المكتب", value: record.officeName },
-        { label: "المندوب", value: record.representativeName },
+        { label: "المندوب", value: record.representativeName }
+    ].concat(getRecordNote(record) ? [{ label: "ملاحظة على السجل", value: getRecordNote(record) }] : []).concat([
         { gap: true },
         { label: "الوكالات الفعالة", value: stats.active.length - stats.missingAgenciesCount },
         { label: "الوكالات المفقودة", value: stats.missingAgenciesCount },
@@ -15074,7 +15344,7 @@ function exportRecordToExcel(id) {
         { label: "الإضافات النقدية", value: stats.additionsTotal, money: true },
         { label: "قيمة طوابع الإضافات", value: stats.stampAdditionsValue, money: true },
         { label: "إجمالي مبلغ السجل", value: stats.grandTotal, money: true },
-        { label: "عدد الطوابع الناقصة", value: stats.missing.pleading + stats.missing.ambulance + stats.missing.aid },
+        { label: "عدد الطوابع الناقصة", value: missingCountOf(stats.missing) },
         { label: "قيمة الطوابع الناقصة", value: stats.missingValue, money: true },
         { gap: true },
         { label: "عدد بدلات الانتقال", value: stats.transport.count },
@@ -15087,7 +15357,7 @@ function exportRecordToExcel(id) {
         { label: "حصة لجنة التعاون", value: stats.committees.cooperation, money: true },
         { gap: true },
         { label: "المبلغ المستحق على المندوب", value: stats.representativeTotal, money: true, due: true }
-    ]);
+    ]));
 
     /* 2) الوكالات */
     const sorted = stats.agencies.slice().sort(function (a, b) { return number(a.number) - number(b.number); });
@@ -15117,6 +15387,7 @@ function exportRecordToExcel(id) {
             agency.status === "cancelled" ? 0 : number(ms.pleading),
             agency.status === "cancelled" ? 0 : number(ms.ambulance),
             agency.status === "cancelled" ? 0 : number(ms.aid),
+            agency.status === "cancelled" ? 0 : number(ms.receipt),
             miss,
             rep,
             grand,
@@ -15127,13 +15398,13 @@ function exportRecordToExcel(id) {
     const agenciesSheet = buildStyledTableSheet({
         title: "تفاصيل وكالات السجل " + record.recordNumber,
         subtitle: subtitle,
-        headers: ["رقم الوكالة", "النوع", "الحالة", "السعر", "بدل الانتقال", "الإضافات", "قيمة الإضافات (طوابع ونقدية)", "نقص مرافعة", "نقص إسعاف", "نقص معونة", "قيمة الطوابع الناقصة", "المطلوب من المندوب", "الإجمالي (السعر + الإضافات + الانتقال)", "ملاحظات"],
+        headers: ["رقم الوكالة", "النوع", "الحالة", "السعر", "بدل الانتقال", "الإضافات", "قيمة الإضافات (طوابع ونقدية)", "نقص مرافعة", "نقص إسعاف", "نقص معونة", "إيصال حد أدنى", "قيمة الطوابع الناقصة", "المطلوب من المندوب", "الإجمالي (السعر + الإضافات + الانتقال)", "ملاحظات"],
         rows: rows,
-        moneyCols: [3, 4, 6, 10, 11, 12],
+        moneyCols: [3, 4, 6, 11, 12, 13],
         mutedRows: muted,
         totalRow: ["الإجمالي", rows.length + " وكالة", "", sBase, sTransport, "", sAdd,
-            stats.missing.pleading, stats.missing.ambulance, stats.missing.aid, sMissing, sRep, sGrand, ""],
-        widths: [14, 20, 10, 14, 14, 34, 14, 11, 11, 11, 16, 18, 22, 40]
+            stats.missing.pleading, stats.missing.ambulance, stats.missing.aid, stats.missing.receipt, sMissing, sRep, sGrand, ""],
+        widths: [14, 20, 10, 14, 14, 34, 14, 11, 11, 11, 11, 16, 18, 22, 40]
     });
 
     /* 3) حسب النوع */
@@ -15265,7 +15536,7 @@ function exportAllRecordsToExcel() {
             String(m.record.recordNumber), m.day, m.record.representativeName,
             String(a.number), AGENCY_NAMES[a.type] || a.type, getAgencyStatusName(a.status),
             base, t.total, agencyAdditionsToText(a, true), agencyAdditionsCount(a),
-            a.status === "cancelled" ? 0 : number(ms.pleading) + number(ms.ambulance) + number(ms.aid), rep, grand, a.notes || ""
+            a.status === "cancelled" ? 0 : missingCountOf(ms), rep, grand, a.notes || ""
         ];
     });
 
@@ -15322,6 +15593,7 @@ function saveRecordDraft() {
             representativeType: getFieldValue("representativeType"),
             recordDate: getFieldValue("recordDate"),
             auditors: getFormAuditors(),
+            recordNote: getFormRecordNote(),
             pendingAgencies: pendingAgencies,
             savedAt: new Date().toISOString()
         };
@@ -15418,6 +15690,7 @@ function importRecordDraftFromFile(file) {
             setValue("representativeType", data.representativeType === "external" ? "external" : "internal");
             setValue("recordDate", data.recordDate || todayDay());
             if (Array.isArray(data.auditors)) setFormAuditors(data.auditors);
+            setFormRecordNote(data.recordNote || "");
             updateRepresentativeTypeHint();
 
             pendingAgencies = list;
@@ -15532,6 +15805,7 @@ function applyRecordDraft(draft) {
     setValue("representativeType", draft.representativeType === "external" ? "external" : "internal");
     setValue("recordDate", draft.recordDate || todayDay());
     if (Array.isArray(draft.auditors)) setFormAuditors(draft.auditors);
+    setFormRecordNote(draft.recordNote || "");
     updateRepresentativeTypeHint();
 
     pendingAgencies = Array.isArray(draft.pendingAgencies)

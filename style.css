@@ -6661,3 +6661,180 @@ html.theme-switching *::after {
     font-size: var(--fs-xs);
     font-weight: 700;
 }
+
+/* ================= تدقيق سريع: كل بند بلون مجموعته =================
+   تدرّج من الأعلى إلى الأسفل بلون المجموعة (النقص عنابي، الإضافات ذهبي،
+   البدل أزرق). التقرير ورقي فاتح دائماً، فالألوان هنا ألوان الوضع النهاري. */
+
+.doc .audit-chip.grp-missing { --grp: #a02c48; }
+.doc .audit-chip.grp-add { --grp: #8a6008; }
+.doc .audit-chip.grp-transport { --grp: #2266b0; }
+
+.audit-chip.grp-missing,
+.audit-chip.grp-add,
+.audit-chip.grp-transport {
+    background: linear-gradient(180deg,
+        color-mix(in srgb, var(--grp) 24%, var(--surface)) 0%,
+        color-mix(in srgb, var(--grp) 5%, var(--surface)) 100%);
+    border-color: color-mix(in srgb, var(--grp) 45%, transparent);
+    border-inline-start: 4px solid var(--grp);
+}
+
+.audit-chip.grp-missing .ti,
+.audit-chip.grp-add .ti,
+.audit-chip.grp-transport .ti {
+    color: var(--grp);
+}
+
+.audit-chip.grp-missing b,
+.audit-chip.grp-add b,
+.audit-chip.grp-transport b {
+    background: linear-gradient(180deg, var(--grp), color-mix(in srgb, var(--grp) 72%, #000));
+    color: #ffffff;
+}
+
+.audit-chip.grp-missing:hover,
+.audit-chip.grp-add:hover,
+.audit-chip.grp-transport:hover {
+    background: linear-gradient(180deg, var(--grp) 0%, color-mix(in srgb, var(--grp) 72%, #000) 100%);
+    border-color: var(--grp);
+    color: #ffffff;
+}
+
+.audit-chip.grp-missing:hover b,
+.audit-chip.grp-add:hover b,
+.audit-chip.grp-transport:hover b {
+    background: #ffffff;
+    color: var(--grp);
+}
+
+/* ================= ملاحظة السجل كاملاً =================
+   في النموذج: حقل بعرض البطاقة. في التقرير: مربع مميز تحت بيانات السجل
+   (بنفسجي الملاحظات، يُطبع أيضاً). */
+
+.record-note-group {
+    margin-top: 14px;
+}
+
+.record-note-group textarea {
+    min-height: 56px;
+    resize: vertical;
+}
+
+.doc-record-note {
+    margin: -6px 0 18px;
+    padding: 10px 14px;
+    border: 1px solid #c9b3e6;
+    border-inline-start: 5px solid #6b3fa0;
+    border-radius: var(--r-sm);
+    background: linear-gradient(180deg, #f1e9fb 0%, #fbf8ff 100%);
+    break-inside: avoid;
+}
+
+.doc-record-note span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    color: #6b3fa0;
+    margin-bottom: 4px;
+}
+
+.doc-record-note p {
+    margin: 0;
+    color: var(--heading);
+    font-size: var(--fs-md);
+    font-weight: 600;
+    line-height: 1.7;
+}
+
+@media print {
+    .doc-record-note {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+
+/* ================= إشعار إضافة وكالة =================
+   بلون نوع الوكالة (AGENCY_TYPE_COLORS) بتدرّج من الأعلى إلى الأسفل،
+   ورقم الوكالة بخط كبير. تنبيه الرقم الناقص سطر كهرماني داخله. */
+
+.app-toast.toast-agency {
+    --agency-color: #137a64;
+    background: linear-gradient(180deg,
+        var(--agency-color) 0%,
+        color-mix(in srgb, var(--agency-color) 62%, #120c1c) 100%);
+    border: 1px solid color-mix(in srgb, var(--agency-color) 55%, #ffffff);
+    box-shadow: 0 18px 44px -12px color-mix(in srgb, var(--agency-color) 70%, transparent);
+    color: #ffffff;
+}
+
+.toast-agency .toast-icon,
+.toast-agency strong {
+    color: #ffffff;
+}
+
+.toast-agency span {
+    color: rgba(255, 255, 255, 0.88);
+}
+
+.toast-agency-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.toast-agency-no {
+    display: inline-grid;
+    place-items: center;
+    min-width: 46px;
+    height: 40px;
+    padding: 0 10px;
+    border-radius: var(--r-sm);
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--agency-color);
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.app-toast .toast-gap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-radius: var(--r-sm);
+    background: #f7c948;
+    color: #3d2a00;
+    font-weight: 700;
+}
+
+.btn-key {
+    margin-inline-start: 6px;
+    padding: 1px 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text-2);
+    font: 600 var(--fs-xs) / 1.4 inherit;
+    font-family: inherit;
+}
+
+@media (max-width: 640px) {
+    .btn-key {
+        display: none;
+    }
+}
+
+/* جدول الوكالات في التقارير: معروض جزء منها مع «عرض المزيد» */
+.report-more {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 4px 4px;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+}

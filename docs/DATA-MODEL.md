@@ -37,6 +37,7 @@
   recordDate: "YYYY-MM-DD",          // قديماً قد يغيب → getRecordDay() يرجع إلى createdAt
   agencies: [ /* وكالات */ ],
   auditors: ["اسم", "اسم"],          // اختياري، داخل البرنامج فقط، لا يظهر في التقارير
+  recordNote: "نص",                  // اختياري (3/11/2026): ملاحظة على السجل كاملاً — مربع في التقرير وExcel؛ يُحفظ فقط إن كُتب
   createdAt, updatedAt               // ISO
 }
 ```
@@ -51,7 +52,9 @@
   representativeAmount,    // المطلوب من المندوب = حصة الفرع + الإضافات النقدية + الطوابع الناقصة (+ فروق البدل)
   additions: {save, signature, inheritance, children, agents, originality, transport},
   additionValues, additionsTotal, pleadingAdditions,
-  stamps: {pleading, ambulance, aid}, missingStampsValue, pleadingRequired,
+  stamps: {pleading, ambulance, aid, receipt}, missingStampsValue, pleadingRequired,
+                           // receipt (3/11/2026، اختياري): عدد «إيصال حد أدنى أتعاب» — يُحمَّل على المندوب مثل نقص الطابع
+                           // بسعر stampPrices.receipt (افتراضي 150) ولا يغيّر قيمة الوكالة؛ غيابه = 0
   notes, transportInAdditions, transportSettings,
   appliedPrices: { agency, representative, priceMonth, additions, transport, stamps },  // الأسعار وقت الحفظ
   pricePeriod,             // اختياري (20/10/2026): "" أو غائب = حسب تاريخ السجل؛ "YYYY-MM-DD" = جدول فترة بعينه؛ "base" = الأسعار الأساسية
