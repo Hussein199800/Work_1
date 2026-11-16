@@ -302,7 +302,8 @@ localStorage.setItem(
 if ([
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_records", "audit_price_schedule",
-    "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved"
+    "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
+    "audit_fee_destinations"
 ].indexOf(key) !== -1) {
     try { markDataChanged(); } catch (e) {}
     /* قبل تحميل قسم Firebase يرمي (منطقة TDZ) ويُتجاهل: حفظ الإعدادات عند فتح الصفحة ليس تعديلاً */
@@ -350,6 +351,26 @@ loadData(
 "audit_stamp_prices",
 DEFAULT_STAMP_PRICES
 );
+
+/*
+    جهة رسوم كل بند نقص (16/11/2026): «central» النقابة المركزية أو «branch» الفرع.
+    تُستخدم في «بيان استدراك النقص» وتُعدَّل من صفحة الأسعار (أسعار الطوابع).
+    مفتاح جديد إضافي؛ القيم الناقصة تُكمَل من الافتراضي وقت القراءة.
+*/
+const FEE_DESTINATIONS_KEY = "audit_fee_destinations";
+const DEFAULT_FEE_DESTINATIONS = { pleading: "central", ambulance: "central", aid: "central", receipt: "branch" };
+const FEE_DESTINATION_NAMES = { central: "النقابة المركزية", branch: "الفرع" };
+
+let feeDestinations = (function () {
+    const saved = loadData(FEE_DESTINATIONS_KEY, null);
+    const out = Object.assign({}, DEFAULT_FEE_DESTINATIONS);
+    if (saved && typeof saved === "object") {
+        Object.keys(out).forEach(function (k) {
+            if (saved[k] === "central" || saved[k] === "branch") out[k] = saved[k];
+        });
+    }
+    return out;
+})();
 
 /* =========================================================
 مكان حفظ السجلات
@@ -3529,7 +3550,7 @@ function announceAgencyAdded(agency, gap) {
 
     const toast = document.getElementById("appToast");
     if (toast) {
-        toast.style.setProperty("--agency-color", AGENCY_TYPE_COLORS[agency.type] || "#137a64");
+        toast.style.setProperty("--agency-color", AGENCY_TYPE_COLORS[agency.type] || "#a8582e");
         toast.classList.toggle("has-gap", !!gap);
     }
 
@@ -5101,7 +5122,12 @@ recordForm.addEventListener(
             );
 
 
-        const record = {
+        /*
+            تعديل سجل: نبدأ من نسخته المحفوظة حتى لا تضيع حقوله التي ليست في
+            النموذج (إيصالات بيان الاستدراك record.recovery، وأي حقل إضافي لاحق)،
+            ثم تُكتب فوقها حقول النموذج.
+        */
+        const record = Object.assign({}, oldRecord ? JSON.parse(JSON.stringify(oldRecord)) : {}, {
 
             id:
                 editingId ||
@@ -5150,7 +5176,7 @@ recordForm.addEventListener(
             updatedAt:
                 new Date().toISOString()
 
-        };
+        });
 
 
         /*
@@ -5888,6 +5914,31 @@ function applyThemeChrome() {
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#16121f" : "#efebe3");
 }
 
+/* حجم خط الموقع (16/11/2026): --ui-scale على <html>، تفضيل لكل جهاز. التقارير لها حجمها الخاص. */
+const UI_FONT_SCALE_KEY = "audit_ui_font_scale";
+
+function currentUiFontScale() {
+    const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ui-scale"));
+    return Number.isFinite(v) ? v : 1;
+}
+
+function changeUiFontScale(step) {
+    let next = step === 0 ? 1 : Math.round((currentUiFontScale() + step * 0.05) * 100) / 100;
+    next = Math.min(1.3, Math.max(0.85, next));
+    if (next === 1) document.documentElement.style.removeProperty("--ui-scale");
+    else document.documentElement.style.setProperty("--ui-scale", String(next));
+    try { localStorage.setItem(UI_FONT_SCALE_KEY, String(next)); } catch (e) {}
+    syncUiFontScaleLabel();
+}
+
+function syncUiFontScaleLabel() {
+    const label = document.getElementById("uiFontScaleValue");
+    if (label) label.textContent = Math.round(currentUiFontScale() * 100) + "%";
+}
+
+window.changeUiFontScale = changeUiFontScale;
+onReady(syncUiFontScaleLabel);
+
 function toggleTheme() {
     const next = currentTheme() === "dark" ? "light" : "dark";
     const root = document.documentElement;
@@ -6019,8 +6070,13 @@ function getRecordBaseTotal(
 record
 ) {
 
+/* مثل التقارير: الوكالة الملغاة لا تدخل في الإجمالي */
 return (record.agencies || []).reduce(
     function (sum, agency) {
+
+        if (!agency || agency.status === "cancelled") {
+            return sum;
+        }
 
         return (
             sum +
@@ -6043,8 +6099,13 @@ function getRecordRepresentativeTotal(
 record
 ) {
 
+/* مثل التقارير: الوكالة الملغاة لا تدخل في الإجمالي */
 return (record.agencies || []).reduce(
     function (sum, agency) {
+
+        if (!agency || agency.status === "cancelled") {
+            return sum;
+        }
 
         return (
             sum +
@@ -6753,7 +6814,214 @@ function docSignatures() {
         "</footer>";
 }
 
-function buildFinalRecordReport(record, mode) {
+/* =========================================================
+تخصيص التقرير: حجم الخط، وإدراج «بيان استدراك النقص» (16/11/2026)
+تفضيل واجهة لكل جهاز (audit_ui_report)، لا بيانات.
+========================================================= */
+
+const REPORT_PREFS_KEY = "audit_ui_report";
+const REPORT_SCALE_MIN = 0.8;
+const REPORT_SCALE_MAX = 1.4;
+
+function reportPrefs() {
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem(REPORT_PREFS_KEY) || "null"); } catch (e) {}
+    p = p && typeof p === "object" ? p : {};
+    const scale = Number(p.scale);
+    return {
+        scale: Number.isFinite(scale) ? Math.min(REPORT_SCALE_MAX, Math.max(REPORT_SCALE_MIN, scale)) : 1,
+        recovery: p.recovery !== false
+    };
+}
+
+function saveReportPrefs(changes) {
+    try { localStorage.setItem(REPORT_PREFS_KEY, JSON.stringify(Object.assign(reportPrefs(), changes))); } catch (e) {}
+}
+
+function changeReportScale(step, id, mode) {
+    const next = step === 0 ? 1 : Math.round((reportPrefs().scale + step * 0.1) * 10) / 10;
+    saveReportPrefs({ scale: Math.min(REPORT_SCALE_MAX, Math.max(REPORT_SCALE_MIN, next)) });
+    showFinalRecordReport(id, mode, true);
+}
+
+function toggleReportRecovery(id, mode, on) {
+    saveReportPrefs({ recovery: !!on });
+    showFinalRecordReport(id, mode, true);
+}
+
+window.changeReportScale = changeReportScale;
+window.toggleReportRecovery = toggleReportRecovery;
+
+/* أدوات التخصيص في شريط أزرار التقرير */
+function reportToolsHTML(record, mode, hasRecovery) {
+    const prefs = reportPrefs();
+    const id = escapeHTML(record.id);
+    return '<span class="report-tools">' +
+        '<span class="report-zoom" role="group" aria-label="حجم خط التقرير">' +
+            '<button type="button" class="secondary-btn" title="تصغير الخط" aria-label="تصغير الخط"' + (prefs.scale <= REPORT_SCALE_MIN ? " disabled" : "") +
+                " onclick=\"changeReportScale(-1, '" + id + "', '" + mode + "')\">A−</button>" +
+            '<button type="button" class="report-zoom-value" title="الحجم الأصلي" onclick="changeReportScale(0, \'' + id + "', '" + mode + "')\">" + Math.round(prefs.scale * 100) + "%</button>" +
+            '<button type="button" class="secondary-btn" title="تكبير الخط" aria-label="تكبير الخط"' + (prefs.scale >= REPORT_SCALE_MAX ? " disabled" : "") +
+                " onclick=\"changeReportScale(1, '" + id + "', '" + mode + "')\">A+</button>" +
+        "</span>" +
+        (hasRecovery
+            ? '<label class="report-toggle"><input type="checkbox"' + (prefs.recovery ? " checked" : "") +
+                " onchange=\"toggleReportRecovery('" + id + "', '" + mode + "', this.checked)\"> مع بيان استدراك النقص</label>"
+            : "") +
+        "</span>";
+}
+
+/* =========================================================
+بيان استدراك النقص (صفحة كتابية بعد جداول التقرير)
+يوثّق أن قيمة النقص استُوفيت من المندوب وسُدّدت لجهتها (النقابة المركزية / الفرع)
+بإيصال رقمه وتاريخه، لمن يدقق العمل لاحقاً.
+record.recovery (إضافي، اختياري): { centralReceipt, centralDate, branchReceipt, branchDate, text }
+========================================================= */
+
+function getRecordRecovery(record) {
+    const r = (record && record.recovery) || {};
+    const str = function (v) { return String(v || "").trim(); };
+    return {
+        centralReceipt: str(r.centralReceipt), centralDate: str(r.centralDate),
+        branchReceipt: str(r.branchReceipt), branchDate: str(r.branchDate),
+        text: str(r.text)
+    };
+}
+
+/* بنود النقص مجمّعة حسب جهتها، بقيمها المحفوظة مع الوكالات */
+function recoveryGroups(stats) {
+    const groups = { central: { items: [], count: 0, value: 0 }, branch: { items: [], count: 0, value: 0 } };
+    MISSING_KEYS.forEach(function (k) {
+        const count = number(stats.missing[k]);
+        if (!count) return;
+        const value = missingStampTypeValue(stats.agencies, k);
+        const g = groups[feeDestinations[k] === "branch" ? "branch" : "central"];
+        g.items.push({ key: k, name: (k === "receipt" ? "" : "طابع ") + MISSING_NAMES[k], count: count, value: value });
+        g.count += count;
+        g.value += value;
+    });
+    return groups;
+}
+
+function recoveryEditorHTML(record, mode, groups, rec) {
+    const id = escapeHTML(record.id);
+    const field = function (key, label, value, type) {
+        return '<label class="input-group"><span>' + label + "</span>" +
+            '<input type="' + (type || "text") + '" id="rcv_' + key + '" value="' + escapeHTML(value) + '"' +
+            (type === "date" ? ' lang="en-GB" dir="ltr"' : ' autocomplete="off"') + "></label>";
+    };
+    let html = '<div class="recovery-editor no-print"><h4><i class="ti ti-receipt" aria-hidden="true"></i> بيانات الإيصالات لبيان استدراك النقص</h4><div class="recovery-fields">';
+    if (groups.central.value > 0) {
+        html += field("centralReceipt", "إيصال النقابة المركزية — الرقم", rec.centralReceipt) + field("centralDate", "تاريخه", rec.centralDate, "date");
+    }
+    if (groups.branch.value > 0) {
+        html += field("branchReceipt", "إيصال الفرع — الرقم", rec.branchReceipt) + field("branchDate", "تاريخه", rec.branchDate, "date");
+    }
+    html += '</div><label class="input-group"><span>فقرة إضافية (اختياري — تظهر في البيان)</span><textarea id="rcv_text" rows="2">' + escapeHTML(rec.text) + "</textarea></label>" +
+        '<button type="button" class="primary-btn" onclick="saveRecordRecovery(\'' + id + "', '" + mode + '\')"><i class="ti ti-device-floppy"></i> حفظ بيانات البيان</button>' +
+        '<small class="field-hint">الخانات الفارغة تُطبع نقاطاً لتُكتب باليد.</small></div>';
+    return html;
+}
+
+function recoveryPageHTML(record, stats, mode, forPrint) {
+
+    const groups = recoveryGroups(stats);
+    const total = groups.central.value + groups.branch.value;
+    if (total <= 0) return "";
+
+    const included = reportPrefs().recovery;
+    if (forPrint && !included) return "";
+
+    const rec = getRecordRecovery(record);
+    const canEdit = !forPrint && currentUser && currentUser.role !== "viewer";
+    const blank = "(....................)";
+    const val = function (v, date) { return v ? "<b>" + escapeHTML(date ? formatDay(v) : v) + "</b>" : blank; };
+
+    let html = "";
+    if (canEdit) html += recoveryEditorHTML(record, mode, groups, rec);
+
+    html += '<section class="doc-recovery' + (included ? "" : " is-excluded no-print") + '">';
+    if (!included) {
+        html += '<p class="recovery-excluded no-print"><i class="ti ti-eye-off" aria-hidden="true"></i> هذه الصفحة لن تُطبع ولن تدخل في ملف PDF (فعّل «مع بيان استدراك النقص» أعلاه).</p>';
+    }
+
+    html += docLetterhead("بيان استدراك النقص", "ملحق بالسجل رقم " + escapeHTML(record.recordNumber) + " — تاريخ الإصدار: " + todayArabic());
+
+    html += '<div class="recovery-body">' +
+        "<p>بالإشارة إلى السجل رقم (<b>" + escapeHTML(record.recordNumber) + "</b>) العائد لمكتب «<b>" + escapeHTML(record.officeName) + "</b>»، " +
+        "المندوب «<b>" + escapeHTML(String(record.representativeName || "").trim()) + "</b>»، المؤرخ في <b>" + formatDay(getRecordDay(record)) + "</b>، " +
+        "وبعد تدقيقه من قِبل مكتب المحاسبة، تبيّن وجود نقص في الطوابع والرسوم المستحقة على وكالاته بلغت قيمته الإجمالية (<b>" + money(total) + "</b>). " +
+        "وقد استُوفيت هذه القيمة من المندوب نقداً، وسُدّدت لأصحاب الحق على النحو الآتي:</p>";
+
+    const ordinals = ["أولاً", "ثانياً"];
+    let n = 0;
+    [["central", "centralReceipt", "centralDate"], ["branch", "branchReceipt", "branchDate"]].forEach(function (g) {
+        const group = groups[g[0]];
+        if (group.value <= 0) return;
+        html += "<h4>" + ordinals[n++] + " — رسوم عائدة إلى " + FEE_DESTINATION_NAMES[g[0]] + "</h4>" +
+            '<table class="doc-table recovery-table"><thead><tr><th>البند</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
+            group.items.map(function (it) {
+                return "<tr><td>" + it.name + '</td><td class="num">' + it.count + '</td><td class="num">' + money(it.value) + "</td></tr>";
+            }).join("") +
+            '</tbody><tfoot><tr><td>المجموع</td><td class="num">' + group.count + '</td><td class="num">' + money(group.value) + "</td></tr></tfoot></table>" +
+            '<p class="recovery-receipt">وقد سُدّد هذا المبلغ إلى ' + FEE_DESTINATION_NAMES[g[0]] + " بموجب الإيصال رقم " + val(rec[g[1]]) + " تاريخ " + val(rec[g[2]], true) + ".</p>";
+    });
+
+    if (rec.text) {
+        html += '<p class="recovery-extra">' + formatNotesHTML(rec.text) + "</p>";
+    }
+
+    html += "<p>وبذلك يُعدّ النقص المذكور مُستدرَكاً ومُسدّداً أصولاً، ولا تجوز المطالبة به مجدداً. " +
+        "وقد حُرّر هذا البيان للعلم والاعتماد عند أي تدقيق لاحق.</p></div>";
+
+    html += docSignatures();
+    html += "</section>";
+    return html;
+}
+
+/* حفظ بيانات الإيصالات مع السجل (تعديل إضافي، ويُزامَن كأي تعديل للسجل) */
+function saveRecordRecovery(id, mode) {
+
+    if (!currentUser || currentUser.role === "viewer") {
+        notify("ليس لديك صلاحية.", "error");
+        return;
+    }
+
+    const record = records.find(function (r) { return r.id === id; });
+    if (!record) return;
+
+    const get = function (key) {
+        const el = document.getElementById("rcv_" + key);
+        return el ? el.value.trim() : null;
+    };
+
+    const before = record.recovery;
+    const next = getRecordRecovery(record);
+    ["centralReceipt", "centralDate", "branchReceipt", "branchDate", "text"].forEach(function (k) {
+        const v = get(k);
+        /* أرقام الإيصالات بالأرقام الغربية مثل بقية النظام */
+        if (v !== null) next[k] = k === "text" ? v : normalizeDigits(v);
+    });
+
+    const empty = Object.keys(next).every(function (k) { return !next[k]; });
+    const updatedBefore = record.updatedAt;
+
+    if (empty) delete record.recovery; else record.recovery = next;
+    record.updatedAt = new Date().toISOString();
+
+    persistRecords().then(function () {
+        notify("حُفظت بيانات بيان استدراك النقص.", "success");
+        showFinalRecordReport(id, mode, true);
+    }).catch(function (error) {
+        if (before === undefined) delete record.recovery; else record.recovery = before;
+        record.updatedAt = updatedBefore;
+        notify("<strong>لم يُحفظ</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+    });
+}
+
+window.saveRecordRecovery = saveRecordRecovery;
+
+function buildFinalRecordReport(record, mode, forPrint) {
 
     mode = mode || "summary";
 
@@ -6770,15 +7038,21 @@ function buildFinalRecordReport(record, mode) {
         return '<h3><span class="sec-no">' + arabicDigit(sec) + "</span>" + text + "</h3>";
     };
 
-    let html = '<div class="final-report doc ' + (detailed ? "doc-detailed" : "doc-summary") + '">';
+    const reportScale = reportPrefs().scale;
+    const hasRecovery = stats.missingValue > 0;
+
+    let html = '<div class="final-report doc ' + (detailed ? "doc-detailed" : "doc-summary") + '"' +
+        (reportScale !== 1 ? ' style="--doc-scale:' + reportScale + '"' : "") + ">";
 
     html += '<div class="report-actions no-print">' +
-        '<button type="button" class="primary-btn" onclick="exportRecordToPDF(\'' + record.id + "', '" + mode + '\')">حفظ PDF</button>' +
+        '<button type="button" class="primary-btn" onclick="downloadRecordPDF(\'' + record.id + "', '" + mode + '\')"><i class="ti ti-download"></i> تنزيل PDF</button>' +
+        '<button type="button" class="secondary-btn" onclick="exportRecordToPDF(\'' + record.id + "', '" + mode + '\')">حفظ PDF من نافذة الطباعة</button>' +
         '<button type="button" class="secondary-btn" onclick="printFinalRecordReport(\'' + record.id + "', '" + mode + '\')">طباعة</button>' +
         '<button type="button" class="secondary-btn" onclick="exportRecordToExcel(\'' + record.id + '\')">تصدير Excel</button>' +
         '<button type="button" class="secondary-btn" onclick="showFinalRecordReport(\'' + record.id + "', '" + (detailed ? "summary" : "detailed") + '\')">' +
             (detailed ? "عرض المختصر" : "عرض المفصل") + "</button>" +
         '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button>' +
+        reportToolsHTML(record, mode, hasRecovery) +
         "</div>";
 
     html += docLetterhead(detailed ? "التقرير المفصل للسجل" : "التقرير المختصر للسجل");
@@ -6964,6 +7238,10 @@ function buildFinalRecordReport(record, mode) {
         '<div class="table-wrapper">' + committeesByTypeTableHTML(stats.committees) + "</div></section>";
 
     html += docSignatures();
+
+    /* صفحة مستقلة بعد الجداول: بيان استدراك النقص */
+    html += recoveryPageHTML(record, stats, mode, forPrint);
+
     html += "</div>";
 
     return html;
@@ -7342,17 +7620,20 @@ function printAgencyAudit(recordId, filter, pdf) {
 window.showAgencyAudit = showAgencyAudit;
 window.printAgencyAudit = printAgencyAudit;
 
-function showFinalRecordReport(id, mode) {
+/* keepScroll: إعادة بناء التقرير المفتوح (تغيير الخط أو حفظ الإيصالات) دون القفز إلى أعلاه */
+function showFinalRecordReport(id, mode, keepScroll) {
     const record = records.find(function (item) { return item.id === id; });
     if (!record) return;
     const modalContent = document.getElementById("modalContent");
     const modal = document.getElementById("recordModal");
     if (!modalContent || !modal) return;
+    const scroller = modalContent.closest(".modal-content");
+    const top = keepScroll && scroller ? scroller.scrollTop : 0;
     modalContent.innerHTML = buildFinalRecordReport(record, mode || "summary");
     modal.classList.remove("hidden");
     modalContent.scrollTop = 0;
     /* الحاوية التي تتمرر فعلاً هي .modal-content */
-    modalContent.closest(".modal-content")?.scrollTo(0, 0);
+    scroller?.scrollTo(0, top);
 }
 
 /* =========================================================
@@ -7707,15 +7988,164 @@ function recordFileTitle(record, mode) {
 function printFinalRecordReport(id, mode) {
     const record = records.find(function (item) { return item.id === id; });
     if (!record) return;
-    openReportDocument(buildFinalRecordReport(record, mode || "summary"), recordFileTitle(record, mode), {
+    openReportDocument(buildFinalRecordReport(record, mode || "summary", true), recordFileTitle(record, mode), {
         landscape: mode === "detailed"
     });
 }
 
+/* =========================================================
+تنزيل PDF مباشرة (بلا نافذة الطباعة) — 16/11/2026
+المكتبات تُحمَّل عند أول استخدام فقط. يُبنى المستند بقواعد الطباعة نفسها
+(قواعد @media print منسوخة على .pdf-capture — بصنف لا بمعرّف: نسخة أداة الالتقاط لا تطابق المعرّفات) وبعرض سطح المكتب حتى على الموبايل،
+فيطابق الطباعة. النص يصبح صورة داخل الملف (لا يُنسخ)، والطباعة العادية باقية.
+========================================================= */
+
+const PDF_LIBS = [
+    "https://cdn.jsdelivr.net/npm/html2canvas-pro@1.5.8/dist/html2canvas-pro.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.min.js"
+];
+
+let pdfLibsLoading = null;
+
+function loadScriptOnce(src) {
+    return new Promise(function (resolve, reject) {
+        if (document.querySelector('script[data-lib="' + src + '"]')) { resolve(); return; }
+        const el = document.createElement("script");
+        el.src = src;
+        el.dataset.lib = src;
+        el.onload = function () { resolve(); };
+        el.onerror = function () { el.remove(); reject(new Error("تعذر تحميل مكتبة PDF")); };
+        document.head.appendChild(el);
+    });
+}
+
+function loadPdfLibs() {
+    if (window.html2pdf && window.html2canvas) return Promise.resolve();
+    if (!pdfLibsLoading) {
+        pdfLibsLoading = PDF_LIBS.reduce(function (p, src) {
+            return p.then(function () { return loadScriptOnce(src); });
+        }, Promise.resolve()).catch(function (error) {
+            pdfLibsLoading = null;
+            throw error;
+        });
+    }
+    return pdfLibsLoading;
+}
+
+/* قواعد الطباعة من style.css منقولة إلى حاوية الالتقاط .pdf-capture */
+function pdfCaptureCSS() {
+    const out = [];
+    const mapSelector = function (sel) {
+        sel = sel.trim();
+        if (!sel || sel.indexOf("body.is-printing") !== -1) return null;
+        sel = sel.replace(/#printRoot/g, ".pdf-capture");
+        if (sel.indexOf(".pdf-capture") === 0) return sel;
+        if (/^\.print-(landscape|doc)\b/.test(sel)) return ".pdf-capture" + sel;
+        return ".pdf-capture " + sel;
+    };
+    const walk = function (rules, inPrint) {
+        Array.prototype.forEach.call(rules || [], function (rule) {
+            if (rule.media && rule.cssRules) {
+                walk(rule.cssRules, inPrint || /print/.test(rule.media.mediaText));
+            } else if (inPrint && rule.selectorText && rule.style) {
+                const sels = rule.selectorText.split(",").map(mapSelector).filter(Boolean);
+                if (sels.length) out.push(sels.join(",") + "{" + rule.style.cssText + "}");
+            }
+        });
+    };
+    Array.prototype.forEach.call(document.styleSheets, function (sheet) {
+        let rules = null;
+        try { rules = sheet.cssRules; } catch (e) { return; }
+        walk(rules, false);
+    });
+    return out.join("\n");
+}
+
+let pdfBusy = false;
+
+function downloadReportPDF(bodyHTML, fileTitle, landscape) {
+
+    if (pdfBusy) return Promise.resolve(false);
+    pdfBusy = true;
+
+    showToast("<strong>جارٍ تجهيز ملف PDF…</strong><span>قد يستغرق بضع ثوانٍ للسجل الكبير.</span>", 30000, "info");
+
+    let host = null, style = null, shelf = null;
+
+    return loadPdfLibs().then(function () {
+
+        /* قواعد الطباعة داخل الحاوية نفسها: أداة الالتقاط تنسخ الحاوية بما فيها */
+        style = document.createElement("style");
+        style.textContent = pdfCaptureCSS();
+
+        /* عرض صفحة A4 الداخلي (هوامش 9 ملم) بالبكسل: 192 ملم عمودي، 279 ملم أفقي */
+        /* الحاوية نفسها بلا إزاحة (المكتبة تنسخها كما هي)، والرف حولها خارج الشاشة */
+        shelf = document.createElement("div");
+        shelf.style.cssText = "position:fixed;top:0;left:-30000px;";
+        host = document.createElement("div");
+        host.className = "pdf-capture print-doc" + (landscape ? " print-landscape" : "");
+        host.style.cssText = "background:#fff;width:" + (landscape ? 1054 : 726) + "px";
+        host.innerHTML = bodyHTML;
+        host.querySelectorAll(".no-print, .report-actions").forEach(function (el) { el.remove(); });
+        host.insertBefore(style, host.firstChild);
+        shelf.appendChild(host);
+        document.body.appendChild(shelf);
+
+        return (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
+
+    }).then(function () {
+
+        return window.html2pdf().set({
+            margin: [10, 9, 12, 9],
+            image: { type: "jpeg", quality: 0.92 },
+            /* عرض نافذة سطح المكتب: تخطيط الطباعة نفسه حتى على شاشة الموبايل */
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", windowWidth: 1400, logging: false },
+            jsPDF: { unit: "mm", format: "a4", orientation: landscape ? "landscape" : "portrait", compress: true },
+            pagebreak: {
+                mode: ["css", "legacy"],
+                before: [".doc-recovery"],
+                avoid: ["tr", ".doc-head", ".doc-section > h3", ".doc-record-note", ".doc-sign", ".doc-summary-row", ".doc-notes li", ".recovery-receipt", ".recovery-body h4"]
+            }
+        }).from(host).outputPdf("blob");
+
+    }).then(function (blob) {
+        /* تنزيل بالاسم نفسه الذي تقترحه نافذة الطباعة (عنوان التقرير) */
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = String(fileTitle || "تقرير").replace(/[\\/:*?"<>|]+/g, "-") + ".pdf";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+        notify("تم تنزيل ملف PDF.", "success", 3000);
+        return true;
+    }).catch(function (error) {
+        console.error("PDF download failed:", error);
+        notify("<strong>تعذر تنزيل PDF مباشرة</strong><span>" +
+            (navigator.onLine === false ? "يحتاج اتصالاً بالإنترنت أول مرة لتحميل أداة PDF. " : escapeHTML(error && error.message || error) + " — ") +
+            "استخدم «حفظ PDF من نافذة الطباعة».</span>", "error", 10000, true);
+        return false;
+    }).then(function (ok) {
+        if (shelf) shelf.remove();
+        pdfBusy = false;
+        return ok;
+    });
+}
+
+function downloadRecordPDF(id, mode) {
+    const record = records.find(function (item) { return item.id === id; });
+    if (!record) return Promise.resolve(false);
+    return downloadReportPDF(buildFinalRecordReport(record, mode || "summary", true), recordFileTitle(record, mode), mode === "detailed");
+}
+
+window.downloadRecordPDF = downloadRecordPDF;
+
 function exportRecordToPDF(id, mode) {
     const record = records.find(function (item) { return item.id === id; });
     if (!record) return;
-    openReportDocument(buildFinalRecordReport(record, mode || "summary"), recordFileTitle(record, mode), {
+    openReportDocument(buildFinalRecordReport(record, mode || "summary", true), recordFileTitle(record, mode), {
         landscape: mode === "detailed",
         pdf: true
     });
@@ -11935,6 +12365,19 @@ container.innerHTML = `
 
     </div>
 
+    <div class="fee-dest-box">
+        <h4><i class="ti ti-building-bank" aria-hidden="true"></i> لمن تعود رسوم النقص؟</h4>
+        <p class="field-hint">تُستخدم في «بيان استدراك النقص» بالتقرير: كل بند يُجمع مع جهته (إيصال للنقابة المركزية وإيصال للفرع).</p>
+        ${MISSING_KEYS.map(function (k) {
+            return '<div class="price-row"><label>' + (k === "receipt" ? "" : "نقص ") + MISSING_NAMES[k] + "</label>" +
+                '<select data-fee-dest-key="' + k + '">' +
+                ["central", "branch"].map(function (d) {
+                    return '<option value="' + d + '"' + (feeDestinations[k] === d ? " selected" : "") + ">" + FEE_DESTINATION_NAMES[d] + "</option>";
+                }).join("") +
+                "</select></div>";
+        }).join("")}
+    </div>
+
 `;
 
 }
@@ -12418,6 +12861,13 @@ savePricesBtn.addEventListener(
             "audit_stamp_prices",
             stampPrices
         );
+
+        /* جهة رسوم كل بند نقص */
+        document.querySelectorAll("[data-fee-dest-key]").forEach(function (select) {
+            const v = select.value;
+            if (v === "central" || v === "branch") feeDestinations[select.dataset.feeDestKey] = v;
+        });
+        saveData(FEE_DESTINATIONS_KEY, feeDestinations);
 
 
         saveData(
@@ -13177,8 +13627,9 @@ function updateDashboard() {
     const missingCount = agencies.filter(function (a) { return a.status === "missing"; }).length;
     const activeCount = agencies.length - cancelled - missingCount;
 
+    /* مثل التقارير: الوكالة الملغاة لا مطلوب عليها (حتى لو بقي مبلغ في سجل قديم) */
     const representativeTotal = agencies.reduce(function (sum, agency) {
-        return sum + number(agency.representativeAmount);
+        return agency.status === "cancelled" ? sum : sum + number(agency.representativeAmount);
     }, 0);
 
     const setText = function (id, value) {
@@ -13602,6 +14053,7 @@ function downloadBackup() {
         committeeRates: committeeRates,
         priceSchedule: priceSchedule,
         councilSaved: councilSaved,
+        feeDestinations: feeDestinations,
         records: records
     };
 
@@ -13693,6 +14145,7 @@ function buildBackupJSON() {
         committeeRates: committeeRates,
         priceSchedule: priceSchedule,
         councilSaved: councilSaved,
+        feeDestinations: feeDestinations,
         records: records
     }, null, 2);
 }
@@ -14384,6 +14837,11 @@ function applyBackupSettings(data) {
             saveData(COUNCIL_SAVED_KEY, data.councilSaved);
         }
 
+        /* جهة رسوم النقص: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+        if (data.feeDestinations && typeof data.feeDestinations === "object") {
+            saveData(FEE_DESTINATIONS_KEY, data.feeDestinations);
+        }
+
         /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
         if (Array.isArray(data.priceSchedule)) {
             saveData(PRICE_SCHEDULE_KEY, data.priceSchedule);
@@ -14503,7 +14961,8 @@ const FB_WORKSPACE = "idlib";
 const FB_SETTINGS_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
-    "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved"
+    "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
+    "audit_fee_destinations"
 ];
 
 let fbState = loadData(FB_STATE_KEY, null);

@@ -17,10 +17,11 @@
 | `audit_committee_shares` | مبالغ الحصص الثابتة (للتوافق فقط) |
 | `audit_committee_rates` | نسب الحصص % من سعر الوكالة لكل نوع `{type:{ambulance, cooperation}}` |
 | `audit_council_share`, `audit_council_saved` | حصة المجلس |
+| `audit_fee_destinations` | (16/11/2026) جهة رسوم كل بند نقص: `{pleading, ambulance, aid, receipt}` = `"central"` (النقابة المركزية) أو `"branch"` (الفرع). الافتراضي: الطوابع للمركزية والإيصال للفرع. يدخل النسخة الاحتياطية (`feeDestinations`) ومزامنة Firebase |
 | `audit_record_draft` | مسودة السجل غير المحفوظ |
 | `currentUser`, `activeSection` | الجلسة والقسم المفتوح |
 
-تفضيلات واجهة (ليست بيانات، يمكن أن تضيع دون ضرر): `audit_ui_theme`, `audit_ui_records_view`, `audit_ui_activity_period`, `audit_ui_last_auditors`, `audit_ui_backup_state`, `audit_ui_seq_check`, `audit_ui_telegram` (رمز البوت — لا يدخل النسخ الاحتياطية ولا المستودع)، `audit_ui_firebase` (حالة المزامنة لهذا الجهاز: `signedIn, uid, base{id:hash}, lastPull, settingsBase, settingsLocalHash, settingsChangedAt, lastSyncAt` — حذفه يعني فقط مزامنة أولى جديدة).
+تفضيلات واجهة (ليست بيانات، يمكن أن تضيع دون ضرر): `audit_ui_theme`, `audit_ui_records_view`, `audit_ui_activity_period`, `audit_ui_last_auditors`, `audit_ui_backup_state`, `audit_ui_seq_check`, `audit_ui_font_scale` (حجم خط الموقع 0.85–1.3)، `audit_ui_report` (`{scale, recovery}`: حجم خط التقرير 0.8–1.4 وإدراج بيان الاستدراك)، `audit_ui_telegram` (رمز البوت — لا يدخل النسخ الاحتياطية ولا المستودع)، `audit_ui_firebase` (حالة المزامنة لهذا الجهاز: `signedIn, uid, base{id:hash}, lastPull, settingsBase, settingsLocalHash, settingsChangedAt, lastSyncAt` — حذفه يعني فقط مزامنة أولى جديدة).
 
 ## Firebase (اختياري)
 نسخة متزامنة على Firestore في مساحة مشتركة: `workspaces/idlib/records/{id}` و`workspaces/idlib/meta/settings`. التفاصيل والقواعد في [`FIREBASE.md`](FIREBASE.md). البيانات المحلية تبقى الأصل.
@@ -37,6 +38,7 @@
   recordDate: "YYYY-MM-DD",          // قديماً قد يغيب → getRecordDay() يرجع إلى createdAt
   agencies: [ /* وكالات */ ],
   auditors: ["اسم", "اسم"],          // اختياري، داخل البرنامج فقط، لا يظهر في التقارير
+  recovery: { centralReceipt, centralDate, branchReceipt, branchDate, text },  // اختياري (16/11/2026): إيصالات «بيان استدراك النقص» — تُكتب من نافذة التقرير
   recordNote: "نص",                  // اختياري (3/11/2026): ملاحظة على السجل كاملاً — مربع في التقرير وExcel؛ يُحفظ فقط إن كُتب
   createdAt, updatedAt               // ISO
 }
@@ -66,5 +68,5 @@
 السجلات القديمة قد تنقصها `appliedPrices` أو `pricePeriod` أو غيرها — اقرأها بقيم افتراضية وقت القراءة، ولا تفترض وجودها.
 
 ## النسخة الاحتياطية (`version: 1`)
-`downloadBackup()` / `buildBackupJSON()` تكتب: `appName, version: 1, exportedAt, users, prices, additionPrices, additionStampStatus, transportSettings, stampPrices, committeeShares, committeeRates, priceSchedule, councilSaved, records`.
+`downloadBackup()` / `buildBackupJSON()` تكتب: `appName, version: 1, exportedAt, users, prices, additionPrices, additionStampStatus, transportSettings, stampPrices, committeeShares, committeeRates, priceSchedule, councilSaved, feeDestinations (منذ 16/11/2026؛ غيابه في ملف أقدم = تبقى الجهات كما هي), records`.
 `restoreBackupFromFile()` يقرأ JSON عادياً أو مضغوطاً gzip (`.json.gz`). يجب أن يبقى قادراً على قراءة الملفات القديمة.
