@@ -13,6 +13,10 @@
                 t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
             }
             document.documentElement.setAttribute("data-theme", t);
+            /* حجم خط الموقع (تفضيل لكل جهاز) قبل الرسم أيضاً */
+            var f = NaN;
+            try { f = parseFloat(localStorage.getItem("audit_ui_font_scale")); } catch (e) {}
+            if (f >= 0.85 && f <= 1.3 && f !== 1) document.documentElement.style.setProperty("--ui-scale", String(f));
         })();
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -173,6 +177,15 @@
                 <span class="theme-label">الوضع الليلي</span>
                 <span class="theme-switch" aria-hidden="true"></span>
             </button>
+
+            <!-- حجم خط الموقع: تكبير وتصغير (لهذا الجهاز فقط) -->
+            <div class="font-size-control" role="group" aria-label="حجم خط الموقع">
+                <i class="ti ti-text-size" aria-hidden="true"></i>
+                <span class="fs-label">حجم الخط</span>
+                <button type="button" onclick="changeUiFontScale(-1)" aria-label="تصغير خط الموقع" title="تصغير">A−</button>
+                <button type="button" class="fs-value" id="uiFontScaleValue" onclick="changeUiFontScale(0)" title="الحجم الأصلي">100%</button>
+                <button type="button" onclick="changeUiFontScale(1)" aria-label="تكبير خط الموقع" title="تكبير">A+</button>
+            </div>
 
             <!-- حالة النسخ الاحتياطي: الضغط يأخذ نسخة الآن -->
             <button type="button" class="backup-status" id="backupStatus" onclick="backupNow()">
@@ -1585,6 +1598,20 @@
                                 <li>رقم السجل ورقم الوكالة أرقام فقط (لوحة الأرقام على الموبايل، والحروف لا تُقبل).</li>
                                 <li>التدقيق السريع في التقرير: كل بند بلون مجموعته بتدرّج (النقص عنابي، الإضافات ذهبي، بدل الانتقال أزرق).</li>
                                 <li>خط واحد في كل الموقع (IBM Plex Sans Arabic مثل موقع «أعمالي»)، نص أكبر قليلاً، وزوايا وظلال أنعم.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-file-certificate"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">16 تشرين الثاني 2026</p>
+                            <h3>بيان استدراك النقص وتخصيص التقرير</h3>
+                            <ul class="devlog-list">
+                                <li>«بيان استدراك النقص»: صفحة كتابية رسمية بعد جداول التقرير المختصر والمفصل، توثّق أن النقص استُوفي من المندوب وسُدّد للنقابة المركزية أو للفرع بإيصال رقمه وتاريخه، لمن يدقق العمل لاحقاً. الإيصالات وفقرة إضافية تُكتب من نافذة التقرير، وخيار لطباعتها أو لا.</li>
+                                <li>جهة رسوم كل بند نقص (المركزية / الفرع) من «أسعار الطوابع».</li>
+                                <li>حجم خط التقرير (A− / A+) يدخل في الطباعة وملف PDF، وحجم خط الموقع كله من القائمة الجانبية.</li>
+                                <li>«تنزيل PDF» مباشرة دون نافذة الطباعة، بتخطيط الطباعة نفسه.</li>
                                 <li>أداء: صفحة التقارير لا تُبنى إلا عند فتحها وتعرض أول 200 وكالة مع «عرض المزيد» (كانت تتجمد مع آلاف الوكالات)، والفحص الدوري لـ Firebase لا يعيد حساب كل السجلات كل دقيقة.</li>
                             </ul>
                         </div>
