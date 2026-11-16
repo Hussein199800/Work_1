@@ -3550,7 +3550,7 @@ function announceAgencyAdded(agency, gap) {
 
     const toast = document.getElementById("appToast");
     if (toast) {
-        toast.style.setProperty("--agency-color", AGENCY_TYPE_COLORS[agency.type] || "#137a64");
+        toast.style.setProperty("--agency-color", AGENCY_TYPE_COLORS[agency.type] || "#a8582e");
         toast.classList.toggle("has-gap", !!gap);
     }
 
@@ -5122,7 +5122,12 @@ recordForm.addEventListener(
             );
 
 
-        const record = {
+        /*
+            تعديل سجل: نبدأ من نسخته المحفوظة حتى لا تضيع حقوله التي ليست في
+            النموذج (إيصالات بيان الاستدراك record.recovery، وأي حقل إضافي لاحق)،
+            ثم تُكتب فوقها حقول النموذج.
+        */
+        const record = Object.assign({}, oldRecord ? JSON.parse(JSON.stringify(oldRecord)) : {}, {
 
             id:
                 editingId ||
@@ -5171,7 +5176,7 @@ recordForm.addEventListener(
             updatedAt:
                 new Date().toISOString()
 
-        };
+        });
 
 
         /*
@@ -6065,8 +6070,13 @@ function getRecordBaseTotal(
 record
 ) {
 
+/* مثل التقارير: الوكالة الملغاة لا تدخل في الإجمالي */
 return (record.agencies || []).reduce(
     function (sum, agency) {
+
+        if (!agency || agency.status === "cancelled") {
+            return sum;
+        }
 
         return (
             sum +
@@ -6089,8 +6099,13 @@ function getRecordRepresentativeTotal(
 record
 ) {
 
+/* مثل التقارير: الوكالة الملغاة لا تدخل في الإجمالي */
 return (record.agencies || []).reduce(
     function (sum, agency) {
+
+        if (!agency || agency.status === "cancelled") {
+            return sum;
+        }
 
         return (
             sum +
@@ -13612,8 +13627,9 @@ function updateDashboard() {
     const missingCount = agencies.filter(function (a) { return a.status === "missing"; }).length;
     const activeCount = agencies.length - cancelled - missingCount;
 
+    /* مثل التقارير: الوكالة الملغاة لا مطلوب عليها (حتى لو بقي مبلغ في سجل قديم) */
     const representativeTotal = agencies.reduce(function (sum, agency) {
-        return sum + number(agency.representativeAmount);
+        return agency.status === "cancelled" ? sum : sum + number(agency.representativeAmount);
     }, 0);
 
     const setText = function (id, value) {

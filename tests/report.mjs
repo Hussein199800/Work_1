@@ -153,6 +153,22 @@ await page.waitForFunction(function () { return typeof switchSection === "functi
 check("حجم خط الموقع يبقى بعد إعادة التحميل", await ev(function () { return document.documentElement.style.getPropertyValue("--ui-scale") === "1.1"; }));
 await ev(function () { changeUiFontScale(0); });
 
+/* 6ب) تعديل السجل من النموذج وحفظه لا يُضيّع إيصالات البيان */
+await ev(function () { closeRecordModal(); editRecord("r1"); });
+await page.waitForTimeout(400);
+await page.fill("#officeName", "مكتب معدّل");
+await page.click('#recordForm button[type="submit"]');
+await page.waitForTimeout(500);
+for (let i = 0; i < 3 && await page.locator("dialog[open]").count(); i++) {
+    await page.locator("dialog[open] .app-dialog-ok, dialog[open] button.primary-btn").first().click();
+    await page.waitForTimeout(400);
+}
+await page.waitForTimeout(500);
+check("تعديل السجل وحفظه يُبقي إيصالات البيان", await ev(function () {
+    const r = records.find(function (x) { return x.id === "r1"; });
+    return r.officeName === "مكتب معدّل" && r.recovery && r.recovery.centralReceipt === "4521" && r.recovery.text === "سُدّد الفرق عند استلام السجل.";
+}), await ev(function () { return JSON.stringify(records.find(function (x) { return x.id === "r1"; }).recovery || null); }));
+
 /* 7) سجل بلا نقص: لا بيان ولا خيار */
 check("سجل بلا نقص: لا بيان", await ev(function () {
     const r = { id: "z", recordNumber: "1", officeName: "o", representativeName: "r", recordDate: "2026-09-12",
