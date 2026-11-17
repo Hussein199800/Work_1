@@ -272,7 +272,10 @@ async function restore(page, data) {
     check("C01", "تعديل الملاحظة لا يغيّر المبالغ ولا الأسعار المطبقة", after.miss === r.miss && after.rep === r.rep && after.grand === r.grand && after.stamp === 100 && after.notes === "ملاحظة جديدة فقط", JSON.stringify(r) + " → " + JSON.stringify(after));
     /* تغيير عدد بند: بأسعار الوكالة المعتمدة لا بسعر اليوم */
     await page.evaluate(function () { editPendingAgency(0); });
+    await page.waitForTimeout(200);
     await page.click('.plus-btn[data-target="missingPleading"]');
+    await page.waitForTimeout(200);
+    console.log("   (عدد نقص المرافعة في النموذج: " + await page.inputValue("#missingPleading") + ")");
     await page.click("#addAgencyBtn");
     await page.waitForTimeout(500);
     const after2 = await page.evaluate(function () { return pendingAgencies[0].missingStampsValue; });
@@ -302,10 +305,11 @@ async function restore(page, data) {
             missingStamps: { pleading: 1, ambulance: 1, aid: 0 }, missingStampsValue: 110 };
         const record = { id: "q1", recordNumber: "9", officeName: "o", representativeName: "r", recordDate: "2026-04-05", agencies: [old] };
         const stats = getRecordFinalStats(record);
-        const rows = MISSING_KEYS.reduce(function (s, k) { return s + missingStampTypeValue(stats.agencies, k); }, 0);
+        /* صفوف الأنواع + صف «غير موزّع» = الإجمالي التاريخي */
+        const rows = MISSING_KEYS.reduce(function (s, k) { return s + missingStampTypeValue(stats.agencies, k); }, 0) + missingUnallocated(stats.agencies).value;
         const g = recoveryGroups(stats);
         const html = buildFinalRecordReport(record, "summary");
-        return { total: stats.missingValue, rows: rows, recovery: g.central.value + g.branch.value, warned: /غير معروف|يحتاج مراجعة|لا يُعرف توزيع/.test(html) };
+        return { total: stats.missingValue, rows: rows, recovery: g.central.value + g.branch.value + (g.unknown ? g.unknown.value : 0), warned: /غير معروف|يحتاج مراجعة|لا يُعرف توزيع/.test(html) };
     });
     check("C03", "نقص قديم متعدد الأنواع: الصفوف والبيان = الإجمالي التاريخي 110", c3.total === 110 && c3.rows === 110 && c3.recovery === 110, JSON.stringify(c3));
     check("C03", "التقرير ينبّه إلى أن توزيع المبلغ القديم غير معروف", c3.warned, JSON.stringify(c3));

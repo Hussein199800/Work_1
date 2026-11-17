@@ -2473,10 +2473,7 @@ function getAgencyTransport(agency) {
     const stampPrice =
         typeof settings.stampPrice === "number"
             ? settings.stampPrice
-            : number(
-                (agency && agency.appliedPrices && agency.appliedPrices.stamps && agency.appliedPrices.stamps.pleading) ||
-                stampPrices.pleading
-            );
+            : savedStampPrice(agency, "pleading");
 
     const share = number(settings.representativeShare);
     const cash = number(settings.cashRemainder);
@@ -2654,8 +2651,12 @@ return {
 function calculateStamps(
 additionsResult,
 missing,
-cancelled
+cancelled,
+stampTable
 ) {
+
+/* أسعار الطوابع: المعتمدة للوكالة إن مُرّرت (تعديل وكالة محفوظة)، وإلا الحالية */
+const sp = stampTable || stampPrices;
 
 if (cancelled) {
 
@@ -2695,7 +2696,7 @@ const missingValue =
             missing.pleading
         ) *
         number(
-            stampPrices.pleading
+            sp.pleading
         )
     )
 
@@ -2706,7 +2707,7 @@ const missingValue =
             missing.ambulance
         ) *
         number(
-            stampPrices.ambulance
+            sp.ambulance
         )
     )
 
@@ -2717,7 +2718,7 @@ const missingValue =
             missing.aid
         ) *
         number(
-            stampPrices.aid
+            sp.aid
         )
     )
 
@@ -2728,7 +2729,7 @@ const missingValue =
             missing.receipt
         ) *
         number(
-            stampPrices.receipt
+            sp.receipt
         )
     );
 
@@ -2897,7 +2898,7 @@ function buildAgency(inputs, pricing, keepId) {
 
     /* الملغاة: الأعداد تبقى كما أُدخلت، لكن بلا قيمة (كما في التقارير) */
     const additionResult = calculateAdditions(cancelled ? {} : additions, pricing);
-    const stampResult = calculateStamps(additionResult, missing, cancelled);
+    const stampResult = calculateStamps(additionResult, missing, cancelled, pricing.stamps);
 
     const representativeAmount = calculateRepresentativeAmount(
         pricing.representative,
@@ -2938,7 +2939,7 @@ function buildAgency(inputs, pricing, keepId) {
             priceMonth: pricing.priceMonth || null,
             additions: JSON.parse(JSON.stringify(pricing.additions)),
             transport: JSON.parse(JSON.stringify(pricing.transport)),
-            stamps: JSON.parse(JSON.stringify(stampPrices))
+            stamps: JSON.parse(JSON.stringify(pricing.stamps || stampPrices))
         }
     };
 }
@@ -2949,13 +2950,61 @@ function getAgencyFromForm() {
 }
 
 /* وكالة معدّلة من النموذج: المعرّف نفسه، والسعر المحدد وسجل الأسعار كما كانا */
+/*
+    أسعار الوكالة المعتمدة يوم حُسبت (C01): السعر وحصة الفرع والإضافات والبدل والطوابع.
+    ما ليس محفوظاً في وكالة قديمة يأخذ السعر الحالي (لا يُخترع سعر تاريخي).
+*/
+function savedPricingOf(source, current) {
+    const applied = source.appliedPrices || {};
+    const has = function (v) { return v !== undefined && v !== null; };
+    return {
+        agency: has(applied.agency) && number(applied.agency) > 0 ? number(applied.agency) : (source.status !== "cancelled" && number(source.basePrice) > 0 ? number(source.basePrice) : current.agency),
+        representative: has(applied.representative) ? number(applied.representative) : (has(source.representativeBase) && source.status !== "cancelled" ? number(source.representativeBase) : current.representative),
+        priceMonth: has(applied.priceMonth) ? applied.priceMonth : current.priceMonth,
+        additions: applied.additions && typeof applied.additions === "object" ? applied.additions : current.additions,
+        transport: source.transportSettings || applied.transport || current.transport,
+        stamps: Object.assign({}, stampPrices, applied.stamps && typeof applied.stamps === "object" ? applied.stamps : {})
+    };
+}
+
+/* هل تغيّر في النموذج شيء له أثر مالي؟ (العدد، النوع، الحالة، فترة السعر) */
+function agencyFinancialInputsChanged(inputs, source) {
+    if ((inputs.type || DEFAULT_AGENCY_TYPE) !== (source.type || DEFAULT_AGENCY_TYPE)) return "basis";
+    if ((inputs.status || "active") !== (source.status || "active")) return "basis";
+    if ((inputs.pricePeriod || "") !== (source.pricePeriod || "")) return "basis";
+    const ad = source.additions || {};
+    const ms = source.stamps || source.missingStamps || {};
+    const addChanged = Object.keys(ADDITION_NAMES).some(function (k) {
+        if (k === "transport" && !isTransportEligible(inputs.type)) return false;
+        return number(inputs.additions[k]) !== number(ad[k]);
+    });
+    const missChanged = MISSING_KEYS.some(function (k) { return number(inputs.missing[k]) !== number(ms[k]); });
+    return addChanged || missChanged ? "counts" : "";
+}
+
 function getEditedAgencyFromForm(source) {
     const inputs = readAgencyInputs();
+
+    const change = agencyFinancialInputsChanged(inputs, source);
+
+    /* تعديل وصفي فقط (رقم، ملاحظة، مكررة): الوكالة كما حُفظت تماماً، بلا إعادة حساب */
+    if (!change) {
+        const kept = JSON.parse(JSON.stringify(source));
+        kept.number = inputs.number || source.number;
+        kept.notes = inputs.notes || "";
+        kept.duplicate = !!inputs.duplicate;
+        return kept;
+    }
+
     if (number(source.customPrice) > 0 && (inputs.pricePeriod || "") === (source.pricePeriod || "")) {
         inputs.customPrice = number(source.customPrice);
         inputs.customRepresentative = source.customRepresentative === undefined ? null : source.customRepresentative;
     }
-    const agency = buildAgency(inputs, pricingForAgency(inputs.type, inputs.pricePeriod), source.id);
+    /* تغيّر عدد بند فقط: يُحسب بأسعار الوكالة المعتمدة لا بأسعار اليوم.
+       تغيير النوع أو الحالة أو الفترة يبقى كما قرر المستخدم: بأسعار اليوم/الفترة. */
+    const current = pricingForAgency(inputs.type, inputs.pricePeriod);
+    const pricing = change === "counts" ? savedPricingOf(source, current) : current;
+    const agency = buildAgency(inputs, pricing, source.id);
     if (Array.isArray(source.priceHistory) && source.priceHistory.length) {
         agency.priceHistory = JSON.parse(JSON.stringify(source.priceHistory));
     }
@@ -6540,6 +6589,16 @@ deleteRecord;
     عددها × سعر طابع المرافعة المطبّق على الوكالة.
     طوابع بدل الانتقال لا تدخل هنا (لها بند مستقل).
 */
+/*
+    سعر طابع محفوظ مع الوكالة (C02): الصفر سعر صحيح محفوظ، لا «غياب».
+    فقط الحقل الغائب (وكالة قديمة) يأخذ السعر الحالي.
+*/
+function savedStampPrice(agency, key) {
+    const saved = agency && agency.appliedPrices && agency.appliedPrices.stamps ? agency.appliedPrices.stamps[key] : undefined;
+    if (saved !== undefined && saved !== null && saved !== "") return number(saved);
+    return number(stampPrices[key]);
+}
+
 function getAgencyStampAdditionsValue(agency) {
 
     if (!agency || agency.status === "cancelled") {
@@ -6561,9 +6620,7 @@ function getAgencyStampAdditionsValue(agency) {
         });
     }
 
-    const stampPrice =
-        number(agency.appliedPrices && agency.appliedPrices.stamps && agency.appliedPrices.stamps.pleading) ||
-        number(stampPrices.pleading);
+    const stampPrice = savedStampPrice(agency, "pleading");
 
     return Math.max(0, count) * stampPrice;
 }
@@ -6654,19 +6711,69 @@ function missingPartsOf(ms) {
     قيمة نوع واحد من الطوابع الناقصة بأسعارها المحفوظة مع كل وكالة (لا بالسعر الحالي)،
     حتى يساوي مجموع الصفوف إجماليها (missingStampsValue المحفوظ).
 */
+/*
+    توزيع قيمة نقص وكالة واحدة على أنواعه (C03، مراجعة 17/11/2026).
+    المبلغ التاريخي المحفوظ (missingStampsValue) هو المرجع دائماً، ولا يُخترع سعر قديم:
+    - النوع الذي له سعر محفوظ مع الوكالة يُحسب به (والصفر سعر صحيح).
+    - وكالة قديمة بلا أسعار: إن أعطت أسعار اليوم المبلغ المحفوظ نفسه فهو التوزيع،
+      وإن بقي نوع واحد بلا سعر فله الباقي، وإلا فالباقي «غير موزّع» (unallocated)
+      مع أنواعه، ويظهر في التقرير صفاً مستقلاً بتنبيه.
+*/
+function agencyMissingSplit(a) {
+    const out = { byKey: {}, unallocated: 0, unallocatedKeys: [] };
+    if (!a || a.status === "cancelled") return out;
+    const ms = a.stamps || a.missingStamps || {};
+    const keys = MISSING_KEYS.filter(function (k) { return number(ms[k]) > 0; });
+    if (!keys.length) return out;
+    const savedOf = function (k) {
+        const v = a.appliedPrices && a.appliedPrices.stamps ? a.appliedPrices.stamps[k] : undefined;
+        return v !== undefined && v !== null && v !== "" ? number(v) : null;
+    };
+    const unsaved = keys.filter(function (k) { return savedOf(k) === null; });
+    keys.forEach(function (k) { if (savedOf(k) !== null) out.byKey[k] = number(ms[k]) * savedOf(k); });
+    if (!unsaved.length) return out;
+    const hasTotal = a.missingStampsValue !== undefined && a.missingStampsValue !== null;
+    const savedSum = keys.reduce(function (s, k) { return s + (out.byKey[k] || 0); }, 0);
+    const remaining = hasTotal ? number(a.missingStampsValue) - savedSum : null;
+    const atToday = unsaved.reduce(function (s, k) { return s + number(ms[k]) * number(stampPrices[k]); }, 0);
+    if (remaining === null || Math.abs(remaining - atToday) < 0.5) {
+        unsaved.forEach(function (k) { out.byKey[k] = number(ms[k]) * number(stampPrices[k]); });
+    } else if (unsaved.length === 1) {
+        out.byKey[unsaved[0]] = Math.max(0, remaining);
+    } else {
+        unsaved.forEach(function (k) { out.byKey[k] = 0; });
+        out.unallocated = Math.max(0, remaining);
+        out.unallocatedKeys = unsaved;
+    }
+    return out;
+}
+
 function missingStampTypeValue(agencies, key) {
     return (agencies || []).reduce(function (sum, a) {
-        if (!a || a.status === "cancelled") return sum;
-        const ms = a.stamps || a.missingStamps || {};
-        const count = number(ms[key]);
-        if (!count) return sum;
-        const saved = a.appliedPrices && a.appliedPrices.stamps && a.appliedPrices.stamps[key];
-        if (saved !== undefined && saved !== null) return sum + count * number(saved);
-        /* وكالة قديمة بلا أسعار محفوظة وفيها نوع واحد: قيمتها المحفوظة هي قيمة هذا النوع */
-        const types = MISSING_KEYS.filter(function (k) { return number(ms[k]) > 0; });
-        if (types.length === 1 && number(a.missingStampsValue) > 0) return sum + number(a.missingStampsValue);
-        return sum + count * number(stampPrices[key]);
+        return sum + number(agencyMissingSplit(a).byKey[key]);
     }, 0);
+}
+
+/* نقص قديم لا يُعرف توزيعه على الأنواع: قيمته وأرقام وكالاته */
+function missingUnallocated(agencies) {
+    const out = { value: 0, numbers: [], keys: {} };
+    (agencies || []).forEach(function (a) {
+        const split = agencyMissingSplit(a);
+        if (split.unallocated > 0) {
+            out.value += split.unallocated;
+            out.numbers.push(String(a.number));
+            split.unallocatedKeys.forEach(function (k) { out.keys[k] = true; });
+        }
+    });
+    return out;
+}
+
+function unallocatedRowHTML(u) {
+    if (!(u.value > 0)) return "";
+    return '<tr class="row-unallocated"><td>نقص قديم غير موزّع على الأنواع' +
+        '<br><small>الوكالات ' + u.numbers.map(escapeHTML).join("، ") + ': مبلغها المحفوظ معروف، وتوزيعه على ' +
+        Object.keys(u.keys).map(function (k) { return MISSING_NAMES[k]; }).join(" و") + " غير معروف (لا أسعار محفوظة). يحتاج مراجعة.</small></td>" +
+        '<td class="num">—</td><td class="num">' + money(u.value) + "</td></tr>";
 }
 
 function groupAgencyNotes(agencies) {
@@ -7054,15 +7161,25 @@ function getRecordRecovery(record) {
 
 /* بنود النقص مجمّعة حسب جهتها، بقيمها المحفوظة مع الوكالات */
 function recoveryGroups(stats) {
-    const groups = { central: { items: [], count: 0, value: 0 }, branch: { items: [], count: 0, value: 0 } };
+    const groups = { central: { items: [], count: 0, value: 0 }, branch: { items: [], count: 0, value: 0 }, unknown: { items: [], count: 0, value: 0 } };
+    const dest = function (k) { return feeDestinations[k] === "branch" ? "branch" : "central"; };
     MISSING_KEYS.forEach(function (k) {
         const count = number(stats.missing[k]);
         if (!count) return;
         const value = missingStampTypeValue(stats.agencies, k);
-        const g = groups[feeDestinations[k] === "branch" ? "branch" : "central"];
+        const g = groups[dest(k)];
         g.items.push({ key: k, name: (k === "receipt" ? "" : "طابع ") + MISSING_NAMES[k], count: count, value: value });
         g.count += count;
         g.value += value;
+    });
+    /* نقص قديم غير موزّع: إن كانت كل أنواعه لجهة واحدة فهو لها (مجموعه معروف)، وإلا «جهة غير محددة» */
+    (stats.agencies || []).forEach(function (a) {
+        const split = agencyMissingSplit(a);
+        if (!(split.unallocated > 0)) return;
+        const dests = split.unallocatedKeys.map(dest).filter(function (d, i, arr) { return arr.indexOf(d) === i; });
+        const g = groups[dests.length === 1 ? dests[0] : "unknown"];
+        g.items.push({ key: "unallocated", name: "نقص قديم غير موزّع (" + split.unallocatedKeys.map(function (k) { return MISSING_NAMES[k]; }).join(" + ") + ") — وكالة " + escapeHTML(a.number), count: 0, value: split.unallocated });
+        g.value += split.unallocated;
     });
     return groups;
 }
@@ -7090,7 +7207,7 @@ function recoveryEditorHTML(record, mode, groups, rec) {
 function recoveryPageHTML(record, stats, mode, forPrint) {
 
     const groups = recoveryGroups(stats);
-    const total = groups.central.value + groups.branch.value;
+    const total = groups.central.value + groups.branch.value + groups.unknown.value;
     if (total <= 0) return "";
 
     const included = reportPrefs().recovery;
@@ -7117,7 +7234,7 @@ function recoveryPageHTML(record, stats, mode, forPrint) {
         "وبعد تدقيقه من قِبل مكتب المحاسبة، تبيّن وجود نقص في الطوابع والرسوم المستحقة على وكالاته بلغت قيمته الإجمالية (<b>" + money(total) + "</b>). " +
         "وقد استُوفيت هذه القيمة من المندوب نقداً، وسُدّدت لأصحاب الحق على النحو الآتي:</p>";
 
-    const ordinals = ["أولاً", "ثانياً"];
+    const ordinals = ["أولاً", "ثانياً", "ثالثاً"];
     let n = 0;
     [["central", "centralReceipt", "centralDate"], ["branch", "branchReceipt", "branchDate"]].forEach(function (g) {
         const group = groups[g[0]];
@@ -7125,11 +7242,23 @@ function recoveryPageHTML(record, stats, mode, forPrint) {
         html += "<h4>" + ordinals[n++] + " — رسوم عائدة إلى " + FEE_DESTINATION_NAMES[g[0]] + "</h4>" +
             '<table class="doc-table recovery-table"><thead><tr><th>البند</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
             group.items.map(function (it) {
-                return "<tr><td>" + it.name + '</td><td class="num">' + it.count + '</td><td class="num">' + money(it.value) + "</td></tr>";
+                return "<tr><td>" + it.name + '</td><td class="num">' + (it.key === "unallocated" ? "—" : it.count) + '</td><td class="num">' + money(it.value) + "</td></tr>";
             }).join("") +
             '</tbody><tfoot><tr><td>المجموع</td><td class="num">' + group.count + '</td><td class="num">' + money(group.value) + "</td></tr></tfoot></table>" +
             '<p class="recovery-receipt">وقد سُدّد هذا المبلغ إلى ' + FEE_DESTINATION_NAMES[g[0]] + " بموجب الإيصال رقم " + val(rec[g[1]]) + " تاريخ " + val(rec[g[2]], true) + ".</p>";
     });
+
+    /* نقص قديم لا تُعرف جهته لأن أنواعه لجهتين مختلفتين ولا أسعار محفوظة له (C03) */
+    if (groups.unknown.value > 0) {
+        html += "<h4>" + (ordinals[n++] || "") + " — نقص قديم جهته غير محددة (يحتاج مراجعة)</h4>" +
+            '<table class="doc-table recovery-table"><tbody>' +
+            groups.unknown.items.map(function (it) {
+                return "<tr><td>" + it.name + '</td><td class="num">' + money(it.value) + "</td></tr>";
+            }).join("") +
+            "</tbody></table>" +
+            '<p class="recovery-warning">مبلغ هذا النقص محفوظ مع الوكالة كما هو، لكن السجل قديم لا يحفظ سعر كل طابع، ' +
+            "وأنواعه تعود لجهتين مختلفتين؛ فلا يُعرف كم منه للنقابة المركزية وكم للفرع. يُراجَع يدوياً قبل اعتماد البيان.</p>";
+    }
 
     if (rec.text) {
         html += '<p class="recovery-extra">' + formatNotesHTML(rec.text) + "</p>";
@@ -7365,6 +7494,7 @@ function buildFinalRecordReport(record, mode, forPrint) {
                     (stats.missing[k] ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
                     '</td><td class="num">' + stats.missing[k] + '</td><td class="num">' + money(missingStampTypeValue(stats.agencies, k)) + "</td></tr>";
             }).join("") +
+            unallocatedRowHTML(missingUnallocated(stats.agencies)) +
             '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(stats.missingValue) + "</td></tr></tfoot></table></section>";
 
         html += '<section class="doc-section">' + secTitle("الإضافات") +
@@ -8447,6 +8577,7 @@ function buildGeneralReportDoc() {
         "<tr><td>إسعاف</td><td class=\"num\">" + pseudo.missing.ambulance + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "ambulance")) + "</td></tr>" +
         "<tr><td>معونة</td><td class=\"num\">" + pseudo.missing.aid + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "aid")) + "</td></tr>" +
         (pseudo.missing.receipt ? "<tr><td>إيصال حد أدنى أتعاب</td><td class=\"num\">" + pseudo.missing.receipt + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "receipt")) + "</td></tr>" : "") +
+        unallocatedRowHTML(missingUnallocated(pseudo.agencies)) +
         '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(pseudo.missingValue) + "</td></tr></tfoot></table></section>";
 
     html += '<section class="doc-section">' + secTitle("بدل الانتقال") + transportTableHTML(pseudo.transport) + "</section>";
@@ -11304,6 +11435,15 @@ stampTypes.forEach(
 
     }
 );
+
+/* نقص قديم لا يُعرف توزيعه على الأنواع (C03) */
+(function () {
+    const u = missingUnallocated(activeAgencies);
+    if (u.value > 0) {
+        html += '<tr class="row-unallocated"><td colspan="3">نقص قديم غير موزّع على الأنواع — الوكالات ' + u.numbers.map(escapeHTML).join("، ") +
+            "<br><small>مبلغه محفوظ ومعروف، وتوزيعه غير معروف (لا أسعار محفوظة). يحتاج مراجعة.</small></td><td>" + money(u.value) + "</td></tr>";
+    }
+})();
 
 
 html += `

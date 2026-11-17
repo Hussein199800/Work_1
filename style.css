@@ -7417,3 +7417,21 @@ html.theme-switching *::after {
         display: none;
     }
 }
+
+/* نقص قديم غير موزّع على الأنواع (C03): صف بتنبيه هادئ */
+.row-unallocated td {
+    background: var(--warning-bg) !important;
+}
+
+.row-unallocated small,
+.recovery-warning {
+    color: var(--warning);
+    font-weight: 600;
+}
+
+.recovery-warning {
+    padding: 8px 12px;
+    border-inline-start: 4px solid var(--warning);
+    background: var(--warning-bg);
+    border-radius: var(--r-sm);
+}
