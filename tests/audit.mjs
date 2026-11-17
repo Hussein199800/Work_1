@@ -39,7 +39,8 @@ const ADMIN = JSON.stringify({ id: "admin-user", username: "admin", role: "manag
 async function fresh(opts) {
     opts = opts || {};
     const ctx = await browser.newContext({ viewport: opts.viewport || { width: 1400, height: 900 }, acceptDownloads: true });
-    await ctx.route(/^https?:\/\/(?!127\.0\.0\.1)/, function (r) { r.abort(); });
+    /* محلي فقط؛ لقياس الأبعاد يُسمح بالخط والأيقونات (الخط البديل أطول فيعطي قياساً غير حقيقي) */
+    await ctx.route(opts.fonts ? /^https?:\/\/(?!127\.0\.0\.1|fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.jsdelivr\.net)/ : /^https?:\/\/(?!127\.0\.0\.1)/, function (r) { r.abort(); });
     await ctx.addInitScript(function (args) {
         if (localStorage.getItem("audit_seeded")) return;
         localStorage.setItem("audit_seeded", "1");
@@ -275,7 +276,6 @@ async function restore(page, data) {
     await page.waitForTimeout(200);
     await page.click('.plus-btn[data-target="missingPleading"]');
     await page.waitForTimeout(200);
-    console.log("   (عدد نقص المرافعة في النموذج: " + await page.inputValue("#missingPleading") + ")");
     await page.click("#addAgencyBtn");
     await page.waitForTimeout(500);
     const after2 = await page.evaluate(function () { return pendingAgencies[0].missingStampsValue; });
@@ -326,6 +326,7 @@ async function restore(page, data) {
     await page.waitForTimeout(300);
     const opener = page.locator("#recordsTableBody button, #recordsTable button, .records-table button").filter({ hasText: "التقرير" }).first();
     const hasOpener = await opener.count();
+    check("R02", "زر «التقرير» في جدول السجلات موجود (لفحص عودة التركيز)", hasOpener > 0);
     if (hasOpener) await opener.click(); else await page.evaluate(function () { showFinalRecordReport("r1", "summary"); });
     await page.waitForTimeout(400);
     await page.fill("#rcv_centralReceipt", "4521");
@@ -369,7 +370,7 @@ async function restore(page, data) {
     await confirmDialogs(page);
     await page.waitForTimeout(300);
     const closed = await page.evaluate(function () { return { hidden: document.getElementById("recordModal").classList.contains("hidden"), focus: (document.activeElement && document.activeElement.textContent || "").trim().slice(0, 20) }; });
-    check("R02", "بعد الإغلاق يعود التركيز إلى زر التقرير", closed.hidden && (!hasOpener || /التقرير/.test(closed.focus)), JSON.stringify(closed));
+    check("R02", "بعد الإغلاق يعود التركيز إلى زر التقرير", closed.hidden && /التقرير/.test(closed.focus), JSON.stringify(closed));
     await ctx.close();
 }
 
@@ -388,9 +389,9 @@ for (const theme of ["light", "dark"]) {
     }
 }
 for (const [w, h] of [[1366, 768], [1440, 900], [1280, 800], [1920, 1080]]) {
-    const ctx = await fresh({ viewport: { width: w, height: h } });
+    const ctx = await fresh({ viewport: { width: w, height: h }, fonts: true });
     const page = await open(ctx);
-    await page.evaluate(function () { switchSection("newRecordSection"); });
+    await page.evaluate(function () { switchSection("newRecordSection"); return document.fonts.ready; });
     await page.waitForTimeout(400);
     await page.focus("#agencyNumber");
     await page.waitForTimeout(900);

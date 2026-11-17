@@ -2019,14 +2019,16 @@
         class="modal hidden"
     >
 
-        <div class="modal-content">
+        <div class="modal-content" role="dialog" aria-modal="true" aria-label="عرض السجل والتقرير" tabindex="-1">
 
             <button
                 type="button"
                 class="modal-close"
                 onclick="closeRecordModal()"
+                aria-label="إغلاق النافذة"
+                title="إغلاق (Esc)"
             >
-                ×
+                <span aria-hidden="true">×</span>
             </button>
 
             <div id="modalContent"></div>

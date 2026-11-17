@@ -1612,9 +1612,43 @@ function updateProfileCard() {
     }
 }
 
-function setNavOpen(open) {
-    document.body.classList.toggle("nav-open", !!open);
+/*
+    القائمة الجانبية على الجوال والآيباد (≤ 1024، مخفية بالتحويل خارج الشاشة) — U03:
+    مغلقةً تخرج من ترتيب Tab (inert)، ومفتوحةً ينتقل التركيز إليها، ومع الإغلاق
+    يعود إلى زر القائمة. على الكمبيوتر القائمة دائمة فلا تُعطَّل أبداً.
+*/
+const navMobileQuery = window.matchMedia ? window.matchMedia("(max-width: 1024px)") : null;
+
+function syncNavInert() {
+    const sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+    const mobile = navMobileQuery ? navMobileQuery.matches : false;
+    const open = document.body.classList.contains("nav-open");
+    sidebar.inert = mobile && !open;
+    if (mobile) sidebar.setAttribute("aria-hidden", open ? "false" : "true"); else sidebar.removeAttribute("aria-hidden");
 }
+
+function setNavOpen(open) {
+    const wasOpen = document.body.classList.contains("nav-open");
+    document.body.classList.toggle("nav-open", !!open);
+    syncNavInert();
+    const mobile = navMobileQuery ? navMobileQuery.matches : false;
+    if (!mobile) return;
+    if (open && !wasOpen) {
+        setTimeout(function () { document.getElementById("menuClose")?.focus({ preventScroll: true }); }, 50);
+    } else if (!open && wasOpen) {
+        const sidebar = document.getElementById("sidebar");
+        if (!document.activeElement || document.activeElement === document.body || (sidebar && sidebar.contains(document.activeElement))) {
+            document.getElementById("menuToggle")?.focus({ preventScroll: true });
+        }
+    }
+}
+
+if (navMobileQuery) {
+    if (navMobileQuery.addEventListener) navMobileQuery.addEventListener("change", syncNavInert);
+    else if (navMobileQuery.addListener) navMobileQuery.addListener(syncNavInert);
+}
+onReady(syncNavInert);
 
 document.getElementById("menuToggle")?.addEventListener("click", function () {
     setNavOpen(true);
@@ -1629,7 +1663,7 @@ document.getElementById("navOverlay")?.addEventListener("click", function () {
 });
 
 document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") {
+    if (event.key === "Escape" && document.body.classList.contains("nav-open")) {
         setNavOpen(false);
     }
 });
@@ -3980,7 +4014,9 @@ document.getElementById("agencyNumber")?.addEventListener("focus", function () {
     if (!card) return;
     /* بعد تمرير المتصفح الخاص بالتركيز: نحاذي البطاقة لأعلى الشاشة إن لم تكن ظاهرة كلها */
     setTimeout(function () {
-        const box = card.getBoundingClientRect();
+        /* U02: المرجع محتوى البطاقة (الأعمدة) لا عنوانها، حتى يتسع كل شيء فوق شريط الحفظ في 1366×768 */
+        const layout = card.querySelector(".agency-layout") || card;
+        const box = layout.getBoundingClientRect();
         const dock = document.getElementById("recordDock");
         const bottomLimit = dock && dock.offsetParent ? dock.getBoundingClientRect().top : window.innerHeight;
         if (box.top < 0 || box.bottom > bottomLimit) {
@@ -7184,14 +7220,42 @@ function recoveryGroups(stats) {
     return groups;
 }
 
+/*
+    مسودة إيصالات البيان لكل سجل (R01): ما يكتبه المستخدم يبقى عند إعادة رسم
+    التقرير (تكبير الخط، إظهار البيان أو إخفاؤه، التنقل بين المختصر والمفصل)،
+    ولا يُحفظ تلقائياً؛ يُحفظ بزر «حفظ بيانات البيان» فقط، ويُسأل عنه قبل الإغلاق.
+*/
+let recoveryDrafts = {};
+
+document.addEventListener("input", function (event) {
+    const el = event.target;
+    if (!el || !el.id || el.id.indexOf("rcv_") !== 0) return;
+    const editor = el.closest(".recovery-editor");
+    const id = editor && editor.dataset.recordId;
+    if (!id) return;
+    recoveryDrafts[id] = recoveryDrafts[id] || {};
+    recoveryDrafts[id][el.id.slice(4)] = el.value;
+});
+
+/* سجلات فيها إيصالات مكتوبة لم تُحفظ */
+function dirtyRecoveryDrafts() {
+    return Object.keys(recoveryDrafts).filter(function (id) {
+        const record = records.find(function (r) { return r.id === id; });
+        const saved = getRecordRecovery(record);
+        const draft = recoveryDrafts[id];
+        return Object.keys(draft).some(function (k) { return String(draft[k] || "").trim() !== String(saved[k] || ""); });
+    });
+}
+
 function recoveryEditorHTML(record, mode, groups, rec) {
     const id = escapeHTML(record.id);
+    rec = Object.assign({}, rec, recoveryDrafts[record.id] || {});
     const field = function (key, label, value, type) {
         return '<label class="input-group"><span>' + label + "</span>" +
             '<input type="' + (type || "text") + '" id="rcv_' + key + '" value="' + escapeHTML(value) + '"' +
             (type === "date" ? ' lang="en-GB" dir="ltr"' : ' autocomplete="off"') + "></label>";
     };
-    let html = '<div class="recovery-editor no-print"><h4><i class="ti ti-receipt" aria-hidden="true"></i> بيانات الإيصالات لبيان استدراك النقص</h4><div class="recovery-fields">';
+    let html = '<div class="recovery-editor no-print" data-record-id="' + id + '"><h4><i class="ti ti-receipt" aria-hidden="true"></i> بيانات الإيصالات لبيان استدراك النقص</h4><div class="recovery-fields">';
     if (groups.central.value > 0) {
         html += field("centralReceipt", "إيصال النقابة المركزية — الرقم", rec.centralReceipt) + field("centralDate", "تاريخه", rec.centralDate, "date");
     }
@@ -7303,6 +7367,7 @@ function saveRecordRecovery(id, mode) {
     record.updatedAt = new Date().toISOString();
 
     persistRecords().then(function () {
+        delete recoveryDrafts[id];
         notify("حُفظت بيانات بيان استدراك النقص.", "success");
         showFinalRecordReport(id, mode, true);
     }).catch(function (error) {
@@ -9278,17 +9343,108 @@ viewRecord;
 إغلاق نافذة العرض
 ========================================================= */
 
-function closeRecordModal() {
+/*
+    الإغلاق (×، «إغلاق»، Escape، الضغط خارج النافذة): إن كانت هناك إيصالات مكتوبة لم
+    تُحفظ يُسأل أولاً (R01/R02). يُرجع Promise بـ true عند الإغلاق فعلاً.
+    force: إغلاق برمجي دون سؤال.
+*/
+function closeRecordModal(force) {
 
-document
-    .getElementById(
-        "recordModal"
-    )
-    ?.classList.add(
-        "hidden"
-    );
+    const hide = function () {
+        recoveryDrafts = {};
+        document.getElementById("recordModal")?.classList.add("hidden");
+        return true;
+    };
 
+    if (!force && dirtyRecoveryDrafts().length) {
+        return appConfirm({
+            title: "إيصالات لم تُحفظ",
+            message: "كتبت بيانات في «بيان استدراك النقص» ولم تحفظها. إن أغلقت الآن فستضيع.",
+            confirmText: "إغلاق دون حفظ",
+            cancelText: "رجوع",
+            danger: true
+        }).then(function (ok) { return ok ? hide() : false; });
+    }
+
+    return Promise.resolve(hide());
 }
+
+/*
+    نافذة التقرير حوار حقيقي (R02): عند فتحها يتعطل ما خلفها (inert) وينتقل التركيز
+    إليها ويبقى فيها، وعند إغلاقها يعود التركيز إلى الزر الذي فتحها.
+    مراقبة ظهورها تغطي كل من يفتحها (التقرير، أنواع الوكالات، التدقيق السريع…).
+*/
+(function () {
+    const modal = document.getElementById("recordModal");
+    if (!modal) return;
+    const box = modal.querySelector(".modal-content");
+    const background = function () {
+        return [document.getElementById("appPage"), document.getElementById("loginPage")].filter(Boolean);
+    };
+    let opener = null;
+    let wasOpen = false;
+
+    const focusables = function () {
+        return Array.prototype.filter.call(
+            box.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+            function (el) { return el.offsetParent !== null || el === document.activeElement; }
+        );
+    };
+
+    const focusInside = function () {
+        if (box.contains(document.activeElement)) return;
+        const first = box.querySelector(".report-actions button, .report-actions a") || focusables()[0];
+        (first || box).focus({ preventScroll: true });
+    };
+
+    const sync = function () {
+        const open = !modal.classList.contains("hidden");
+        if (open && !wasOpen) {
+            const active = document.activeElement;
+            opener = active && active !== document.body && !modal.contains(active) ? active : null;
+            background().forEach(function (el) { el.inert = true; });
+            setTimeout(focusInside, 0);
+        } else if (!open && wasOpen) {
+            background().forEach(function (el) { el.inert = false; });
+            if (opener && document.contains(opener) && typeof opener.focus === "function") {
+                try { opener.focus({ preventScroll: true }); } catch (e) {}
+            }
+            opener = null;
+        }
+        wasOpen = open;
+    };
+
+    new MutationObserver(sync).observe(modal, { attributes: true, attributeFilter: ["class"] });
+    /* إعادة رسم المحتوى (تكبير، تبديل…) تُسقط التركيز: يعود داخل النافذة */
+    new MutationObserver(function () {
+        if (!modal.classList.contains("hidden")) setTimeout(focusInside, 0);
+    }).observe(document.getElementById("modalContent"), { childList: true });
+
+    document.addEventListener("keydown", function (event) {
+        if (modal.classList.contains("hidden") || document.querySelector("dialog[open]")) return;
+        if (event.key === "Escape") {
+            event.preventDefault();
+            closeRecordModal();
+            return;
+        }
+        if (event.key !== "Tab") return;
+        const list = focusables();
+        if (!list.length) { event.preventDefault(); box.focus(); return; }
+        const first = list[0];
+        const last = list[list.length - 1];
+        const active = document.activeElement;
+        if (!box.contains(active)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus();
+        } else if (event.shiftKey && active === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && active === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
+})();
 
 window.closeRecordModal =
 closeRecordModal;
@@ -9892,7 +10048,8 @@ function openAgencyForEdit(recordId, index) {
         return;
     }
 
-    closeRecordModal();
+    closeRecordModal().then(function (closed) {
+    if (!closed) return;
     editRecord(recordId, function () {
 
         if (pendingAgencies[index]) {
@@ -9908,6 +10065,7 @@ function openAgencyForEdit(recordId, index) {
             "<span>عدّل بيانات الوكالة ثم اضغط «إضافة الوكالة»، وبعدها «حفظ السجل» لحفظ التعديل.</span>",
             8000
         );
+    });
     });
 }
 
