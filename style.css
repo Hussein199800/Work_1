@@ -6341,7 +6341,8 @@ html.theme-switching *::after {
 }
 
 .agency-main .notes-group textarea {
-    height: 64px;
+    /* U02: 44 بدل 64 حتى تتسع البطاقة كاملة فوق شريط الحفظ في 1366×768 (قابلة للسحب للتكبير) */
+    height: 44px;
     min-height: 40px;
 }
 
@@ -7415,5 +7416,47 @@ html.theme-switching *::after {
     .dash-due::after,
     .sidebar::before {
         display: none;
+    }
+}
+
+/* نقص قديم غير موزّع على الأنواع (C03): صف بتنبيه هادئ */
+.row-unallocated td {
+    background: var(--warning-bg) !important;
+}
+
+.row-unallocated small,
+.recovery-warning {
+    color: var(--warning);
+    font-weight: 600;
+}
+
+.recovery-warning {
+    padding: 8px 12px;
+    border-inline-start: 4px solid var(--warning);
+    background: var(--warning-bg);
+    border-radius: var(--r-sm);
+}
+
+/* U01 (مراجعة 17/11/2026): صف سعر الإضافة على الجوال الضيق — الاسم سطر كامل،
+   ثم خانة السعر وخيار «طابع مرافعة» جنباً إلى جنب، دون تجاوز عرض الشاشة (320 / 360). */
+@media screen and (max-width: 640px) {
+    #additionPricesContainer .price-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px 12px !important;
+        align-items: center;
+    }
+
+    #additionPricesContainer .price-row > label:first-child {
+        grid-column: 1 / -1;
+    }
+
+    #additionPricesContainer .price-row input:not([type="checkbox"]) {
+        width: 100%;
+        min-width: 0;
+    }
+
+    #additionPricesContainer .price-row > label:last-child {
+        justify-content: flex-start;
+        white-space: nowrap;
     }
 }

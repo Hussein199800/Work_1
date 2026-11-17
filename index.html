@@ -1619,6 +1619,19 @@
                         </div>
                     </li>
 
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-shield-check"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">17 تشرين الثاني 2026</p>
+                            <h3>مراجعة مستقلة وإصلاح ثلاثة عشر بنداً</h3>
+                            <ul class="devlog-list">
+                                <li>حماية البيانات: نافذتان تحفظان في اللحظة نفسها لا يضيع حفظ إحداهما، الاستعادة كلها أو لا شيء، رفض ملف النسخة التالف قبل أي كتابة، الإعداد التالف لا يُستبدل بالافتراضي، وفشل الحفظ بعد المزامنة لا يترك بيانات غير محفوظة.</li>
+                                <li>الحسابات: تعديل ملاحظة الوكالة لا يغيّر مبالغها التاريخية، السعر المحفوظ صفراً يبقى صفراً، والنقص القديم متعدد الأنواع يبقى بمبلغه المحفوظ مع تنبيه بدل توزيع مخترع.</li>
+                                <li>نافذة التقرير حوار حقيقي (تركيز، Esc، رجوع التركيز) ولا تمسح الإيصالات غير المحفوظة؛ صفحة الأسعار على الجوال الضيق، بطاقة الوكالة كاملة في شاشة 1366×768، والقائمة المغلقة على الجوال خارج ترتيب Tab.</li>
+                            </ul>
+                        </div>
+                    </li>
+
                 </ol>
 
             </section>
@@ -2019,14 +2032,16 @@
         class="modal hidden"
     >
 
-        <div class="modal-content">
+        <div class="modal-content" role="dialog" aria-modal="true" aria-label="عرض السجل والتقرير" tabindex="-1">
 
             <button
                 type="button"
                 class="modal-close"
                 onclick="closeRecordModal()"
+                aria-label="إغلاق النافذة"
+                title="إغلاق (Esc)"
             >
-                ×
+                <span aria-hidden="true">×</span>
             </button>
 
             <div id="modalContent"></div>
@@ -2058,9 +2073,17 @@
                 req.onupgradeneeded = function () { req.result.createObjectStore("kv"); };
                 req.onsuccess = function () {
                     try {
-                        var get = req.result.transaction("kv", "readonly").objectStore("kv").get("audit_records");
-                        get.onsuccess = function () { window.__AUDIT_IDB_RECORDS = get.result; start(); };
-                        get.onerror = function () { window.__AUDIT_IDB_ERROR = get.error || "read"; start(); };
+                        /* السجلات ورقم نسختها في معاملة قراءة واحدة (الرقم يمنع نافذتين من الكتابة فوق بعضهما) */
+                        var tx = req.result.transaction("kv", "readonly");
+                        var store = tx.objectStore("kv");
+                        var get = store.get("audit_records");
+                        var rev = store.get("audit_records_rev");
+                        tx.oncomplete = function () {
+                            window.__AUDIT_IDB_RECORDS = get.result;
+                            window.__AUDIT_IDB_REV = rev.result === undefined ? null : rev.result;
+                            start();
+                        };
+                        tx.onerror = function () { window.__AUDIT_IDB_ERROR = tx.error || "read"; start(); };
                     } catch (e) { window.__AUDIT_IDB_ERROR = e; start(); }
                 };
                 req.onerror = function () { window.__AUDIT_IDB_ERROR = req.error || "open"; start(); };

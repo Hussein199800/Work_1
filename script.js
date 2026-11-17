@@ -259,6 +259,29 @@ const NOTE_NO_BOND =
 التخزين
 ========================================================= */
 
+/*
+    إعدادات بيانات تعذرت قراءتها (نص JSON تالف) — مراجعة 17/11/2026، D04.
+    المفتاح الغائب (تثبيت جديد) يأخذ القيمة الافتراضية كما كان، أما المفتاح
+    الموجود التالف فلا يُكتب فوقه بالافتراضي عند الفتح: يبقى نصه كما هو،
+    وتظهر رسالة، ويتوقف حفظ السجلات حتى يُعالَج (استعادة نسخة، أو مزامنة،
+    أو اعتماد الافتراضي صراحةً بعد تنزيل النص التالف).
+*/
+const DATA_SETTINGS_KEYS = [
+    "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
+    "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
+    "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
+    "audit_fee_destinations"
+];
+let settingsLoadFailed = [];
+const settingsCorruptRaw = {};
+/* بعد اكتمال الفتح: الكتابة فوق إعداد تالف خطأ صريح لا تجاهل صامت */
+let appStartupDone = false;
+
+function settingsLoadFailedMessage() {
+    return "تعذرت قراءة إعدادات محفوظة (" + settingsLoadFailed.join("، ") + ")، فأُوقف حفظ السجلات حتى لا تُحسب بأسعار افتراضية. " +
+        "استعد نسخة احتياطية، أو اعتمد الإعدادات الافتراضية صراحةً من الرسالة الظاهرة.";
+}
+
 function loadData(key, defaultValue) {
 
 try {
@@ -283,6 +306,11 @@ try {
         error
     );
 
+    if (DATA_SETTINGS_KEYS.indexOf(key) !== -1) {
+        try { settingsCorruptRaw[key] = localStorage.getItem(key); } catch (e) {}
+        if (settingsLoadFailed.indexOf(key) === -1) settingsLoadFailed.push(key);
+    }
+
     return JSON.parse(
         JSON.stringify(defaultValue)
     );
@@ -291,7 +319,20 @@ try {
 
 }
 
-function saveData(key, value) {
+/* force: كتابة مقصودة فوق إعداد تالف (استعادة نسخة، أو «اعتماد الافتراضي») */
+function saveData(key, value, force) {
+
+if (settingsLoadFailed.indexOf(key) !== -1) {
+    if (!force) {
+        if (!appStartupDone) {
+            /* الكتابة التلقائية عند الفتح لا تمس الإعداد التالف */
+            console.warn("Skipped writing unreadable setting:", key);
+            return;
+        }
+        throw new Error(settingsLoadFailedMessage());
+    }
+    settingsLoadFailed = settingsLoadFailed.filter(function (k) { return k !== key; });
+}
 
 localStorage.setItem(
     key,
@@ -408,8 +449,31 @@ let recordsLoadFailed = false;
 
 let records;
 
+/*
+    بنية قائمة السجلات (D03): كل سجل كائن بمعرّف ووكالاته قائمة كائنات، دون معرّفات مكررة.
+    الحقول الحديثة (receipt، recovery، additions…) ليست شرطاً: النسخ القديمة صحيحة.
+    يُرجع نص المشكلة الأولى أو "" إن كانت سليمة.
+*/
+function recordsListProblem(list) {
+    if (!Array.isArray(list)) return "السجلات ليست قائمة";
+    const seen = {};
+    for (let i = 0; i < list.length; i++) {
+        const r = list[i];
+        if (!r || typeof r !== "object" || Array.isArray(r)) return "السجل رقم " + (i + 1) + " فارغ أو ليس سجلاً";
+        if (r.id === undefined || r.id === null || String(r.id) === "") return "السجل رقم " + (i + 1) + " بلا معرّف";
+        if (seen[String(r.id)]) return "معرّف سجل مكرر (" + String(r.id) + ")";
+        seen[String(r.id)] = true;
+        if (r.agencies !== undefined && !Array.isArray(r.agencies)) return "وكالات السجل " + (r.recordNumber || i + 1) + " ليست قائمة";
+        const ags = r.agencies || [];
+        for (let j = 0; j < ags.length; j++) {
+            if (!ags[j] || typeof ags[j] !== "object" || Array.isArray(ags[j])) return "وكالة فارغة في السجل " + (r.recordNumber || i + 1);
+        }
+    }
+    return "";
+}
+
 if (recordsInIDB) {
-    if (window.__AUDIT_IDB_ERROR || !Array.isArray(window.__AUDIT_IDB_RECORDS)) {
+    if (window.__AUDIT_IDB_ERROR || !Array.isArray(window.__AUDIT_IDB_RECORDS) || recordsListProblem(window.__AUDIT_IDB_RECORDS)) {
         console.error("Records could not be read from IndexedDB:", window.__AUDIT_IDB_ERROR);
         records = [];
         recordsLoadFailed = true;
@@ -422,7 +486,7 @@ if (recordsInIDB) {
     try { rawRecords = localStorage.getItem("audit_records"); } catch (e) {}
     let parsedRecords = null;
     try { parsedRecords = rawRecords === null ? [] : JSON.parse(rawRecords); } catch (e) { parsedRecords = null; }
-    if (Array.isArray(parsedRecords)) {
+    if (Array.isArray(parsedRecords) && !recordsListProblem(parsedRecords)) {
         records = parsedRecords;
     } else {
         console.error("audit_records is not a readable list; saving is blocked to protect it.");
@@ -507,6 +571,12 @@ function moveRecordsToIDBNow() {
                 throw new Error("فشل التحقق من نسخ السجلات إلى المخزن الكبير، لم يُحذف شيء.");
             }
 
+            /* رقم نسخة أول للسجلات في المخزن الكبير (للمقارنة عند كل حفظ) */
+            const rev = newRecordsRevision();
+            return idbPut(IDB_REV_KEY, rev).then(function () { knownIdbRev = rev; return saved; });
+        })
+        .then(function () {
+
             try {
                 localStorage.setItem(RECORDS_STORE_KEY, "idb");
             } catch (error) {
@@ -548,40 +618,134 @@ window.addEventListener("storage", function (event) {
     if (event.key === RECORDS_REV_KEY && String(event.newValue || "").indexOf(TAB_ID + ":") === 0) return;
     if (recordsStaleTab) return;
     recordsStaleTab = true;
+    notifyStaleTab();
+});
+
+function notifyStaleTab() {
     try {
         notify("<strong>السجلات تغيّرت في نافذة أخرى من البرنامج</strong>" +
             "<span>أُوقف الحفظ في هذه النافذة حتى لا تُكتب نسخة قديمة فوقها. أعد تحميلها، أو اعمل من نافذة واحدة.</span>" +
             '<span class="toast-actions"><button type="button" class="act-btn" onclick="reloadApp()">إعادة التحميل</button></span>', "warning", 600000, true);
     } catch (e) {}
-});
+}
 
 /* يزداد مع كل حفظ للسجلات: بصمات المزامنة المحفوظة مؤقتاً (fbLocalHashCache) تصلح ما دام لم يتغير */
 let recordsWriteSeq = 0;
 
+/*
+    حماية من نافذتين تحفظان في اللحظة نفسها (مراجعة 17/11/2026، D01):
+    حدث storage يصل متأخراً أحياناً، فحفظان متداخلان كانا ينجحان ويضيع أحدهما.
+    الآن: ١) حفظات النافذة الواحدة بالدور ٢) قفل بين النوافذ (Web Locks)
+    ٣) قبل الكتابة يُقارن رقم نسخة السجلات المخزّن بما قرأته هذه النافذة؛ إن
+    كتبت نافذة أخرى بعده يُرفض الحفظ بدل الكتابة فوقها. في IndexedDB المقارنة
+    والكتابة في معاملة واحدة (audit_records_rev بجانب audit_records في kv).
+*/
+const RECORDS_STALE_MESSAGE = "السجلات تغيّرت في نافذة أخرى من البرنامج. أعد تحميل هذه الصفحة قبل الحفظ.";
+const IDB_REV_KEY = "audit_records_rev";
+/* undefined = غير معروف (محمّل قديم): لا مقارنة؛ null = لا رقم بعد */
+let knownIdbRev = window.__AUDIT_IDB_REV;
+let knownLsRev = (function () { try { return localStorage.getItem(RECORDS_REV_KEY); } catch (e) { return undefined; } })();
+let revCounter = 0;
+let recordsSaveQueue = Promise.resolve();
+
+function newRecordsRevision() {
+    revCounter += 1;
+    return TAB_ID + ":" + Date.now() + ":" + revCounter;
+}
+
+function recordsConflict() {
+    if (!recordsStaleTab) {
+        recordsStaleTab = true;
+        notifyStaleTab();
+    }
+    const error = new Error(RECORDS_STALE_MESSAGE);
+    error.code = "records-conflict";
+    return error;
+}
+
+function withRecordsLock(fn) {
+    try {
+        if (navigator.locks && typeof navigator.locks.request === "function") {
+            return navigator.locks.request("audit_records_write", fn);
+        }
+    } catch (e) {}
+    return Promise.resolve().then(fn);
+}
+
 function persistRecordsNow() {
     recordsWriteSeq++;
     if (recordsStaleTab) {
-        return Promise.reject(new Error("السجلات تغيّرت في نافذة أخرى من البرنامج. أعد تحميل هذه الصفحة قبل الحفظ."));
+        return Promise.reject(new Error(RECORDS_STALE_MESSAGE));
     }
-    return persistRecordsRaw().then(function (value) {
-        try { localStorage.setItem(RECORDS_REV_KEY, TAB_ID + ":" + Date.now()); } catch (e) {}
-        return value;
+    const run = function () {
+        return withRecordsLock(function () {
+            if (recordsStaleTab) {
+                return Promise.reject(new Error(RECORDS_STALE_MESSAGE));
+            }
+            const rev = newRecordsRevision();
+            return persistRecordsRaw(rev).then(function (value) {
+                try { localStorage.setItem(RECORDS_REV_KEY, rev); knownLsRev = rev; } catch (e) {}
+                return value;
+            });
+        });
+    };
+    const result = recordsSaveQueue.then(run, run);
+    recordsSaveQueue = result.catch(function () {});
+    return result;
+}
+
+/* IndexedDB: مقارنة رقم النسخة وكتابة السجلات ورقمها الجديد في معاملة واحدة */
+function idbPutRecordsChecked(list, rev) {
+    return idbOpen().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            let conflict = false;
+            const tx = db.transaction(IDB_STORE, "readwrite");
+            const store = tx.objectStore(IDB_STORE);
+            const get = store.get(IDB_REV_KEY);
+            get.onsuccess = function () {
+                const current = get.result === undefined ? null : get.result;
+                if (knownIdbRev !== undefined && current !== knownIdbRev) {
+                    conflict = true;
+                    tx.abort();
+                    return;
+                }
+                store.put(list, "audit_records");
+                store.put(rev, IDB_REV_KEY);
+            };
+            tx.oncomplete = function () { db.close(); knownIdbRev = rev; resolve(); };
+            tx.onerror = function () { if (!conflict) { db.close(); reject(tx.error); } };
+            tx.onabort = function () { db.close(); reject(conflict ? recordsConflict() : (tx.error || new Error("IndexedDB abort"))); };
+        });
     });
 }
 
-function persistRecordsRaw() {
+function persistRecordsRaw(rev) {
+
+    rev = rev || newRecordsRevision();
 
     /* نقل جارٍ: ننتظره ثم نحفظ آخر نسخة من السجلات في مكانها الجديد */
     if (recordsMoving) {
-        return recordsMoving.catch(function () {}).then(persistRecordsNow);
+        return recordsMoving.catch(function () {}).then(function () { return persistRecordsRaw(rev); });
     }
 
     if (recordsLoadFailed) {
         return Promise.reject(new Error("تعذر قراءة السجلات من المخزن عند فتح الصفحة، لذلك أُوقف الحفظ حمايةً للبيانات. حدّث الصفحة (Ctrl + F5)."));
     }
 
+    /* إعداد مالي تالف لم يُصلح بعد: لا حفظ لسجلات بأسعار افتراضية غير مقصودة (D04) */
+    if (settingsLoadFailed.length) {
+        return Promise.reject(new Error(settingsLoadFailedMessage()));
+    }
+
     if (recordsInIDB) {
-        return idbPut("audit_records", records);
+        return idbPutRecordsChecked(records, rev);
+    }
+
+    /* localStorage: نافذة أخرى حفظت بعد أن قرأت هذه النافذة السجلات */
+    let currentLsRev = null;
+    try { currentLsRev = localStorage.getItem(RECORDS_REV_KEY); } catch (e) {}
+    if (knownLsRev !== undefined && currentLsRev !== knownLsRev) {
+        return Promise.reject(recordsConflict());
     }
 
     try {
@@ -594,7 +758,7 @@ function persistRecordsRaw() {
         /* المساحة ممتلئة: ننقل السجلات إلى المخزن الكبير ونحفظ هناك */
         return moveRecordsToIDB().then(function () {
             /* إن كان نقلٌ استباقي قد بدأ قبل هذا الحفظ فلقطته لا تحوي السجل الجديد */
-            return idbPut("audit_records", records);
+            return idbPutRecordsChecked(records, rev);
         }).then(function () {
             notify("<strong>نُقلت السجلات إلى مخزن أكبر</strong><span>امتلأت مساحة المتصفح، فنُقلت كل السجلات إلى مخزن أكبر في نفس المتصفح وحُفظ السجل.</span>", "info", 8000, true);
         });
@@ -1448,9 +1612,43 @@ function updateProfileCard() {
     }
 }
 
-function setNavOpen(open) {
-    document.body.classList.toggle("nav-open", !!open);
+/*
+    القائمة الجانبية على الجوال والآيباد (≤ 1024، مخفية بالتحويل خارج الشاشة) — U03:
+    مغلقةً تخرج من ترتيب Tab (inert)، ومفتوحةً ينتقل التركيز إليها، ومع الإغلاق
+    يعود إلى زر القائمة. على الكمبيوتر القائمة دائمة فلا تُعطَّل أبداً.
+*/
+const navMobileQuery = window.matchMedia ? window.matchMedia("(max-width: 1024px)") : null;
+
+function syncNavInert() {
+    const sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+    const mobile = navMobileQuery ? navMobileQuery.matches : false;
+    const open = document.body.classList.contains("nav-open");
+    sidebar.inert = mobile && !open;
+    if (mobile) sidebar.setAttribute("aria-hidden", open ? "false" : "true"); else sidebar.removeAttribute("aria-hidden");
 }
+
+function setNavOpen(open) {
+    const wasOpen = document.body.classList.contains("nav-open");
+    document.body.classList.toggle("nav-open", !!open);
+    syncNavInert();
+    const mobile = navMobileQuery ? navMobileQuery.matches : false;
+    if (!mobile) return;
+    if (open && !wasOpen) {
+        setTimeout(function () { document.getElementById("menuClose")?.focus({ preventScroll: true }); }, 50);
+    } else if (!open && wasOpen) {
+        const sidebar = document.getElementById("sidebar");
+        if (!document.activeElement || document.activeElement === document.body || (sidebar && sidebar.contains(document.activeElement))) {
+            document.getElementById("menuToggle")?.focus({ preventScroll: true });
+        }
+    }
+}
+
+if (navMobileQuery) {
+    if (navMobileQuery.addEventListener) navMobileQuery.addEventListener("change", syncNavInert);
+    else if (navMobileQuery.addListener) navMobileQuery.addListener(syncNavInert);
+}
+onReady(syncNavInert);
 
 document.getElementById("menuToggle")?.addEventListener("click", function () {
     setNavOpen(true);
@@ -1465,7 +1663,7 @@ document.getElementById("navOverlay")?.addEventListener("click", function () {
 });
 
 document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") {
+    if (event.key === "Escape" && document.body.classList.contains("nav-open")) {
         setNavOpen(false);
     }
 });
@@ -2309,10 +2507,7 @@ function getAgencyTransport(agency) {
     const stampPrice =
         typeof settings.stampPrice === "number"
             ? settings.stampPrice
-            : number(
-                (agency && agency.appliedPrices && agency.appliedPrices.stamps && agency.appliedPrices.stamps.pleading) ||
-                stampPrices.pleading
-            );
+            : savedStampPrice(agency, "pleading");
 
     const share = number(settings.representativeShare);
     const cash = number(settings.cashRemainder);
@@ -2490,8 +2685,12 @@ return {
 function calculateStamps(
 additionsResult,
 missing,
-cancelled
+cancelled,
+stampTable
 ) {
+
+/* أسعار الطوابع: المعتمدة للوكالة إن مُرّرت (تعديل وكالة محفوظة)، وإلا الحالية */
+const sp = stampTable || stampPrices;
 
 if (cancelled) {
 
@@ -2531,7 +2730,7 @@ const missingValue =
             missing.pleading
         ) *
         number(
-            stampPrices.pleading
+            sp.pleading
         )
     )
 
@@ -2542,7 +2741,7 @@ const missingValue =
             missing.ambulance
         ) *
         number(
-            stampPrices.ambulance
+            sp.ambulance
         )
     )
 
@@ -2553,7 +2752,7 @@ const missingValue =
             missing.aid
         ) *
         number(
-            stampPrices.aid
+            sp.aid
         )
     )
 
@@ -2564,7 +2763,7 @@ const missingValue =
             missing.receipt
         ) *
         number(
-            stampPrices.receipt
+            sp.receipt
         )
     );
 
@@ -2733,7 +2932,7 @@ function buildAgency(inputs, pricing, keepId) {
 
     /* الملغاة: الأعداد تبقى كما أُدخلت، لكن بلا قيمة (كما في التقارير) */
     const additionResult = calculateAdditions(cancelled ? {} : additions, pricing);
-    const stampResult = calculateStamps(additionResult, missing, cancelled);
+    const stampResult = calculateStamps(additionResult, missing, cancelled, pricing.stamps);
 
     const representativeAmount = calculateRepresentativeAmount(
         pricing.representative,
@@ -2774,7 +2973,7 @@ function buildAgency(inputs, pricing, keepId) {
             priceMonth: pricing.priceMonth || null,
             additions: JSON.parse(JSON.stringify(pricing.additions)),
             transport: JSON.parse(JSON.stringify(pricing.transport)),
-            stamps: JSON.parse(JSON.stringify(stampPrices))
+            stamps: JSON.parse(JSON.stringify(pricing.stamps || stampPrices))
         }
     };
 }
@@ -2785,13 +2984,61 @@ function getAgencyFromForm() {
 }
 
 /* وكالة معدّلة من النموذج: المعرّف نفسه، والسعر المحدد وسجل الأسعار كما كانا */
+/*
+    أسعار الوكالة المعتمدة يوم حُسبت (C01): السعر وحصة الفرع والإضافات والبدل والطوابع.
+    ما ليس محفوظاً في وكالة قديمة يأخذ السعر الحالي (لا يُخترع سعر تاريخي).
+*/
+function savedPricingOf(source, current) {
+    const applied = source.appliedPrices || {};
+    const has = function (v) { return v !== undefined && v !== null; };
+    return {
+        agency: has(applied.agency) && number(applied.agency) > 0 ? number(applied.agency) : (source.status !== "cancelled" && number(source.basePrice) > 0 ? number(source.basePrice) : current.agency),
+        representative: has(applied.representative) ? number(applied.representative) : (has(source.representativeBase) && source.status !== "cancelled" ? number(source.representativeBase) : current.representative),
+        priceMonth: has(applied.priceMonth) ? applied.priceMonth : current.priceMonth,
+        additions: applied.additions && typeof applied.additions === "object" ? applied.additions : current.additions,
+        transport: source.transportSettings || applied.transport || current.transport,
+        stamps: Object.assign({}, stampPrices, applied.stamps && typeof applied.stamps === "object" ? applied.stamps : {})
+    };
+}
+
+/* هل تغيّر في النموذج شيء له أثر مالي؟ (العدد، النوع، الحالة، فترة السعر) */
+function agencyFinancialInputsChanged(inputs, source) {
+    if ((inputs.type || DEFAULT_AGENCY_TYPE) !== (source.type || DEFAULT_AGENCY_TYPE)) return "basis";
+    if ((inputs.status || "active") !== (source.status || "active")) return "basis";
+    if ((inputs.pricePeriod || "") !== (source.pricePeriod || "")) return "basis";
+    const ad = source.additions || {};
+    const ms = source.stamps || source.missingStamps || {};
+    const addChanged = Object.keys(ADDITION_NAMES).some(function (k) {
+        if (k === "transport" && !isTransportEligible(inputs.type)) return false;
+        return number(inputs.additions[k]) !== number(ad[k]);
+    });
+    const missChanged = MISSING_KEYS.some(function (k) { return number(inputs.missing[k]) !== number(ms[k]); });
+    return addChanged || missChanged ? "counts" : "";
+}
+
 function getEditedAgencyFromForm(source) {
     const inputs = readAgencyInputs();
+
+    const change = agencyFinancialInputsChanged(inputs, source);
+
+    /* تعديل وصفي فقط (رقم، ملاحظة، مكررة): الوكالة كما حُفظت تماماً، بلا إعادة حساب */
+    if (!change) {
+        const kept = JSON.parse(JSON.stringify(source));
+        kept.number = inputs.number || source.number;
+        kept.notes = inputs.notes || "";
+        kept.duplicate = !!inputs.duplicate;
+        return kept;
+    }
+
     if (number(source.customPrice) > 0 && (inputs.pricePeriod || "") === (source.pricePeriod || "")) {
         inputs.customPrice = number(source.customPrice);
         inputs.customRepresentative = source.customRepresentative === undefined ? null : source.customRepresentative;
     }
-    const agency = buildAgency(inputs, pricingForAgency(inputs.type, inputs.pricePeriod), source.id);
+    /* تغيّر عدد بند فقط: يُحسب بأسعار الوكالة المعتمدة لا بأسعار اليوم.
+       تغيير النوع أو الحالة أو الفترة يبقى كما قرر المستخدم: بأسعار اليوم/الفترة. */
+    const current = pricingForAgency(inputs.type, inputs.pricePeriod);
+    const pricing = change === "counts" ? savedPricingOf(source, current) : current;
+    const agency = buildAgency(inputs, pricing, source.id);
     if (Array.isArray(source.priceHistory) && source.priceHistory.length) {
         agency.priceHistory = JSON.parse(JSON.stringify(source.priceHistory));
     }
@@ -3767,7 +4014,9 @@ document.getElementById("agencyNumber")?.addEventListener("focus", function () {
     if (!card) return;
     /* بعد تمرير المتصفح الخاص بالتركيز: نحاذي البطاقة لأعلى الشاشة إن لم تكن ظاهرة كلها */
     setTimeout(function () {
-        const box = card.getBoundingClientRect();
+        /* U02: المرجع محتوى البطاقة (الأعمدة) لا عنوانها، حتى يتسع كل شيء فوق شريط الحفظ في 1366×768 */
+        const layout = card.querySelector(".agency-layout") || card;
+        const box = layout.getBoundingClientRect();
         const dock = document.getElementById("recordDock");
         const bottomLimit = dock && dock.offsetParent ? dock.getBoundingClientRect().top : window.innerHeight;
         if (box.top < 0 || box.bottom > bottomLimit) {
@@ -6376,6 +6625,16 @@ deleteRecord;
     عددها × سعر طابع المرافعة المطبّق على الوكالة.
     طوابع بدل الانتقال لا تدخل هنا (لها بند مستقل).
 */
+/*
+    سعر طابع محفوظ مع الوكالة (C02): الصفر سعر صحيح محفوظ، لا «غياب».
+    فقط الحقل الغائب (وكالة قديمة) يأخذ السعر الحالي.
+*/
+function savedStampPrice(agency, key) {
+    const saved = agency && agency.appliedPrices && agency.appliedPrices.stamps ? agency.appliedPrices.stamps[key] : undefined;
+    if (saved !== undefined && saved !== null && saved !== "") return number(saved);
+    return number(stampPrices[key]);
+}
+
 function getAgencyStampAdditionsValue(agency) {
 
     if (!agency || agency.status === "cancelled") {
@@ -6397,9 +6656,7 @@ function getAgencyStampAdditionsValue(agency) {
         });
     }
 
-    const stampPrice =
-        number(agency.appliedPrices && agency.appliedPrices.stamps && agency.appliedPrices.stamps.pleading) ||
-        number(stampPrices.pleading);
+    const stampPrice = savedStampPrice(agency, "pleading");
 
     return Math.max(0, count) * stampPrice;
 }
@@ -6490,19 +6747,69 @@ function missingPartsOf(ms) {
     قيمة نوع واحد من الطوابع الناقصة بأسعارها المحفوظة مع كل وكالة (لا بالسعر الحالي)،
     حتى يساوي مجموع الصفوف إجماليها (missingStampsValue المحفوظ).
 */
+/*
+    توزيع قيمة نقص وكالة واحدة على أنواعه (C03، مراجعة 17/11/2026).
+    المبلغ التاريخي المحفوظ (missingStampsValue) هو المرجع دائماً، ولا يُخترع سعر قديم:
+    - النوع الذي له سعر محفوظ مع الوكالة يُحسب به (والصفر سعر صحيح).
+    - وكالة قديمة بلا أسعار: إن أعطت أسعار اليوم المبلغ المحفوظ نفسه فهو التوزيع،
+      وإن بقي نوع واحد بلا سعر فله الباقي، وإلا فالباقي «غير موزّع» (unallocated)
+      مع أنواعه، ويظهر في التقرير صفاً مستقلاً بتنبيه.
+*/
+function agencyMissingSplit(a) {
+    const out = { byKey: {}, unallocated: 0, unallocatedKeys: [] };
+    if (!a || a.status === "cancelled") return out;
+    const ms = a.stamps || a.missingStamps || {};
+    const keys = MISSING_KEYS.filter(function (k) { return number(ms[k]) > 0; });
+    if (!keys.length) return out;
+    const savedOf = function (k) {
+        const v = a.appliedPrices && a.appliedPrices.stamps ? a.appliedPrices.stamps[k] : undefined;
+        return v !== undefined && v !== null && v !== "" ? number(v) : null;
+    };
+    const unsaved = keys.filter(function (k) { return savedOf(k) === null; });
+    keys.forEach(function (k) { if (savedOf(k) !== null) out.byKey[k] = number(ms[k]) * savedOf(k); });
+    if (!unsaved.length) return out;
+    const hasTotal = a.missingStampsValue !== undefined && a.missingStampsValue !== null;
+    const savedSum = keys.reduce(function (s, k) { return s + (out.byKey[k] || 0); }, 0);
+    const remaining = hasTotal ? number(a.missingStampsValue) - savedSum : null;
+    const atToday = unsaved.reduce(function (s, k) { return s + number(ms[k]) * number(stampPrices[k]); }, 0);
+    if (remaining === null || Math.abs(remaining - atToday) < 0.5) {
+        unsaved.forEach(function (k) { out.byKey[k] = number(ms[k]) * number(stampPrices[k]); });
+    } else if (unsaved.length === 1) {
+        out.byKey[unsaved[0]] = Math.max(0, remaining);
+    } else {
+        unsaved.forEach(function (k) { out.byKey[k] = 0; });
+        out.unallocated = Math.max(0, remaining);
+        out.unallocatedKeys = unsaved;
+    }
+    return out;
+}
+
 function missingStampTypeValue(agencies, key) {
     return (agencies || []).reduce(function (sum, a) {
-        if (!a || a.status === "cancelled") return sum;
-        const ms = a.stamps || a.missingStamps || {};
-        const count = number(ms[key]);
-        if (!count) return sum;
-        const saved = a.appliedPrices && a.appliedPrices.stamps && a.appliedPrices.stamps[key];
-        if (saved !== undefined && saved !== null) return sum + count * number(saved);
-        /* وكالة قديمة بلا أسعار محفوظة وفيها نوع واحد: قيمتها المحفوظة هي قيمة هذا النوع */
-        const types = MISSING_KEYS.filter(function (k) { return number(ms[k]) > 0; });
-        if (types.length === 1 && number(a.missingStampsValue) > 0) return sum + number(a.missingStampsValue);
-        return sum + count * number(stampPrices[key]);
+        return sum + number(agencyMissingSplit(a).byKey[key]);
     }, 0);
+}
+
+/* نقص قديم لا يُعرف توزيعه على الأنواع: قيمته وأرقام وكالاته */
+function missingUnallocated(agencies) {
+    const out = { value: 0, numbers: [], keys: {} };
+    (agencies || []).forEach(function (a) {
+        const split = agencyMissingSplit(a);
+        if (split.unallocated > 0) {
+            out.value += split.unallocated;
+            out.numbers.push(String(a.number));
+            split.unallocatedKeys.forEach(function (k) { out.keys[k] = true; });
+        }
+    });
+    return out;
+}
+
+function unallocatedRowHTML(u) {
+    if (!(u.value > 0)) return "";
+    return '<tr class="row-unallocated"><td>نقص قديم غير موزّع على الأنواع' +
+        '<br><small>الوكالات ' + u.numbers.map(escapeHTML).join("، ") + ': مبلغها المحفوظ معروف، وتوزيعه على ' +
+        Object.keys(u.keys).map(function (k) { return MISSING_NAMES[k]; }).join(" و") + " غير معروف (لا أسعار محفوظة). يحتاج مراجعة.</small></td>" +
+        '<td class="num">—</td><td class="num">' + money(u.value) + "</td></tr>";
 }
 
 function groupAgencyNotes(agencies) {
@@ -6890,27 +7197,65 @@ function getRecordRecovery(record) {
 
 /* بنود النقص مجمّعة حسب جهتها، بقيمها المحفوظة مع الوكالات */
 function recoveryGroups(stats) {
-    const groups = { central: { items: [], count: 0, value: 0 }, branch: { items: [], count: 0, value: 0 } };
+    const groups = { central: { items: [], count: 0, value: 0 }, branch: { items: [], count: 0, value: 0 }, unknown: { items: [], count: 0, value: 0 } };
+    const dest = function (k) { return feeDestinations[k] === "branch" ? "branch" : "central"; };
     MISSING_KEYS.forEach(function (k) {
         const count = number(stats.missing[k]);
         if (!count) return;
         const value = missingStampTypeValue(stats.agencies, k);
-        const g = groups[feeDestinations[k] === "branch" ? "branch" : "central"];
+        const g = groups[dest(k)];
         g.items.push({ key: k, name: (k === "receipt" ? "" : "طابع ") + MISSING_NAMES[k], count: count, value: value });
         g.count += count;
         g.value += value;
     });
+    /* نقص قديم غير موزّع: إن كانت كل أنواعه لجهة واحدة فهو لها (مجموعه معروف)، وإلا «جهة غير محددة» */
+    (stats.agencies || []).forEach(function (a) {
+        const split = agencyMissingSplit(a);
+        if (!(split.unallocated > 0)) return;
+        const dests = split.unallocatedKeys.map(dest).filter(function (d, i, arr) { return arr.indexOf(d) === i; });
+        const g = groups[dests.length === 1 ? dests[0] : "unknown"];
+        g.items.push({ key: "unallocated", name: "نقص قديم غير موزّع (" + split.unallocatedKeys.map(function (k) { return MISSING_NAMES[k]; }).join(" + ") + ") — وكالة " + escapeHTML(a.number), count: 0, value: split.unallocated });
+        g.value += split.unallocated;
+    });
     return groups;
+}
+
+/*
+    مسودة إيصالات البيان لكل سجل (R01): ما يكتبه المستخدم يبقى عند إعادة رسم
+    التقرير (تكبير الخط، إظهار البيان أو إخفاؤه، التنقل بين المختصر والمفصل)،
+    ولا يُحفظ تلقائياً؛ يُحفظ بزر «حفظ بيانات البيان» فقط، ويُسأل عنه قبل الإغلاق.
+*/
+let recoveryDrafts = {};
+
+document.addEventListener("input", function (event) {
+    const el = event.target;
+    if (!el || !el.id || el.id.indexOf("rcv_") !== 0) return;
+    const editor = el.closest(".recovery-editor");
+    const id = editor && editor.dataset.recordId;
+    if (!id) return;
+    recoveryDrafts[id] = recoveryDrafts[id] || {};
+    recoveryDrafts[id][el.id.slice(4)] = el.value;
+});
+
+/* سجلات فيها إيصالات مكتوبة لم تُحفظ */
+function dirtyRecoveryDrafts() {
+    return Object.keys(recoveryDrafts).filter(function (id) {
+        const record = records.find(function (r) { return r.id === id; });
+        const saved = getRecordRecovery(record);
+        const draft = recoveryDrafts[id];
+        return Object.keys(draft).some(function (k) { return String(draft[k] || "").trim() !== String(saved[k] || ""); });
+    });
 }
 
 function recoveryEditorHTML(record, mode, groups, rec) {
     const id = escapeHTML(record.id);
+    rec = Object.assign({}, rec, recoveryDrafts[record.id] || {});
     const field = function (key, label, value, type) {
         return '<label class="input-group"><span>' + label + "</span>" +
             '<input type="' + (type || "text") + '" id="rcv_' + key + '" value="' + escapeHTML(value) + '"' +
             (type === "date" ? ' lang="en-GB" dir="ltr"' : ' autocomplete="off"') + "></label>";
     };
-    let html = '<div class="recovery-editor no-print"><h4><i class="ti ti-receipt" aria-hidden="true"></i> بيانات الإيصالات لبيان استدراك النقص</h4><div class="recovery-fields">';
+    let html = '<div class="recovery-editor no-print" data-record-id="' + id + '"><h4><i class="ti ti-receipt" aria-hidden="true"></i> بيانات الإيصالات لبيان استدراك النقص</h4><div class="recovery-fields">';
     if (groups.central.value > 0) {
         html += field("centralReceipt", "إيصال النقابة المركزية — الرقم", rec.centralReceipt) + field("centralDate", "تاريخه", rec.centralDate, "date");
     }
@@ -6926,7 +7271,7 @@ function recoveryEditorHTML(record, mode, groups, rec) {
 function recoveryPageHTML(record, stats, mode, forPrint) {
 
     const groups = recoveryGroups(stats);
-    const total = groups.central.value + groups.branch.value;
+    const total = groups.central.value + groups.branch.value + groups.unknown.value;
     if (total <= 0) return "";
 
     const included = reportPrefs().recovery;
@@ -6953,7 +7298,7 @@ function recoveryPageHTML(record, stats, mode, forPrint) {
         "وبعد تدقيقه من قِبل مكتب المحاسبة، تبيّن وجود نقص في الطوابع والرسوم المستحقة على وكالاته بلغت قيمته الإجمالية (<b>" + money(total) + "</b>). " +
         "وقد استُوفيت هذه القيمة من المندوب نقداً، وسُدّدت لأصحاب الحق على النحو الآتي:</p>";
 
-    const ordinals = ["أولاً", "ثانياً"];
+    const ordinals = ["أولاً", "ثانياً", "ثالثاً"];
     let n = 0;
     [["central", "centralReceipt", "centralDate"], ["branch", "branchReceipt", "branchDate"]].forEach(function (g) {
         const group = groups[g[0]];
@@ -6961,11 +7306,23 @@ function recoveryPageHTML(record, stats, mode, forPrint) {
         html += "<h4>" + ordinals[n++] + " — رسوم عائدة إلى " + FEE_DESTINATION_NAMES[g[0]] + "</h4>" +
             '<table class="doc-table recovery-table"><thead><tr><th>البند</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
             group.items.map(function (it) {
-                return "<tr><td>" + it.name + '</td><td class="num">' + it.count + '</td><td class="num">' + money(it.value) + "</td></tr>";
+                return "<tr><td>" + it.name + '</td><td class="num">' + (it.key === "unallocated" ? "—" : it.count) + '</td><td class="num">' + money(it.value) + "</td></tr>";
             }).join("") +
             '</tbody><tfoot><tr><td>المجموع</td><td class="num">' + group.count + '</td><td class="num">' + money(group.value) + "</td></tr></tfoot></table>" +
             '<p class="recovery-receipt">وقد سُدّد هذا المبلغ إلى ' + FEE_DESTINATION_NAMES[g[0]] + " بموجب الإيصال رقم " + val(rec[g[1]]) + " تاريخ " + val(rec[g[2]], true) + ".</p>";
     });
+
+    /* نقص قديم لا تُعرف جهته لأن أنواعه لجهتين مختلفتين ولا أسعار محفوظة له (C03) */
+    if (groups.unknown.value > 0) {
+        html += "<h4>" + (ordinals[n++] || "") + " — نقص قديم جهته غير محددة (يحتاج مراجعة)</h4>" +
+            '<table class="doc-table recovery-table"><tbody>' +
+            groups.unknown.items.map(function (it) {
+                return "<tr><td>" + it.name + '</td><td class="num">' + money(it.value) + "</td></tr>";
+            }).join("") +
+            "</tbody></table>" +
+            '<p class="recovery-warning">مبلغ هذا النقص محفوظ مع الوكالة كما هو، لكن السجل قديم لا يحفظ سعر كل طابع، ' +
+            "وأنواعه تعود لجهتين مختلفتين؛ فلا يُعرف كم منه للنقابة المركزية وكم للفرع. يُراجَع يدوياً قبل اعتماد البيان.</p>";
+    }
 
     if (rec.text) {
         html += '<p class="recovery-extra">' + formatNotesHTML(rec.text) + "</p>";
@@ -7010,6 +7367,7 @@ function saveRecordRecovery(id, mode) {
     record.updatedAt = new Date().toISOString();
 
     persistRecords().then(function () {
+        delete recoveryDrafts[id];
         notify("حُفظت بيانات بيان استدراك النقص.", "success");
         showFinalRecordReport(id, mode, true);
     }).catch(function (error) {
@@ -7201,6 +7559,7 @@ function buildFinalRecordReport(record, mode, forPrint) {
                     (stats.missing[k] ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
                     '</td><td class="num">' + stats.missing[k] + '</td><td class="num">' + money(missingStampTypeValue(stats.agencies, k)) + "</td></tr>";
             }).join("") +
+            unallocatedRowHTML(missingUnallocated(stats.agencies)) +
             '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(stats.missingValue) + "</td></tr></tfoot></table></section>";
 
         html += '<section class="doc-section">' + secTitle("الإضافات") +
@@ -7754,6 +8113,77 @@ window.addEventListener("unhandledrejection", function (event) {
     reportUnexpectedError(event.reason && event.reason.message || event.reason);
 });
 
+/* =========================================================
+إعدادات تعذرت قراءتها عند الفتح (D04): رسالة دائمة وخياران صريحان
+========================================================= */
+
+function settingMemoryValue(key) {
+    switch (key) {
+        case "audit_users": return users;
+        case "audit_prices": return prices;
+        case "audit_addition_prices": return additionPrices;
+        case "audit_addition_stamp_status": return additionStampStatus;
+        case "audit_transport_settings": return transportSettings;
+        case "audit_stamp_prices": return stampPrices;
+        case "audit_price_schedule": return priceSchedule;
+        case "audit_committee_shares": return committeeShares;
+        case "audit_committee_rates": return committeeRates;
+        case "audit_council_saved": return councilSaved;
+        case "audit_fee_destinations": return feeDestinations;
+        default: return undefined;
+    }
+}
+
+/* نسخة من النص التالف كما هو (للفحص أو الإصلاح اليدوي) */
+function downloadCorruptSettings() {
+    const blob = new Blob([JSON.stringify(settingsCorruptRaw, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "إعدادات-تالفة-" + todayDay() + ".json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+}
+
+function acceptDefaultSettings() {
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("اعتماد الإعدادات الافتراضية للمدير فقط.", "error");
+        return;
+    }
+    appConfirm({
+        title: "اعتماد الإعدادات الافتراضية",
+        message: "سيُنزَّل أولاً ملف فيه النص التالف كما هو، ثم تُكتب القيم الافتراضية مكان: " + settingsLoadFailed.join("، ") +
+            ". راجع الأسعار بعدها قبل إدخال أي سجل. الأفضل إن كانت لديك نسخة احتياطية حديثة: استعدها بدلاً من هذا.",
+        confirmText: "تنزيل النص التالف واعتماد الافتراضي",
+        cancelText: "إلغاء",
+        danger: true
+    }).then(function (ok) {
+        if (!ok) return;
+        downloadCorruptSettings();
+        settingsLoadFailed.slice().forEach(function (key) {
+            const value = settingMemoryValue(key);
+            if (value !== undefined) saveData(key, value, true);
+        });
+        flashNotify("اعتُمدت الإعدادات الافتراضية. راجع صفحة الأسعار الآن.", "warning");
+        reloadApp();
+    });
+}
+
+window.downloadCorruptSettings = downloadCorruptSettings;
+window.acceptDefaultSettings = acceptDefaultSettings;
+
+onReady(function () {
+    appStartupDone = true;
+    if (!settingsLoadFailed.length) return;
+    notify("<strong>تعذرت قراءة إعدادات محفوظة (نص تالف)</strong>" +
+        "<span>" + escapeHTML(settingsLoadFailed.join("، ")) + " — لم يُكتب فوقها شيء، وأُوقف حفظ السجلات حتى لا تُحسب بأسعار افتراضية. " +
+        "الأفضل: استعادة نسخة احتياطية (قسم المستخدمين)، أو المزامنة مع Firebase إن كانت مفعّلة.</span>" +
+        '<span class="toast-actions"><button type="button" class="act-btn" onclick="downloadCorruptSettings()">تنزيل النص التالف</button>' +
+        '<button type="button" class="act-btn" onclick="acceptDefaultSettings()">اعتماد الافتراضي…</button></span>', "error", 600000, true);
+});
+
 /* رسالة تظهر بعد إعادة تحميل الصفحة (حفظ الأسعار، الاستعادة...) */
 const FLASH_KEY = "audit_flash_message";
 
@@ -8212,6 +8642,7 @@ function buildGeneralReportDoc() {
         "<tr><td>إسعاف</td><td class=\"num\">" + pseudo.missing.ambulance + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "ambulance")) + "</td></tr>" +
         "<tr><td>معونة</td><td class=\"num\">" + pseudo.missing.aid + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "aid")) + "</td></tr>" +
         (pseudo.missing.receipt ? "<tr><td>إيصال حد أدنى أتعاب</td><td class=\"num\">" + pseudo.missing.receipt + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "receipt")) + "</td></tr>" : "") +
+        unallocatedRowHTML(missingUnallocated(pseudo.agencies)) +
         '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(pseudo.missingValue) + "</td></tr></tfoot></table></section>";
 
     html += '<section class="doc-section">' + secTitle("بدل الانتقال") + transportTableHTML(pseudo.transport) + "</section>";
@@ -8912,17 +9343,108 @@ viewRecord;
 إغلاق نافذة العرض
 ========================================================= */
 
-function closeRecordModal() {
+/*
+    الإغلاق (×، «إغلاق»، Escape، الضغط خارج النافذة): إن كانت هناك إيصالات مكتوبة لم
+    تُحفظ يُسأل أولاً (R01/R02). يُرجع Promise بـ true عند الإغلاق فعلاً.
+    force: إغلاق برمجي دون سؤال.
+*/
+function closeRecordModal(force) {
 
-document
-    .getElementById(
-        "recordModal"
-    )
-    ?.classList.add(
-        "hidden"
-    );
+    const hide = function () {
+        recoveryDrafts = {};
+        document.getElementById("recordModal")?.classList.add("hidden");
+        return true;
+    };
 
+    if (!force && dirtyRecoveryDrafts().length) {
+        return appConfirm({
+            title: "إيصالات لم تُحفظ",
+            message: "كتبت بيانات في «بيان استدراك النقص» ولم تحفظها. إن أغلقت الآن فستضيع.",
+            confirmText: "إغلاق دون حفظ",
+            cancelText: "رجوع",
+            danger: true
+        }).then(function (ok) { return ok ? hide() : false; });
+    }
+
+    return Promise.resolve(hide());
 }
+
+/*
+    نافذة التقرير حوار حقيقي (R02): عند فتحها يتعطل ما خلفها (inert) وينتقل التركيز
+    إليها ويبقى فيها، وعند إغلاقها يعود التركيز إلى الزر الذي فتحها.
+    مراقبة ظهورها تغطي كل من يفتحها (التقرير، أنواع الوكالات، التدقيق السريع…).
+*/
+(function () {
+    const modal = document.getElementById("recordModal");
+    if (!modal) return;
+    const box = modal.querySelector(".modal-content");
+    const background = function () {
+        return [document.getElementById("appPage"), document.getElementById("loginPage")].filter(Boolean);
+    };
+    let opener = null;
+    let wasOpen = false;
+
+    const focusables = function () {
+        return Array.prototype.filter.call(
+            box.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+            function (el) { return el.offsetParent !== null || el === document.activeElement; }
+        );
+    };
+
+    const focusInside = function () {
+        if (box.contains(document.activeElement)) return;
+        const first = box.querySelector(".report-actions button, .report-actions a") || focusables()[0];
+        (first || box).focus({ preventScroll: true });
+    };
+
+    const sync = function () {
+        const open = !modal.classList.contains("hidden");
+        if (open && !wasOpen) {
+            const active = document.activeElement;
+            opener = active && active !== document.body && !modal.contains(active) ? active : null;
+            background().forEach(function (el) { el.inert = true; });
+            setTimeout(focusInside, 0);
+        } else if (!open && wasOpen) {
+            background().forEach(function (el) { el.inert = false; });
+            if (opener && document.contains(opener) && typeof opener.focus === "function") {
+                try { opener.focus({ preventScroll: true }); } catch (e) {}
+            }
+            opener = null;
+        }
+        wasOpen = open;
+    };
+
+    new MutationObserver(sync).observe(modal, { attributes: true, attributeFilter: ["class"] });
+    /* إعادة رسم المحتوى (تكبير، تبديل…) تُسقط التركيز: يعود داخل النافذة */
+    new MutationObserver(function () {
+        if (!modal.classList.contains("hidden")) setTimeout(focusInside, 0);
+    }).observe(document.getElementById("modalContent"), { childList: true });
+
+    document.addEventListener("keydown", function (event) {
+        if (modal.classList.contains("hidden") || document.querySelector("dialog[open]")) return;
+        if (event.key === "Escape") {
+            event.preventDefault();
+            closeRecordModal();
+            return;
+        }
+        if (event.key !== "Tab") return;
+        const list = focusables();
+        if (!list.length) { event.preventDefault(); box.focus(); return; }
+        const first = list[0];
+        const last = list[list.length - 1];
+        const active = document.activeElement;
+        if (!box.contains(active)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus();
+        } else if (event.shiftKey && active === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && active === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
+})();
 
 window.closeRecordModal =
 closeRecordModal;
@@ -9526,7 +10048,8 @@ function openAgencyForEdit(recordId, index) {
         return;
     }
 
-    closeRecordModal();
+    closeRecordModal().then(function (closed) {
+    if (!closed) return;
     editRecord(recordId, function () {
 
         if (pendingAgencies[index]) {
@@ -9542,6 +10065,7 @@ function openAgencyForEdit(recordId, index) {
             "<span>عدّل بيانات الوكالة ثم اضغط «إضافة الوكالة»، وبعدها «حفظ السجل» لحفظ التعديل.</span>",
             8000
         );
+    });
     });
 }
 
@@ -11069,6 +11593,15 @@ stampTypes.forEach(
 
     }
 );
+
+/* نقص قديم لا يُعرف توزيعه على الأنواع (C03) */
+(function () {
+    const u = missingUnallocated(activeAgencies);
+    if (u.value > 0) {
+        html += '<tr class="row-unallocated"><td colspan="3">نقص قديم غير موزّع على الأنواع — الوكالات ' + u.numbers.map(escapeHTML).join("، ") +
+            "<br><small>مبلغه محفوظ ومعروف، وتوزيعه غير معروف (لا أسعار محفوظة). يحتاج مراجعة.</small></td><td>" + money(u.value) + "</td></tr>";
+    }
+})();
 
 
 html += `
@@ -14767,8 +15300,10 @@ function restoreBackupFromFile(file) {
             return;
         }
 
-        if (!data || !Array.isArray(data.records)) {
-            notify("ملف النسخة الاحتياطية غير صالح.", "error");
+        /* فحص كامل قبل أي سؤال أو كتابة (D03): الملف التالف لا يمس البيانات الحالية */
+        const problem = backupDataProblem(data);
+        if (problem) {
+            notify("<strong>ملف النسخة الاحتياطية غير صالح — لم يتغير شيء</strong><span>" + escapeHTML(problem) + "</span>", "error", 12000, true);
             return;
         }
 
@@ -14793,86 +15328,168 @@ function restoreBackupFromFile(file) {
 
 }
 
-function applyBackupData(data) {
-
-        /*
-            السجلات تُحفظ أولاً (أكبر جزء، وقد تكون في المخزن الكبير)،
-            وبقية الإعدادات لا تُكتب إلا بعد نجاحها.
-            الاستعادة مقصودة لاستبدال السجلات، فهي تعمل حتى لو تعذرت قراءتها.
-        */
-        const recordsBefore = records;
-        const loadFailedBefore = recordsLoadFailed;
-        recordsLoadFailed = false;
-        records = data.records || [];
-
-        persistRecords().then(function () {
-            applyBackupSettings(data);
-        }).catch(function (error) {
-            /* لم يُحفظ شيء: الذاكرة تعود كما كانت (والحماية كما كانت) */
-            records = recordsBefore;
-            recordsLoadFailed = loadFailedBefore;
-            console.error("Restore records failed:", error);
-            notify("<strong>لم تكتمل الاستعادة</strong><span>تعذر حفظ السجلات: " + escapeHTML(error && error.message || error) +
-                " — لم يتغير شيء. حدّث الصفحة.</span>", "error", 15000, true);
-        });
+/*
+    فحص بنية النسخة الاحتياطية قبل الاستعادة (D03). النسخ القديمة (version 1 أو بلا version)
+    التي تنقصها الحقول الحديثة مقبولة؛ المرفوض: بنية تالفة قد تكسر التحميل التالي.
+*/
+function backupDataProblem(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) return "ليس ملف نسخة احتياطية.";
+    if (data.version !== undefined && !(Number(data.version) >= 1 && Number(data.version) <= 1)) {
+        return "الملف من إصدار " + escapeHTML(String(data.version)) + " لا يعرفه هذا البرنامج (المدعوم: 1). حدّث الصفحة أو استخدم نسخة أحدث من البرنامج.";
+    }
+    const recordsProblem = recordsListProblem(data.records);
+    if (recordsProblem) return recordsProblem + ".";
+    if (data.users !== undefined) {
+        if (!Array.isArray(data.users) || !data.users.length) return "قائمة المستخدمين فارغة أو تالفة (الاستعادة كانت ستحذف كل الحسابات).";
+        const badUser = data.users.some(function (u) { return !u || typeof u !== "object" || !String(u.username || "").trim(); });
+        if (badUser) return "في قائمة المستخدمين حساب تالف.";
+        if (!data.users.some(function (u) { return u.role === "manager"; })) return "لا يوجد مدير في قائمة المستخدمين.";
+    }
+    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations"];
+    for (let i = 0; i < objects.length; i++) {
+        const v = data[objects[i]];
+        if (v !== undefined && (!v || typeof v !== "object" || Array.isArray(v))) return "الإعداد " + objects[i] + " تالف.";
+    }
+    if (data.committeeRates !== undefined && data.committeeRates !== null && (typeof data.committeeRates !== "object" || Array.isArray(data.committeeRates))) return "الإعداد committeeRates تالف.";
+    if (data.priceSchedule !== undefined && !Array.isArray(data.priceSchedule)) return "جدول الأسعار حسب الفترات تالف.";
+    if (data.councilSaved !== undefined && !Array.isArray(data.councilSaved)) return "حصص المجلس المحفوظة تالفة.";
+    return "";
 }
 
-function applyBackupSettings(data) {
+/*
+    الاستعادة كلها أو لا شيء (D02):
+    ١) لقطة من نصوص كل مفاتيح الإعدادات ٢) كتابة الإعدادات ٣) حفظ السجلات.
+    أي فشل ← تُعاد مفاتيح الإعدادات حرفياً من اللقطة والسجلات لم تُكتب (كتابتها
+    خطوة واحدة)، ثم إعادة تحميل لتتطابق الذاكرة مع التخزين. إن تعذّر حتى الإرجاع:
+    رسالة صريحة، ويتوقف الحفظ والمزامنة حتى تُعاد الاستعادة.
+*/
+const RESTORE_SETTING_KEYS = [
+    "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
+    "audit_transport_settings", "audit_stamp_prices", "audit_committee_shares",
+    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations"
+];
 
-        users = data.users || users;
-        prices = data.prices || prices;
-        additionPrices = data.additionPrices || additionPrices;
-        additionStampStatus = data.additionStampStatus || additionStampStatus;
-        transportSettings = data.transportSettings || transportSettings;
-        stampPrices = data.stampPrices || stampPrices;
-        committeeShares = data.committeeShares || committeeShares;
+function applyBackupData(data) {
 
-        /* النسخ القديمة لا تحتوي القيمة الكاملة لبدل الانتقال:
-           نحذفها ليُعاد استنتاجها من مكوناتها عند إعادة التحميل */
-        if (data.transportSettings && typeof data.transportSettings.total !== "number") {
-            delete transportSettings.total;
-        }
+    const snapshot = {};
+    RESTORE_SETTING_KEYS.forEach(function (key) {
+        try { snapshot[key] = localStorage.getItem(key); } catch (e) { snapshot[key] = null; }
+    });
+    const failedBefore = settingsLoadFailed.slice();
+    const recordsBefore = records;
+    const loadFailedBefore = recordsLoadFailed;
 
-        if (Array.isArray(data.councilSaved)) {
-            saveData(COUNCIL_SAVED_KEY, data.councilSaved);
-        }
+    const rollbackSettings = function () {
+        let ok = true;
+        RESTORE_SETTING_KEYS.forEach(function (key) {
+            try {
+                if (snapshot[key] === null) {
+                    /* لم يكن موجوداً قبل الاستعادة: يعود غائباً كما كان */
+                    if (localStorage.getItem(key) !== null) localStorage.removeItem(key);
+                } else if (localStorage.getItem(key) !== snapshot[key]) {
+                    localStorage.setItem(key, snapshot[key]);
+                }
+            } catch (e) {
+                ok = false;
+            }
+        });
+        settingsLoadFailed = failedBefore;
+        return ok;
+    };
 
-        /* جهة رسوم النقص: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
-        if (data.feeDestinations && typeof data.feeDestinations === "object") {
-            saveData(FEE_DESTINATIONS_KEY, data.feeDestinations);
-        }
-
-        /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
-        if (Array.isArray(data.priceSchedule)) {
-            saveData(PRICE_SCHEDULE_KEY, data.priceSchedule);
-        }
-
-        /*
-            نسب اللجان: من الملف إن وُجدت، وإلا تُشتق عند إعادة التحميل
-            من المبالغ الثابتة والأسعار المستعادة (النسخ الأقدم).
-        */
-        if (data.committeeRates && typeof data.committeeRates === "object") {
-            saveData(COMMITTEE_RATES_KEY, data.committeeRates);
+    const fail = function (step, error) {
+        records = recordsBefore;
+        const rolledBack = rollbackSettings();
+        console.error("Restore failed at " + step + ":", error);
+        const reason = escapeHTML(error && error.message || error);
+        if (rolledBack) {
+            recordsLoadFailed = loadFailedBefore;
+            flashNotify("<strong>لم تكتمل الاستعادة — لم يتغير شيء</strong><span>تعذر " + step + ": " + reason + ". أُعيدت الإعدادات كما كانت ولم تُكتب السجلات.</span>", "error");
+            reloadApp();
         } else {
-            /* null = تُشتق بعد ترحيل الأسعار عند إعادة التحميل */
-            saveData(COMMITTEE_RATES_KEY, null);
+            /* حالة مختلطة لا يمكن إرجاعها: لا حفظ ولا نسخ ولا مزامنة حتى تُعاد الاستعادة */
+            recordsLoadFailed = true;
+            notify("<strong>استعادة ناقصة: أعد الاستعادة من الملف نفسه الآن</strong><span>تعذر " + step + " ثم تعذر إرجاع الإعدادات (" + reason +
+                "). أُوقف الحفظ والمزامنة في هذه النافذة. أفرغ مساحة في المتصفح ثم استعد الملف مرة أخرى.</span>", "error", 600000, true);
         }
+    };
 
-        saveData("audit_committee_shares", committeeShares);
-        saveData("audit_users", users);
-        saveData("audit_prices", prices);
-        saveData("audit_addition_prices", additionPrices);
-        saveData("audit_addition_stamp_status", additionStampStatus);
-        saveData("audit_transport_settings", transportSettings);
-        saveData("audit_stamp_prices", stampPrices);
+    try {
+        writeBackupSettings(data);
+    } catch (error) {
+        fail("كتابة الإعدادات", error);
+        return;
+    }
 
+    recordsLoadFailed = false;
+    records = data.records || [];
+
+    persistRecords().then(function () {
         flashNotify("تم استيراد النسخة الاحتياطية بنجاح (" + records.length + " سجل).", "success");
-
         /* المزامنة بعد الاستعادة: دمج أول من جديد، لا «حذف» لما ليس في الملف */
         fbResetAfterRestore();
-
         reloadApp();
+    }).catch(function (error) {
+        fail("حفظ السجلات", error);
+    });
+}
 
+/* كتابة إعدادات النسخة (ترمي عند أي فشل كتابة؛ لا إعادة تحميل هنا) */
+function writeBackupSettings(data) {
+
+    /* مفتاح موجود في الملف يُكتب حتى فوق إعداد تالف (الاستعادة هي الإصلاح المقصود)،
+       وغائب عن الملف وتالف محلياً يُترك كما هو ويبقى الحفظ متوقفاً بسببه */
+    const write = function (key, value, provided) {
+        if (!provided && settingsLoadFailed.indexOf(key) !== -1) return;
+        saveData(key, value, provided);
+    };
+
+    users = data.users || users;
+    prices = data.prices || prices;
+    additionPrices = data.additionPrices || additionPrices;
+    additionStampStatus = data.additionStampStatus || additionStampStatus;
+    transportSettings = data.transportSettings || transportSettings;
+    stampPrices = data.stampPrices || stampPrices;
+    committeeShares = data.committeeShares || committeeShares;
+
+    /* النسخ القديمة لا تحتوي القيمة الكاملة لبدل الانتقال:
+       نحذفها ليُعاد استنتاجها من مكوناتها عند إعادة التحميل */
+    if (data.transportSettings && typeof data.transportSettings.total !== "number") {
+        delete transportSettings.total;
+    }
+
+    if (Array.isArray(data.councilSaved)) {
+        write(COUNCIL_SAVED_KEY, data.councilSaved, true);
+    }
+
+    /* جهة رسوم النقص: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+    if (data.feeDestinations && typeof data.feeDestinations === "object") {
+        write(FEE_DESTINATIONS_KEY, data.feeDestinations, true);
+    }
+
+    /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+    if (Array.isArray(data.priceSchedule)) {
+        write(PRICE_SCHEDULE_KEY, data.priceSchedule, true);
+    }
+
+    /*
+        نسب اللجان: من الملف إن وُجدت، وإلا تُشتق عند إعادة التحميل
+        من المبالغ الثابتة والأسعار المستعادة (النسخ الأقدم).
+    */
+    if (data.committeeRates && typeof data.committeeRates === "object") {
+        write(COMMITTEE_RATES_KEY, data.committeeRates, true);
+    } else {
+        /* null = تُشتق بعد ترحيل الأسعار عند إعادة التحميل */
+        write(COMMITTEE_RATES_KEY, null, true);
+    }
+
+    write("audit_committee_shares", committeeShares, !!data.committeeShares);
+    write("audit_users", users, !!data.users);
+    write("audit_prices", prices, !!data.prices);
+    write("audit_addition_prices", additionPrices, !!data.additionPrices);
+    write("audit_addition_stamp_status", additionStampStatus, !!data.additionStampStatus);
+    write("audit_transport_settings", transportSettings, !!data.transportSettings);
+    write("audit_stamp_prices", stampPrices, !!data.stampPrices);
 }
 
 const downloadBackupBtn =
@@ -15283,28 +15900,52 @@ function fbSync(reason) {
         } else {
             fbState.settingsBase = sL;
         }
+        /* إعدادات محلية تالفة (D04): لا تُرفع أبداً، والمشتركة السليمة تُطبَّق لإصلاحها */
+        if (settingsLoadFailed.length) {
+            pushSettings = false;
+            if (remoteSettings && remoteSettings.hash !== sL) applySettings = remoteSettings;
+        }
+
         /* إعدادات تصل أثناء إدخال سجل: تؤجَّل حتى لا تضيع الوكالات المضافة */
         if (applySettings && pendingAgencies.length) applySettings = null;
 
         return (lostLocal || conflicts ? fbSafetyBackup("قبل تطبيق مزامنة") : Promise.resolve()).then(function () {
 
+            /*
+                التغييرات القادمة تُطبَّق على نسخة من القائمة، ولا تصبح هي القائمة المعتمدة
+                إلا بعد نجاح الحفظ المحلي (D05). عند الفشل تعود الذاكرة كما كانت، ما لم
+                يحفظ المستخدم شيئاً في الأثناء (حفظه يتضمن القائمة الجديدة فيُترك).
+            */
             let localChangedNow = false;
+            const recordsBeforeApply = records;
+            const next = records.slice();
             apply.forEach(function (a) {
-                const idx = records.findIndex(function (r) { return String(r.id) === a.id; });
+                const idx = next.findIndex(function (r) { return String(r.id) === a.id; });
                 /* حُفظ هذا السجل هنا أثناء انتظار النسخة الاحتياطية: لا نكتب فوقه (يُرفع في المزامنة التالية) */
-                const nowHash = idx === -1 ? null : fbRecordHash(records[idx]);
+                const nowHash = idx === -1 ? null : fbRecordHash(next[idx]);
                 if (nowHash !== a.local) { delete appliedBase[a.id]; return; }
                 if (a.record === null) {
-                    if (idx !== -1) { records.splice(idx, 1); localChangedNow = true; }
+                    if (idx !== -1) { next.splice(idx, 1); localChangedNow = true; }
                 } else if (idx !== -1) {
-                    records[idx] = a.record; localChangedNow = true;
+                    next[idx] = a.record; localChangedNow = true;
                 } else {
-                    records.push(a.record); localChangedNow = true;
+                    next.push(a.record); localChangedNow = true;
                 }
             });
 
             /* حفظ مباشر (لا persistRecords حتى لا تُطلب مزامنة جديدة)، مع تعليم التغيير للنسخ الاحتياطي */
-            const save = localChangedNow ? persistRecordsNow().then(function () { try { markDataChanged(); } catch (e) {} }) : Promise.resolve();
+            let save = Promise.resolve();
+            if (localChangedNow) {
+                records = next;
+                const seqAtSave = recordsWriteSeq + 1;
+                save = persistRecordsNow().then(function () {
+                    try { markDataChanged(); } catch (e) {}
+                }, function (error) {
+                    /* لم يُحفظ: لا نترك في الذاكرة بيانات تبدو محفوظة وهي ليست كذلك */
+                    if (records === next && recordsWriteSeq === seqAtSave) records = recordsBeforeApply;
+                    throw error;
+                });
+            }
             return save.then(function () {
                 Object.keys(appliedBase).forEach(function (id) { base[id] = appliedBase[id]; });
                 return toPush.length ? fbBackend.pushRecords(uid, toPush) : null;
