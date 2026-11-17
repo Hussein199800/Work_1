@@ -4,7 +4,7 @@
 1. `index.html` يُحمَّل؛ سكربت صغير في `<head>` يضبط الوضع الفاتح/الداكن قبل الرسم (`audit_ui_theme`).
 2. مكتبة Excel (`xlsx-js-style`) من CDN.
 3. سكربت التحميل في آخر `index.html`:
-   - إذا كان `localStorage.audit_records_store === "idb"` يقرأ السجلات من IndexedDB (`audit_db` → `kv` → `audit_records`) ويضعها في `window.__AUDIT_IDB_RECORDS` (أو الخطأ في `window.__AUDIT_IDB_ERROR`).
+   - إذا كان `localStorage.audit_records_store === "idb"` يقرأ السجلات من IndexedDB (`audit_db` → `kv` → `audit_records`) ويضعها في `window.__AUDIT_IDB_RECORDS` (أو الخطأ في `window.__AUDIT_IDB_ERROR`)، ومعها رقم نسختها `audit_records_rev` في المعاملة نفسها → `window.__AUDIT_IDB_REV` (17/11/2026: يمنع نافذتين من الكتابة فوق بعضهما).
    - ثم يحقن `script.js` ديناميكياً.
 4. لذلك `script.js` يعمل **بعد** تحميل الصفحة: استخدم `onReady(fn)` بدل `DOMContentLoaded`.
 5. إذا تعذّرت قراءة السجلات: `recordsLoadFailed = true` ويُمنع كل حفظ (حماية من الكتابة فوق البيانات الحقيقية بنسخة فارغة).
