@@ -259,6 +259,29 @@ const NOTE_NO_BOND =
 التخزين
 ========================================================= */
 
+/*
+    إعدادات بيانات تعذرت قراءتها (نص JSON تالف) — مراجعة 17/11/2026، D04.
+    المفتاح الغائب (تثبيت جديد) يأخذ القيمة الافتراضية كما كان، أما المفتاح
+    الموجود التالف فلا يُكتب فوقه بالافتراضي عند الفتح: يبقى نصه كما هو،
+    وتظهر رسالة، ويتوقف حفظ السجلات حتى يُعالَج (استعادة نسخة، أو مزامنة،
+    أو اعتماد الافتراضي صراحةً بعد تنزيل النص التالف).
+*/
+const DATA_SETTINGS_KEYS = [
+    "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
+    "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
+    "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
+    "audit_fee_destinations"
+];
+let settingsLoadFailed = [];
+const settingsCorruptRaw = {};
+/* بعد اكتمال الفتح: الكتابة فوق إعداد تالف خطأ صريح لا تجاهل صامت */
+let appStartupDone = false;
+
+function settingsLoadFailedMessage() {
+    return "تعذرت قراءة إعدادات محفوظة (" + settingsLoadFailed.join("، ") + ")، فأُوقف حفظ السجلات حتى لا تُحسب بأسعار افتراضية. " +
+        "استعد نسخة احتياطية، أو اعتمد الإعدادات الافتراضية صراحةً من الرسالة الظاهرة.";
+}
+
 function loadData(key, defaultValue) {
 
 try {
@@ -283,6 +306,11 @@ try {
         error
     );
 
+    if (DATA_SETTINGS_KEYS.indexOf(key) !== -1) {
+        try { settingsCorruptRaw[key] = localStorage.getItem(key); } catch (e) {}
+        if (settingsLoadFailed.indexOf(key) === -1) settingsLoadFailed.push(key);
+    }
+
     return JSON.parse(
         JSON.stringify(defaultValue)
     );
@@ -291,7 +319,20 @@ try {
 
 }
 
-function saveData(key, value) {
+/* force: كتابة مقصودة فوق إعداد تالف (استعادة نسخة، أو «اعتماد الافتراضي») */
+function saveData(key, value, force) {
+
+if (settingsLoadFailed.indexOf(key) !== -1) {
+    if (!force) {
+        if (!appStartupDone) {
+            /* الكتابة التلقائية عند الفتح لا تمس الإعداد التالف */
+            console.warn("Skipped writing unreadable setting:", key);
+            return;
+        }
+        throw new Error(settingsLoadFailedMessage());
+    }
+    settingsLoadFailed = settingsLoadFailed.filter(function (k) { return k !== key; });
+}
 
 localStorage.setItem(
     key,
@@ -408,8 +449,31 @@ let recordsLoadFailed = false;
 
 let records;
 
+/*
+    بنية قائمة السجلات (D03): كل سجل كائن بمعرّف ووكالاته قائمة كائنات، دون معرّفات مكررة.
+    الحقول الحديثة (receipt، recovery، additions…) ليست شرطاً: النسخ القديمة صحيحة.
+    يُرجع نص المشكلة الأولى أو "" إن كانت سليمة.
+*/
+function recordsListProblem(list) {
+    if (!Array.isArray(list)) return "السجلات ليست قائمة";
+    const seen = {};
+    for (let i = 0; i < list.length; i++) {
+        const r = list[i];
+        if (!r || typeof r !== "object" || Array.isArray(r)) return "السجل رقم " + (i + 1) + " فارغ أو ليس سجلاً";
+        if (r.id === undefined || r.id === null || String(r.id) === "") return "السجل رقم " + (i + 1) + " بلا معرّف";
+        if (seen[String(r.id)]) return "معرّف سجل مكرر (" + String(r.id) + ")";
+        seen[String(r.id)] = true;
+        if (r.agencies !== undefined && !Array.isArray(r.agencies)) return "وكالات السجل " + (r.recordNumber || i + 1) + " ليست قائمة";
+        const ags = r.agencies || [];
+        for (let j = 0; j < ags.length; j++) {
+            if (!ags[j] || typeof ags[j] !== "object" || Array.isArray(ags[j])) return "وكالة فارغة في السجل " + (r.recordNumber || i + 1);
+        }
+    }
+    return "";
+}
+
 if (recordsInIDB) {
-    if (window.__AUDIT_IDB_ERROR || !Array.isArray(window.__AUDIT_IDB_RECORDS)) {
+    if (window.__AUDIT_IDB_ERROR || !Array.isArray(window.__AUDIT_IDB_RECORDS) || recordsListProblem(window.__AUDIT_IDB_RECORDS)) {
         console.error("Records could not be read from IndexedDB:", window.__AUDIT_IDB_ERROR);
         records = [];
         recordsLoadFailed = true;
@@ -422,7 +486,7 @@ if (recordsInIDB) {
     try { rawRecords = localStorage.getItem("audit_records"); } catch (e) {}
     let parsedRecords = null;
     try { parsedRecords = rawRecords === null ? [] : JSON.parse(rawRecords); } catch (e) { parsedRecords = null; }
-    if (Array.isArray(parsedRecords)) {
+    if (Array.isArray(parsedRecords) && !recordsListProblem(parsedRecords)) {
         records = parsedRecords;
     } else {
         console.error("audit_records is not a readable list; saving is blocked to protect it.");
@@ -507,6 +571,12 @@ function moveRecordsToIDBNow() {
                 throw new Error("فشل التحقق من نسخ السجلات إلى المخزن الكبير، لم يُحذف شيء.");
             }
 
+            /* رقم نسخة أول للسجلات في المخزن الكبير (للمقارنة عند كل حفظ) */
+            const rev = newRecordsRevision();
+            return idbPut(IDB_REV_KEY, rev).then(function () { knownIdbRev = rev; return saved; });
+        })
+        .then(function () {
+
             try {
                 localStorage.setItem(RECORDS_STORE_KEY, "idb");
             } catch (error) {
@@ -548,40 +618,134 @@ window.addEventListener("storage", function (event) {
     if (event.key === RECORDS_REV_KEY && String(event.newValue || "").indexOf(TAB_ID + ":") === 0) return;
     if (recordsStaleTab) return;
     recordsStaleTab = true;
+    notifyStaleTab();
+});
+
+function notifyStaleTab() {
     try {
         notify("<strong>السجلات تغيّرت في نافذة أخرى من البرنامج</strong>" +
             "<span>أُوقف الحفظ في هذه النافذة حتى لا تُكتب نسخة قديمة فوقها. أعد تحميلها، أو اعمل من نافذة واحدة.</span>" +
             '<span class="toast-actions"><button type="button" class="act-btn" onclick="reloadApp()">إعادة التحميل</button></span>', "warning", 600000, true);
     } catch (e) {}
-});
+}
 
 /* يزداد مع كل حفظ للسجلات: بصمات المزامنة المحفوظة مؤقتاً (fbLocalHashCache) تصلح ما دام لم يتغير */
 let recordsWriteSeq = 0;
 
+/*
+    حماية من نافذتين تحفظان في اللحظة نفسها (مراجعة 17/11/2026، D01):
+    حدث storage يصل متأخراً أحياناً، فحفظان متداخلان كانا ينجحان ويضيع أحدهما.
+    الآن: ١) حفظات النافذة الواحدة بالدور ٢) قفل بين النوافذ (Web Locks)
+    ٣) قبل الكتابة يُقارن رقم نسخة السجلات المخزّن بما قرأته هذه النافذة؛ إن
+    كتبت نافذة أخرى بعده يُرفض الحفظ بدل الكتابة فوقها. في IndexedDB المقارنة
+    والكتابة في معاملة واحدة (audit_records_rev بجانب audit_records في kv).
+*/
+const RECORDS_STALE_MESSAGE = "السجلات تغيّرت في نافذة أخرى من البرنامج. أعد تحميل هذه الصفحة قبل الحفظ.";
+const IDB_REV_KEY = "audit_records_rev";
+/* undefined = غير معروف (محمّل قديم): لا مقارنة؛ null = لا رقم بعد */
+let knownIdbRev = window.__AUDIT_IDB_REV;
+let knownLsRev = (function () { try { return localStorage.getItem(RECORDS_REV_KEY); } catch (e) { return undefined; } })();
+let revCounter = 0;
+let recordsSaveQueue = Promise.resolve();
+
+function newRecordsRevision() {
+    revCounter += 1;
+    return TAB_ID + ":" + Date.now() + ":" + revCounter;
+}
+
+function recordsConflict() {
+    if (!recordsStaleTab) {
+        recordsStaleTab = true;
+        notifyStaleTab();
+    }
+    const error = new Error(RECORDS_STALE_MESSAGE);
+    error.code = "records-conflict";
+    return error;
+}
+
+function withRecordsLock(fn) {
+    try {
+        if (navigator.locks && typeof navigator.locks.request === "function") {
+            return navigator.locks.request("audit_records_write", fn);
+        }
+    } catch (e) {}
+    return Promise.resolve().then(fn);
+}
+
 function persistRecordsNow() {
     recordsWriteSeq++;
     if (recordsStaleTab) {
-        return Promise.reject(new Error("السجلات تغيّرت في نافذة أخرى من البرنامج. أعد تحميل هذه الصفحة قبل الحفظ."));
+        return Promise.reject(new Error(RECORDS_STALE_MESSAGE));
     }
-    return persistRecordsRaw().then(function (value) {
-        try { localStorage.setItem(RECORDS_REV_KEY, TAB_ID + ":" + Date.now()); } catch (e) {}
-        return value;
+    const run = function () {
+        return withRecordsLock(function () {
+            if (recordsStaleTab) {
+                return Promise.reject(new Error(RECORDS_STALE_MESSAGE));
+            }
+            const rev = newRecordsRevision();
+            return persistRecordsRaw(rev).then(function (value) {
+                try { localStorage.setItem(RECORDS_REV_KEY, rev); knownLsRev = rev; } catch (e) {}
+                return value;
+            });
+        });
+    };
+    const result = recordsSaveQueue.then(run, run);
+    recordsSaveQueue = result.catch(function () {});
+    return result;
+}
+
+/* IndexedDB: مقارنة رقم النسخة وكتابة السجلات ورقمها الجديد في معاملة واحدة */
+function idbPutRecordsChecked(list, rev) {
+    return idbOpen().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            let conflict = false;
+            const tx = db.transaction(IDB_STORE, "readwrite");
+            const store = tx.objectStore(IDB_STORE);
+            const get = store.get(IDB_REV_KEY);
+            get.onsuccess = function () {
+                const current = get.result === undefined ? null : get.result;
+                if (knownIdbRev !== undefined && current !== knownIdbRev) {
+                    conflict = true;
+                    tx.abort();
+                    return;
+                }
+                store.put(list, "audit_records");
+                store.put(rev, IDB_REV_KEY);
+            };
+            tx.oncomplete = function () { db.close(); knownIdbRev = rev; resolve(); };
+            tx.onerror = function () { if (!conflict) { db.close(); reject(tx.error); } };
+            tx.onabort = function () { db.close(); reject(conflict ? recordsConflict() : (tx.error || new Error("IndexedDB abort"))); };
+        });
     });
 }
 
-function persistRecordsRaw() {
+function persistRecordsRaw(rev) {
+
+    rev = rev || newRecordsRevision();
 
     /* نقل جارٍ: ننتظره ثم نحفظ آخر نسخة من السجلات في مكانها الجديد */
     if (recordsMoving) {
-        return recordsMoving.catch(function () {}).then(persistRecordsNow);
+        return recordsMoving.catch(function () {}).then(function () { return persistRecordsRaw(rev); });
     }
 
     if (recordsLoadFailed) {
         return Promise.reject(new Error("تعذر قراءة السجلات من المخزن عند فتح الصفحة، لذلك أُوقف الحفظ حمايةً للبيانات. حدّث الصفحة (Ctrl + F5)."));
     }
 
+    /* إعداد مالي تالف لم يُصلح بعد: لا حفظ لسجلات بأسعار افتراضية غير مقصودة (D04) */
+    if (settingsLoadFailed.length) {
+        return Promise.reject(new Error(settingsLoadFailedMessage()));
+    }
+
     if (recordsInIDB) {
-        return idbPut("audit_records", records);
+        return idbPutRecordsChecked(records, rev);
+    }
+
+    /* localStorage: نافذة أخرى حفظت بعد أن قرأت هذه النافذة السجلات */
+    let currentLsRev = null;
+    try { currentLsRev = localStorage.getItem(RECORDS_REV_KEY); } catch (e) {}
+    if (knownLsRev !== undefined && currentLsRev !== knownLsRev) {
+        return Promise.reject(recordsConflict());
     }
 
     try {
@@ -594,7 +758,7 @@ function persistRecordsRaw() {
         /* المساحة ممتلئة: ننقل السجلات إلى المخزن الكبير ونحفظ هناك */
         return moveRecordsToIDB().then(function () {
             /* إن كان نقلٌ استباقي قد بدأ قبل هذا الحفظ فلقطته لا تحوي السجل الجديد */
-            return idbPut("audit_records", records);
+            return idbPutRecordsChecked(records, rev);
         }).then(function () {
             notify("<strong>نُقلت السجلات إلى مخزن أكبر</strong><span>امتلأت مساحة المتصفح، فنُقلت كل السجلات إلى مخزن أكبر في نفس المتصفح وحُفظ السجل.</span>", "info", 8000, true);
         });
@@ -7754,6 +7918,77 @@ window.addEventListener("unhandledrejection", function (event) {
     reportUnexpectedError(event.reason && event.reason.message || event.reason);
 });
 
+/* =========================================================
+إعدادات تعذرت قراءتها عند الفتح (D04): رسالة دائمة وخياران صريحان
+========================================================= */
+
+function settingMemoryValue(key) {
+    switch (key) {
+        case "audit_users": return users;
+        case "audit_prices": return prices;
+        case "audit_addition_prices": return additionPrices;
+        case "audit_addition_stamp_status": return additionStampStatus;
+        case "audit_transport_settings": return transportSettings;
+        case "audit_stamp_prices": return stampPrices;
+        case "audit_price_schedule": return priceSchedule;
+        case "audit_committee_shares": return committeeShares;
+        case "audit_committee_rates": return committeeRates;
+        case "audit_council_saved": return councilSaved;
+        case "audit_fee_destinations": return feeDestinations;
+        default: return undefined;
+    }
+}
+
+/* نسخة من النص التالف كما هو (للفحص أو الإصلاح اليدوي) */
+function downloadCorruptSettings() {
+    const blob = new Blob([JSON.stringify(settingsCorruptRaw, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "إعدادات-تالفة-" + todayDay() + ".json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+}
+
+function acceptDefaultSettings() {
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("اعتماد الإعدادات الافتراضية للمدير فقط.", "error");
+        return;
+    }
+    appConfirm({
+        title: "اعتماد الإعدادات الافتراضية",
+        message: "سيُنزَّل أولاً ملف فيه النص التالف كما هو، ثم تُكتب القيم الافتراضية مكان: " + settingsLoadFailed.join("، ") +
+            ". راجع الأسعار بعدها قبل إدخال أي سجل. الأفضل إن كانت لديك نسخة احتياطية حديثة: استعدها بدلاً من هذا.",
+        confirmText: "تنزيل النص التالف واعتماد الافتراضي",
+        cancelText: "إلغاء",
+        danger: true
+    }).then(function (ok) {
+        if (!ok) return;
+        downloadCorruptSettings();
+        settingsLoadFailed.slice().forEach(function (key) {
+            const value = settingMemoryValue(key);
+            if (value !== undefined) saveData(key, value, true);
+        });
+        flashNotify("اعتُمدت الإعدادات الافتراضية. راجع صفحة الأسعار الآن.", "warning");
+        reloadApp();
+    });
+}
+
+window.downloadCorruptSettings = downloadCorruptSettings;
+window.acceptDefaultSettings = acceptDefaultSettings;
+
+onReady(function () {
+    appStartupDone = true;
+    if (!settingsLoadFailed.length) return;
+    notify("<strong>تعذرت قراءة إعدادات محفوظة (نص تالف)</strong>" +
+        "<span>" + escapeHTML(settingsLoadFailed.join("، ")) + " — لم يُكتب فوقها شيء، وأُوقف حفظ السجلات حتى لا تُحسب بأسعار افتراضية. " +
+        "الأفضل: استعادة نسخة احتياطية (قسم المستخدمين)، أو المزامنة مع Firebase إن كانت مفعّلة.</span>" +
+        '<span class="toast-actions"><button type="button" class="act-btn" onclick="downloadCorruptSettings()">تنزيل النص التالف</button>' +
+        '<button type="button" class="act-btn" onclick="acceptDefaultSettings()">اعتماد الافتراضي…</button></span>', "error", 600000, true);
+});
+
 /* رسالة تظهر بعد إعادة تحميل الصفحة (حفظ الأسعار، الاستعادة...) */
 const FLASH_KEY = "audit_flash_message";
 
@@ -14767,8 +15002,10 @@ function restoreBackupFromFile(file) {
             return;
         }
 
-        if (!data || !Array.isArray(data.records)) {
-            notify("ملف النسخة الاحتياطية غير صالح.", "error");
+        /* فحص كامل قبل أي سؤال أو كتابة (D03): الملف التالف لا يمس البيانات الحالية */
+        const problem = backupDataProblem(data);
+        if (problem) {
+            notify("<strong>ملف النسخة الاحتياطية غير صالح — لم يتغير شيء</strong><span>" + escapeHTML(problem) + "</span>", "error", 12000, true);
             return;
         }
 
@@ -14793,86 +15030,168 @@ function restoreBackupFromFile(file) {
 
 }
 
-function applyBackupData(data) {
-
-        /*
-            السجلات تُحفظ أولاً (أكبر جزء، وقد تكون في المخزن الكبير)،
-            وبقية الإعدادات لا تُكتب إلا بعد نجاحها.
-            الاستعادة مقصودة لاستبدال السجلات، فهي تعمل حتى لو تعذرت قراءتها.
-        */
-        const recordsBefore = records;
-        const loadFailedBefore = recordsLoadFailed;
-        recordsLoadFailed = false;
-        records = data.records || [];
-
-        persistRecords().then(function () {
-            applyBackupSettings(data);
-        }).catch(function (error) {
-            /* لم يُحفظ شيء: الذاكرة تعود كما كانت (والحماية كما كانت) */
-            records = recordsBefore;
-            recordsLoadFailed = loadFailedBefore;
-            console.error("Restore records failed:", error);
-            notify("<strong>لم تكتمل الاستعادة</strong><span>تعذر حفظ السجلات: " + escapeHTML(error && error.message || error) +
-                " — لم يتغير شيء. حدّث الصفحة.</span>", "error", 15000, true);
-        });
+/*
+    فحص بنية النسخة الاحتياطية قبل الاستعادة (D03). النسخ القديمة (version 1 أو بلا version)
+    التي تنقصها الحقول الحديثة مقبولة؛ المرفوض: بنية تالفة قد تكسر التحميل التالي.
+*/
+function backupDataProblem(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) return "ليس ملف نسخة احتياطية.";
+    if (data.version !== undefined && !(Number(data.version) >= 1 && Number(data.version) <= 1)) {
+        return "الملف من إصدار " + escapeHTML(String(data.version)) + " لا يعرفه هذا البرنامج (المدعوم: 1). حدّث الصفحة أو استخدم نسخة أحدث من البرنامج.";
+    }
+    const recordsProblem = recordsListProblem(data.records);
+    if (recordsProblem) return recordsProblem + ".";
+    if (data.users !== undefined) {
+        if (!Array.isArray(data.users) || !data.users.length) return "قائمة المستخدمين فارغة أو تالفة (الاستعادة كانت ستحذف كل الحسابات).";
+        const badUser = data.users.some(function (u) { return !u || typeof u !== "object" || !String(u.username || "").trim(); });
+        if (badUser) return "في قائمة المستخدمين حساب تالف.";
+        if (!data.users.some(function (u) { return u.role === "manager"; })) return "لا يوجد مدير في قائمة المستخدمين.";
+    }
+    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations"];
+    for (let i = 0; i < objects.length; i++) {
+        const v = data[objects[i]];
+        if (v !== undefined && (!v || typeof v !== "object" || Array.isArray(v))) return "الإعداد " + objects[i] + " تالف.";
+    }
+    if (data.committeeRates !== undefined && data.committeeRates !== null && (typeof data.committeeRates !== "object" || Array.isArray(data.committeeRates))) return "الإعداد committeeRates تالف.";
+    if (data.priceSchedule !== undefined && !Array.isArray(data.priceSchedule)) return "جدول الأسعار حسب الفترات تالف.";
+    if (data.councilSaved !== undefined && !Array.isArray(data.councilSaved)) return "حصص المجلس المحفوظة تالفة.";
+    return "";
 }
 
-function applyBackupSettings(data) {
+/*
+    الاستعادة كلها أو لا شيء (D02):
+    ١) لقطة من نصوص كل مفاتيح الإعدادات ٢) كتابة الإعدادات ٣) حفظ السجلات.
+    أي فشل ← تُعاد مفاتيح الإعدادات حرفياً من اللقطة والسجلات لم تُكتب (كتابتها
+    خطوة واحدة)، ثم إعادة تحميل لتتطابق الذاكرة مع التخزين. إن تعذّر حتى الإرجاع:
+    رسالة صريحة، ويتوقف الحفظ والمزامنة حتى تُعاد الاستعادة.
+*/
+const RESTORE_SETTING_KEYS = [
+    "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
+    "audit_transport_settings", "audit_stamp_prices", "audit_committee_shares",
+    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations"
+];
 
-        users = data.users || users;
-        prices = data.prices || prices;
-        additionPrices = data.additionPrices || additionPrices;
-        additionStampStatus = data.additionStampStatus || additionStampStatus;
-        transportSettings = data.transportSettings || transportSettings;
-        stampPrices = data.stampPrices || stampPrices;
-        committeeShares = data.committeeShares || committeeShares;
+function applyBackupData(data) {
 
-        /* النسخ القديمة لا تحتوي القيمة الكاملة لبدل الانتقال:
-           نحذفها ليُعاد استنتاجها من مكوناتها عند إعادة التحميل */
-        if (data.transportSettings && typeof data.transportSettings.total !== "number") {
-            delete transportSettings.total;
-        }
+    const snapshot = {};
+    RESTORE_SETTING_KEYS.forEach(function (key) {
+        try { snapshot[key] = localStorage.getItem(key); } catch (e) { snapshot[key] = null; }
+    });
+    const failedBefore = settingsLoadFailed.slice();
+    const recordsBefore = records;
+    const loadFailedBefore = recordsLoadFailed;
 
-        if (Array.isArray(data.councilSaved)) {
-            saveData(COUNCIL_SAVED_KEY, data.councilSaved);
-        }
+    const rollbackSettings = function () {
+        let ok = true;
+        RESTORE_SETTING_KEYS.forEach(function (key) {
+            try {
+                if (snapshot[key] === null) {
+                    /* لم يكن موجوداً قبل الاستعادة: يعود غائباً كما كان */
+                    if (localStorage.getItem(key) !== null) localStorage.removeItem(key);
+                } else if (localStorage.getItem(key) !== snapshot[key]) {
+                    localStorage.setItem(key, snapshot[key]);
+                }
+            } catch (e) {
+                ok = false;
+            }
+        });
+        settingsLoadFailed = failedBefore;
+        return ok;
+    };
 
-        /* جهة رسوم النقص: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
-        if (data.feeDestinations && typeof data.feeDestinations === "object") {
-            saveData(FEE_DESTINATIONS_KEY, data.feeDestinations);
-        }
-
-        /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
-        if (Array.isArray(data.priceSchedule)) {
-            saveData(PRICE_SCHEDULE_KEY, data.priceSchedule);
-        }
-
-        /*
-            نسب اللجان: من الملف إن وُجدت، وإلا تُشتق عند إعادة التحميل
-            من المبالغ الثابتة والأسعار المستعادة (النسخ الأقدم).
-        */
-        if (data.committeeRates && typeof data.committeeRates === "object") {
-            saveData(COMMITTEE_RATES_KEY, data.committeeRates);
+    const fail = function (step, error) {
+        records = recordsBefore;
+        const rolledBack = rollbackSettings();
+        console.error("Restore failed at " + step + ":", error);
+        const reason = escapeHTML(error && error.message || error);
+        if (rolledBack) {
+            recordsLoadFailed = loadFailedBefore;
+            flashNotify("<strong>لم تكتمل الاستعادة — لم يتغير شيء</strong><span>تعذر " + step + ": " + reason + ". أُعيدت الإعدادات كما كانت ولم تُكتب السجلات.</span>", "error");
+            reloadApp();
         } else {
-            /* null = تُشتق بعد ترحيل الأسعار عند إعادة التحميل */
-            saveData(COMMITTEE_RATES_KEY, null);
+            /* حالة مختلطة لا يمكن إرجاعها: لا حفظ ولا نسخ ولا مزامنة حتى تُعاد الاستعادة */
+            recordsLoadFailed = true;
+            notify("<strong>استعادة ناقصة: أعد الاستعادة من الملف نفسه الآن</strong><span>تعذر " + step + " ثم تعذر إرجاع الإعدادات (" + reason +
+                "). أُوقف الحفظ والمزامنة في هذه النافذة. أفرغ مساحة في المتصفح ثم استعد الملف مرة أخرى.</span>", "error", 600000, true);
         }
+    };
 
-        saveData("audit_committee_shares", committeeShares);
-        saveData("audit_users", users);
-        saveData("audit_prices", prices);
-        saveData("audit_addition_prices", additionPrices);
-        saveData("audit_addition_stamp_status", additionStampStatus);
-        saveData("audit_transport_settings", transportSettings);
-        saveData("audit_stamp_prices", stampPrices);
+    try {
+        writeBackupSettings(data);
+    } catch (error) {
+        fail("كتابة الإعدادات", error);
+        return;
+    }
 
+    recordsLoadFailed = false;
+    records = data.records || [];
+
+    persistRecords().then(function () {
         flashNotify("تم استيراد النسخة الاحتياطية بنجاح (" + records.length + " سجل).", "success");
-
         /* المزامنة بعد الاستعادة: دمج أول من جديد، لا «حذف» لما ليس في الملف */
         fbResetAfterRestore();
-
         reloadApp();
+    }).catch(function (error) {
+        fail("حفظ السجلات", error);
+    });
+}
 
+/* كتابة إعدادات النسخة (ترمي عند أي فشل كتابة؛ لا إعادة تحميل هنا) */
+function writeBackupSettings(data) {
+
+    /* مفتاح موجود في الملف يُكتب حتى فوق إعداد تالف (الاستعادة هي الإصلاح المقصود)،
+       وغائب عن الملف وتالف محلياً يُترك كما هو ويبقى الحفظ متوقفاً بسببه */
+    const write = function (key, value, provided) {
+        if (!provided && settingsLoadFailed.indexOf(key) !== -1) return;
+        saveData(key, value, provided);
+    };
+
+    users = data.users || users;
+    prices = data.prices || prices;
+    additionPrices = data.additionPrices || additionPrices;
+    additionStampStatus = data.additionStampStatus || additionStampStatus;
+    transportSettings = data.transportSettings || transportSettings;
+    stampPrices = data.stampPrices || stampPrices;
+    committeeShares = data.committeeShares || committeeShares;
+
+    /* النسخ القديمة لا تحتوي القيمة الكاملة لبدل الانتقال:
+       نحذفها ليُعاد استنتاجها من مكوناتها عند إعادة التحميل */
+    if (data.transportSettings && typeof data.transportSettings.total !== "number") {
+        delete transportSettings.total;
+    }
+
+    if (Array.isArray(data.councilSaved)) {
+        write(COUNCIL_SAVED_KEY, data.councilSaved, true);
+    }
+
+    /* جهة رسوم النقص: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+    if (data.feeDestinations && typeof data.feeDestinations === "object") {
+        write(FEE_DESTINATIONS_KEY, data.feeDestinations, true);
+    }
+
+    /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+    if (Array.isArray(data.priceSchedule)) {
+        write(PRICE_SCHEDULE_KEY, data.priceSchedule, true);
+    }
+
+    /*
+        نسب اللجان: من الملف إن وُجدت، وإلا تُشتق عند إعادة التحميل
+        من المبالغ الثابتة والأسعار المستعادة (النسخ الأقدم).
+    */
+    if (data.committeeRates && typeof data.committeeRates === "object") {
+        write(COMMITTEE_RATES_KEY, data.committeeRates, true);
+    } else {
+        /* null = تُشتق بعد ترحيل الأسعار عند إعادة التحميل */
+        write(COMMITTEE_RATES_KEY, null, true);
+    }
+
+    write("audit_committee_shares", committeeShares, !!data.committeeShares);
+    write("audit_users", users, !!data.users);
+    write("audit_prices", prices, !!data.prices);
+    write("audit_addition_prices", additionPrices, !!data.additionPrices);
+    write("audit_addition_stamp_status", additionStampStatus, !!data.additionStampStatus);
+    write("audit_transport_settings", transportSettings, !!data.transportSettings);
+    write("audit_stamp_prices", stampPrices, !!data.stampPrices);
 }
 
 const downloadBackupBtn =
@@ -15283,28 +15602,52 @@ function fbSync(reason) {
         } else {
             fbState.settingsBase = sL;
         }
+        /* إعدادات محلية تالفة (D04): لا تُرفع أبداً، والمشتركة السليمة تُطبَّق لإصلاحها */
+        if (settingsLoadFailed.length) {
+            pushSettings = false;
+            if (remoteSettings && remoteSettings.hash !== sL) applySettings = remoteSettings;
+        }
+
         /* إعدادات تصل أثناء إدخال سجل: تؤجَّل حتى لا تضيع الوكالات المضافة */
         if (applySettings && pendingAgencies.length) applySettings = null;
 
         return (lostLocal || conflicts ? fbSafetyBackup("قبل تطبيق مزامنة") : Promise.resolve()).then(function () {
 
+            /*
+                التغييرات القادمة تُطبَّق على نسخة من القائمة، ولا تصبح هي القائمة المعتمدة
+                إلا بعد نجاح الحفظ المحلي (D05). عند الفشل تعود الذاكرة كما كانت، ما لم
+                يحفظ المستخدم شيئاً في الأثناء (حفظه يتضمن القائمة الجديدة فيُترك).
+            */
             let localChangedNow = false;
+            const recordsBeforeApply = records;
+            const next = records.slice();
             apply.forEach(function (a) {
-                const idx = records.findIndex(function (r) { return String(r.id) === a.id; });
+                const idx = next.findIndex(function (r) { return String(r.id) === a.id; });
                 /* حُفظ هذا السجل هنا أثناء انتظار النسخة الاحتياطية: لا نكتب فوقه (يُرفع في المزامنة التالية) */
-                const nowHash = idx === -1 ? null : fbRecordHash(records[idx]);
+                const nowHash = idx === -1 ? null : fbRecordHash(next[idx]);
                 if (nowHash !== a.local) { delete appliedBase[a.id]; return; }
                 if (a.record === null) {
-                    if (idx !== -1) { records.splice(idx, 1); localChangedNow = true; }
+                    if (idx !== -1) { next.splice(idx, 1); localChangedNow = true; }
                 } else if (idx !== -1) {
-                    records[idx] = a.record; localChangedNow = true;
+                    next[idx] = a.record; localChangedNow = true;
                 } else {
-                    records.push(a.record); localChangedNow = true;
+                    next.push(a.record); localChangedNow = true;
                 }
             });
 
             /* حفظ مباشر (لا persistRecords حتى لا تُطلب مزامنة جديدة)، مع تعليم التغيير للنسخ الاحتياطي */
-            const save = localChangedNow ? persistRecordsNow().then(function () { try { markDataChanged(); } catch (e) {} }) : Promise.resolve();
+            let save = Promise.resolve();
+            if (localChangedNow) {
+                records = next;
+                const seqAtSave = recordsWriteSeq + 1;
+                save = persistRecordsNow().then(function () {
+                    try { markDataChanged(); } catch (e) {}
+                }, function (error) {
+                    /* لم يُحفظ: لا نترك في الذاكرة بيانات تبدو محفوظة وهي ليست كذلك */
+                    if (records === next && recordsWriteSeq === seqAtSave) records = recordsBeforeApply;
+                    throw error;
+                });
+            }
             return save.then(function () {
                 Object.keys(appliedBase).forEach(function (id) { base[id] = appliedBase[id]; });
                 return toPush.length ? fbBackend.pushRecords(uid, toPush) : null;
