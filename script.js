@@ -3336,9 +3336,12 @@ function updateRecordDock() {
         rep += agency.status === "cancelled" ? 0 : number(agency.representativeAmount);
     });
 
+    /* المقاصة: الحسم المكتوب في بيانات السجل ينقص المطلوب من المندوب */
+    const deduction = typeof getFormDeduction === "function" ? getFormDeduction().amount : 0;
+
     count.textContent = pendingAgencies.length;
     document.getElementById("dockGrand").textContent = money(grand);
-    document.getElementById("dockRep").textContent = money(rep);
+    document.getElementById("dockRep").textContent = money(rep - deduction);
 
     /* آخر وكالة أُضيفت: رقمها ونوعها بلونه */
     const lastBox = document.getElementById("dockLast");
@@ -5351,6 +5354,16 @@ recordForm.addEventListener(
 
         }
 
+        /* المقاصة: الحسم يحتاج سبباً مكتوباً (يظهر في التقرير لمن يدقق لاحقاً) */
+        const formDeduction = getFormDeduction();
+        if (formDeduction.amount > 0 && !formDeduction.reason) {
+            notify("اكتب «سبب الحسم» للمقاصة في بيانات السجل أعلى الصفحة.", "error");
+            const reasonField = document.getElementById("recordDeductionReason");
+            reasonField?.scrollIntoView({ behavior: "smooth", block: "center" });
+            reasonField?.focus({ preventScroll: true });
+            return;
+        }
+
 
         const editingId =
             document.getElementById(
@@ -5416,6 +5429,10 @@ recordForm.addEventListener(
             /* ملاحظة على السجل كاملاً (إضافي: يُحفظ فقط إن كُتب) */
             recordNote:
                 getFormRecordNote() || undefined,
+
+            /* المقاصة: حسم للمندوب وسببه (إضافي: يُحفظ فقط إن كان المبلغ > 0) */
+            deduction:
+                getFormDeduction().amount > 0 ? getFormDeduction() : undefined,
 
             createdAt:
                 oldRecord
@@ -5553,6 +5570,21 @@ recordForm.addEventListener(
 
         };
 
+        /* حسم أكبر من المطلوب: الصافي يصبح للمندوب لا عليه — تأكيد صريح */
+        const grossDue = getRecordRepresentativeTotal(record);
+        if (formDeduction.amount > grossDue) {
+            appConfirm({
+                title: "الحسم أكبر من المطلوب من المندوب",
+                message: "المطلوب من المندوب في هذا السجل " + money(grossDue) + " والحسم " + money(formDeduction.amount) +
+                    "، فيصبح الصافي " + money(grossDue - formDeduction.amount) + " (للمندوب). هل هذا مقصود؟",
+                confirmText: "نعم، احفظ",
+                cancelText: "رجوع للتعديل"
+            }).then(function (ok) {
+                if (ok) checkAgencySequenceThen(record.agencies, afterSequence);
+            });
+            return;
+        }
+
         checkAgencySequenceThen(record.agencies, afterSequence);
 
 
@@ -5634,6 +5666,8 @@ setFormAuditors(lastAuditors());
 
 setFormRecordNote("");
 
+setFormDeduction(null);
+
 setAgencyPricePeriod("");
 
 renderPendingAgencies();
@@ -5668,6 +5702,48 @@ function getFormAuditors() {
     });
     return out;
 }
+
+/*
+    المقاصة: حسم للمندوب على مستوى السجل (19/11/2026). record.deduction = { amount, reason }
+    (إضافي، يُحفظ فقط إن كان المبلغ > 0). ينقص «المطلوب من المندوب» وحده:
+    سعر الوكالات وإجمالي السجل وحصص اللجان والوكالات نفسها لا تتغير.
+*/
+function getRecordDeduction(record) {
+    const d = record && record.deduction;
+    const amount = d ? number(d.amount) : 0;
+    return { amount: amount, reason: amount > 0 ? String(d.reason || "").trim() : "" };
+}
+
+/* الصافي المطلوب من المندوب لسجل = مطلوب وكالاته غير الملغاة − الحسم */
+function getRecordNetDue(record) {
+    return getRecordRepresentativeTotal(record) - getRecordDeduction(record).amount;
+}
+
+/* مجموع الحسومات لمجموعة سجلات */
+function sumDeductions(list) {
+    return (list || []).reduce(function (s, r) { return s + getRecordDeduction(r).amount; }, 0);
+}
+
+function getFormDeduction() {
+    const amount = number(document.getElementById("recordDeductionAmount")?.value);
+    const reason = (document.getElementById("recordDeductionReason")?.value || "").trim();
+    return { amount: amount, reason: amount > 0 ? reason : "" };
+}
+
+function setFormDeduction(d) {
+    const a = document.getElementById("recordDeductionAmount");
+    const r = document.getElementById("recordDeductionReason");
+    if (a) a.value = d && number(d.amount) > 0 ? String(number(d.amount)) : "";
+    if (r) r.value = d && number(d.amount) > 0 ? String(d.reason || "") : "";
+    if (typeof updateRecordDock === "function") { try { updateRecordDock(); } catch (e) {} }
+}
+
+["recordDeductionAmount", "recordDeductionReason"].forEach(function (id) {
+    document.getElementById(id)?.addEventListener("input", function () {
+        if (typeof saveRecordDraft === "function") saveRecordDraft();
+        if (typeof updateRecordDock === "function") { try { updateRecordDock(); } catch (e) {} }
+    });
+});
 
 /* ملاحظة السجل كاملاً (record.recordNote): تظهر في مربع بالتقرير المختصر والمفصل */
 function getRecordNote(record) {
@@ -5751,7 +5827,7 @@ onReady(function () {
 ========================================================= */
 
 const RECORDS_VIEW_KEY = "audit_ui_records_view";
-const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", office: "all", auditor: "all", sort: "date-desc" };
+const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", repName: "all", office: "all", auditor: "all", sort: "date-desc" };
 
 function loadRecordsView() {
     try {
@@ -5798,6 +5874,7 @@ function getVisibleRecords() {
         if (range[1] && (!day || day > range[1])) return false;
         if (view.rep !== "all" && (record.representativeType === "external" ? "external" : "internal") !== view.rep) return false;
         if (view.office !== "all" && String(record.officeName || "").trim() !== view.office) return false;
+        if (view.repName !== "all" && String(record.representativeName || "").trim() !== view.repName) return false;
         if (view.auditor !== "all" && getRecordAuditors(record).indexOf(view.auditor) === -1) return false;
         if (q) {
             const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, getRecordAuditors(record).join(" "), formatDay(getRecordDay(record))].join(" ")).toLowerCase();
@@ -5815,7 +5892,10 @@ function getVisibleRecords() {
         "total-desc": function (a, b) { return getRecordGrandTotal(b) - getRecordGrandTotal(a); },
         "total-asc": function (a, b) { return getRecordGrandTotal(a) - getRecordGrandTotal(b); },
         "agencies-desc": function (a, b) { return (b.agencies || []).length - (a.agencies || []).length; },
-        "office-asc": function (a, b) { return String(a.officeName || "").localeCompare(String(b.officeName || ""), "ar") || byDay(b, a); }
+        "office-asc": function (a, b) { return String(a.officeName || "").localeCompare(String(b.officeName || ""), "ar") || byDay(b, a); },
+        /* اسم المندوب أبجدياً، وسجلات المندوب الواحد بالتاريخ (الأحدث أولاً) */
+        "rep-asc": function (a, b) { return String(a.representativeName || "").trim().localeCompare(String(b.representativeName || "").trim(), "ar") || byDay(b, a); },
+        "rep-desc": function (a, b) { return String(b.representativeName || "").trim().localeCompare(String(a.representativeName || "").trim(), "ar") || byDay(b, a); }
     };
 
     if (sorters[view.sort]) {
@@ -5836,6 +5916,18 @@ function syncRecordsFilters() {
             names.unshift(recordsView.office);
         }
         office.innerHTML = '<option value="all">كل المكاتب</option>' + names.map(function (n) {
+            return '<option value="' + escapeHTML(n) + '">' + escapeHTML(n) + "</option>";
+        }).join("");
+    }
+
+    const repName = document.getElementById("rfRepName");
+    if (repName) {
+        const names = Array.from(new Set(records.map(function (r) { return String(r.representativeName || "").trim(); }).filter(Boolean)))
+            .sort(function (a, b) { return a.localeCompare(b, "ar"); });
+        if (recordsView.repName !== "all" && names.indexOf(recordsView.repName) === -1) {
+            names.unshift(recordsView.repName);
+        }
+        repName.innerHTML = '<option value="all">كل المندوبين</option>' + names.map(function (n) {
             return '<option value="' + escapeHTML(n) + '">' + escapeHTML(n) + "</option>";
         }).join("");
     }
@@ -5861,6 +5953,7 @@ function syncRecordsFilters() {
     set("rfFrom", recordsView.from);
     set("rfTo", recordsView.to);
     set("rfRep", recordsView.rep);
+    set("rfRepName", recordsView.repName);
     set("rfOffice", recordsView.office);
     set("rfSort", recordsView.sort);
 
@@ -5870,7 +5963,7 @@ function syncRecordsFilters() {
 }
 
 document.getElementById("recordsFilters")?.addEventListener("change", function (event) {
-    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfOffice: "office", rfAuditor: "auditor", rfSort: "sort" };
+    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfRepName: "repName", rfOffice: "office", rfAuditor: "auditor", rfSort: "sort" };
     const key = map[event.target.id];
     if (!key) return;
     recordsView[key] = event.target.value;
@@ -5915,14 +6008,14 @@ function renderRecords() {
 
     if (records.length && !visible.length) {
         tbody.innerHTML =
-            '<tr><td colspan="9"><div class="empty-state"><p>لا توجد سجلات تطابق البحث أو الفلترة الحالية.</p>' +
+            '<tr><td colspan="10"><div class="empty-state"><p>لا توجد سجلات تطابق البحث أو الفلترة الحالية.</p>' +
             '<button type="button" class="secondary-btn" data-rf-reset>عرض كل السجلات</button></div></td></tr>';
         return;
     }
 
     if (records.length === 0) {
         tbody.innerHTML =
-            '<tr><td colspan="9"><div class="empty-state"><p>لا توجد سجلات محفوظة بعد.</p>' +
+            '<tr><td colspan="10"><div class="empty-state"><p>لا توجد سجلات محفوظة بعد.</p>' +
             '<button type="button" class="primary-btn" onclick="switchSection(\'newRecordSection\')">إنشاء سجل جديد</button></div></td></tr>';
         return;
     }
@@ -5945,7 +6038,9 @@ function renderRecords() {
 
         const date = formatDay(getRecordDay(record));
 
-        return "<tr>" +
+        const sel = selectedRecordIds.has(record.id);
+        return "<tr" + (sel ? ' class="is-selected"' : "") + ">" +
+            '<td class="sel-cell"><input type="checkbox" data-sel="' + escapeHTML(record.id) + '"' + (sel ? " checked" : "") + ' aria-label="تحديد السجل ' + escapeHTML(record.recordNumber) + ' للتقرير المخصّص"></td>' +
             '<td><span class="record-tag">' + escapeHTML(record.recordNumber) + "</span></td>" +
             "<td><strong>" + escapeHTML(record.officeName) + "</strong>" +
                 (getRecordAuditors(record).length ? '<small class="auditor-note"><i class="ti ti-user-check" aria-hidden="true"></i> ' + escapeHTML(getRecordAuditors(record).join(" و")) + "</small>" : "") +
@@ -5954,7 +6049,7 @@ function renderRecords() {
             '<td class="num"><span class="agency-count">' + (record.agencies || []).length + "</span>" + bar + "</td>" +
             '<td class="num">' + money(getRecordBaseTotal(record)) + "</td>" +
             '<td class="num">' + money(getRecordGrandTotal(record)) + "</td>" +
-            '<td class="num money-cell">' + money(getRecordRepresentativeTotal(record)) + "</td>" +
+            '<td class="num money-cell">' + money(getRecordNetDue(record)) + (getRecordDeduction(record).amount > 0 ? '<small class="deduction-note" title="' + escapeHTML(getRecordDeduction(record).reason) + '">بعد حسم ' + money(getRecordDeduction(record).amount) + "</small>" : "") + "</td>" +
             '<td class="date-cell">' + date + "</td>" +
             /* الإجراءات الأكثر استخداماً ظاهرة، والباقي في قائمة ⋮ */
             '<td><div class="action-group">' +
@@ -5966,6 +6061,500 @@ function renderRecords() {
 
     }).join("");
 
+    syncRecordSelectionUI();
+
+}
+
+/* =========================================================
+التقارير المخصّصة: طباعة وحفظ عدة سجلات مرة واحدة (19/11/2026)
+يختار المستخدم السجلات (المحددة في جدول السجلات، أو كل الظاهر حسب الفلترة)،
+والمستوى (سطر لكل سجل أو لكل وكالة)، والأعمدة وترتيبها، والعنوان والفرز
+والتجميع حسب المندوب وسطر الإجمالي. المخرجات: طباعة، PDF، Excel، CSV.
+القوالب تفضيل واجهة لكل جهاز (audit_ui_custom_reports)، لا بيانات.
+أسماء المدققين لا تظهر في أي تقرير (قاعدة المشروع)، فلا عمود لها.
+========================================================= */
+
+const CR_PREFS_KEY = "audit_ui_custom_reports";
+let selectedRecordIds = new Set();
+let crRecordIds = [];
+let crState = null;
+
+/* type: text | num | money — المجموع لـ num وmoney */
+const CR_COLUMNS = {
+    record: [
+        { key: "recordNumber", label: "رقم السجل", get: function (r) { return String(r.recordNumber || ""); } },
+        { key: "date", label: "التاريخ", get: function (r) { return formatDay(getRecordDay(r)); } },
+        { key: "office", label: "المكتب", get: function (r) { return String(r.officeName || ""); } },
+        { key: "rep", label: "المندوب", get: function (r) { return String(r.representativeName || "").trim(); } },
+        { key: "repType", label: "نوع المندوب", get: function (r) { return r.representativeType === "external" ? "خارجي" : "داخلي"; } },
+        { key: "agencies", label: "عدد الوكالات", type: "num", get: function (r, st) { return st.agencies.length; } },
+        { key: "active", label: "الفعالة", type: "num", get: function (r, st) { return st.active.length - st.missingAgenciesCount; } },
+        { key: "lost", label: "المفقودة", type: "num", get: function (r, st) { return st.missingAgenciesCount; } },
+        { key: "cancelled", label: "الملغاة", type: "num", get: function (r, st) { return st.cancelled; } },
+        { key: "base", label: "سعر الوكالات", type: "money", get: function (r, st) { return st.active.reduce(function (s, a) { return s + number(a.basePrice); }, 0); } },
+        { key: "additions", label: "الإضافات النقدية", type: "money", get: function (r, st) { return st.additionsTotal; } },
+        { key: "stampAdditions", label: "قيمة طوابع الإضافات", type: "money", get: function (r, st) { return st.stampAdditionsValue; } },
+        { key: "missingCount", label: "عدد النقص", type: "num", get: function (r, st) { return missingCountOf(st.missing); } },
+        { key: "missingValue", label: "قيمة النقص", type: "money", get: function (r, st) { return st.missingValue; } },
+        { key: "transport", label: "بدل الانتقال", type: "money", get: function (r, st) { return st.transport.total; } },
+        { key: "transportShare", label: "حصة المندوب من البدل", type: "money", get: function (r, st) { return st.transport.share; } },
+        { key: "grand", label: "إجمالي السجل", type: "money", get: function (r, st) { return st.grandTotal; } },
+        { key: "due", label: "المطلوب من المندوب", type: "money", get: function (r, st) { return st.representativeTotal; } },
+        { key: "deduction", label: "الحسم (مقاصة)", type: "money", get: function (r, st) { return st.deduction; } },
+        { key: "deductionReason", label: "سبب الحسم", get: function (r, st) { return st.deductionReason; } },
+        { key: "net", label: "الصافي المطلوب", type: "money", get: function (r, st) { return st.netDue; } },
+        { key: "ambulance", label: "حصة الإسعاف", type: "money", get: function (r, st) { return st.committees.ambulance; } },
+        { key: "cooperation", label: "حصة التعاون", type: "money", get: function (r, st) { return st.committees.cooperation; } },
+        { key: "note", label: "ملاحظة السجل", get: function (r) { return getRecordNote(r); } },
+        { key: "centralReceipt", label: "إيصال المركزية", get: function (r) { const x = getRecordRecovery(r); return x.centralReceipt ? x.centralReceipt + (x.centralDate ? " — " + formatDay(x.centralDate) : "") : ""; } },
+        { key: "branchReceipt", label: "إيصال الفرع", get: function (r) { const x = getRecordRecovery(r); return x.branchReceipt ? x.branchReceipt + (x.branchDate ? " — " + formatDay(x.branchDate) : "") : ""; } }
+    ],
+    agency: [
+        { key: "recordNumber", label: "رقم السجل", get: function (r) { return String(r.recordNumber || ""); } },
+        { key: "date", label: "التاريخ", get: function (r) { return formatDay(getRecordDay(r)); } },
+        { key: "office", label: "المكتب", get: function (r) { return String(r.officeName || ""); } },
+        { key: "rep", label: "المندوب", get: function (r) { return String(r.representativeName || "").trim(); } },
+        { key: "number", label: "رقم الوكالة", get: function (r, a) { return String(a.number || ""); } },
+        { key: "type", label: "النوع", get: function (r, a) { return AGENCY_NAMES[a.type] || a.type || ""; } },
+        { key: "status", label: "الحالة", get: function (r, a) { return getAgencyStatusName(a.status); } },
+        { key: "price", label: "السعر", type: "money", get: function (r, a) { return a.status === "cancelled" ? 0 : number(a.basePrice); } },
+        { key: "transport", label: "بدل الانتقال", type: "money", get: function (r, a) { return getAgencyTransport(a).total; } },
+        { key: "additionsText", label: "الإضافات", get: function (r, a) { const t = agencyAdditionsToText(a, true); return t === "-" ? "" : t; } },
+        { key: "additionsValue", label: "قيمة الإضافات", type: "money", get: function (r, a) { return a.status === "cancelled" ? 0 : Math.max(0, number(a.additionsTotal) - getAgencyTransport(a).cash) + getAgencyStampAdditionsValue(a); } },
+        { key: "missingText", label: "النقص", get: function (r, a) { return missingPartsOf(a.stamps || a.missingStamps).join("، "); } },
+        { key: "missingValue", label: "قيمة النقص", type: "money", get: function (r, a) { return a.status === "cancelled" ? 0 : number(a.missingStampsValue); } },
+        { key: "due", label: "المطلوب من المندوب", type: "money", get: function (r, a) { return a.status === "cancelled" ? 0 : number(a.representativeAmount); } },
+        { key: "grand", label: "الإجمالي", type: "money", get: function (r, a) { return getAgencyGrandTotal(a); } },
+        { key: "notes", label: "ملاحظات", get: function (r, a) { return String(a.notes || "").replace(/<br\s*\/?>/gi, " — ").replace(/\r?\n/g, " — "); } }
+    ]
+};
+
+/* قوالب جاهزة (لا تُحذف) + قوالب المستخدم المحفوظة */
+const CR_BUILTIN = [
+    { id: "builtin-4", name: "المطلوب من المندوبين (4 أعمدة)", level: "record", columns: ["rep", "recordNumber", "date", "net"], title: "المطلوب من المندوبين", sort: "rep", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-7", name: "ملخص السجلات (7 أعمدة)", level: "record", columns: ["recordNumber", "date", "office", "rep", "agencies", "grand", "net"], title: "ملخص السجلات", sort: "date", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-rep", name: "حسب المندوب مع المقاصة", level: "record", columns: ["rep", "recordNumber", "date", "due", "deduction", "deductionReason", "net"], title: "المطلوب من المندوبين بعد المقاصة", sort: "rep", group: true, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-agencies", name: "تفاصيل الوكالات", level: "agency", columns: ["recordNumber", "rep", "number", "type", "status", "price", "missingValue", "due", "grand"], title: "تفاصيل الوكالات", sort: "record", group: false, totals: true, signatures: false, orientation: "auto" }
+];
+
+function crLoadPrefs() {
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem(CR_PREFS_KEY) || "null"); } catch (e) {}
+    p = p && typeof p === "object" ? p : {};
+    return { templates: Array.isArray(p.templates) ? p.templates : [], last: p.last && typeof p.last === "object" ? p.last : null };
+}
+
+function crSavePrefs(prefs) {
+    try { localStorage.setItem(CR_PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
+}
+
+function crNormalize(state) {
+    const base = Object.assign({}, CR_BUILTIN[1], state || {});
+    const valid = CR_COLUMNS[base.level === "agency" ? "agency" : "record"].map(function (c) { return c.key; });
+    base.level = base.level === "agency" ? "agency" : "record";
+    base.columns = (Array.isArray(base.columns) ? base.columns : []).filter(function (k) { return valid.indexOf(k) !== -1; });
+    /* ترتيب كامل: المختارة أولاً بترتيبها، ثم البقية */
+    base.order = base.columns.concat(valid.filter(function (k) { return base.columns.indexOf(k) === -1; }));
+    return base;
+}
+
+/* ---------- اختيار السجلات في جدول السجلات ---------- */
+
+function syncRecordSelectionUI() {
+    const visible = getVisibleRecords();
+    const ids = visible.map(function (r) { return r.id; });
+    selectedRecordIds.forEach(function (id) { if (!records.some(function (r) { return r.id === id; })) selectedRecordIds.delete(id); });
+    const selectedVisible = ids.filter(function (id) { return selectedRecordIds.has(id); }).length;
+    const all = document.getElementById("rfSelectAll");
+    if (all) {
+        all.checked = ids.length > 0 && selectedVisible === ids.length;
+        all.indeterminate = selectedVisible > 0 && selectedVisible < ids.length;
+    }
+    const btn = document.getElementById("customReportBtn");
+    if (btn) {
+        const n = selectedRecordIds.size;
+        btn.querySelector("span").textContent = n ? "تقرير مخصّص للمحدد (" + n + ")" : "تقرير مخصّص (" + ids.length + " ظاهر)";
+    }
+    document.getElementById("rfClearSelection")?.toggleAttribute("hidden", selectedRecordIds.size === 0);
+}
+
+document.getElementById("recordsTableBody")?.addEventListener("change", function (event) {
+    const box = event.target.closest("input[data-sel]");
+    if (!box) return;
+    if (box.checked) selectedRecordIds.add(box.dataset.sel); else selectedRecordIds.delete(box.dataset.sel);
+    box.closest("tr")?.classList.toggle("is-selected", box.checked);
+    syncRecordSelectionUI();
+});
+
+document.getElementById("rfSelectAll")?.addEventListener("change", function () {
+    const on = this.checked;
+    getVisibleRecords().forEach(function (r) { if (on) selectedRecordIds.add(r.id); else selectedRecordIds.delete(r.id); });
+    renderRecords();
+});
+
+document.getElementById("rfClearSelection")?.addEventListener("click", function () {
+    selectedRecordIds.clear();
+    renderRecords();
+});
+
+/* ---------- نافذة البناء ---------- */
+
+function openCustomReport() {
+    const visible = getVisibleRecords();
+    /* المحدد بترتيب الجدول الحالي؛ وإن لم يُحدَّد شيء: كل الظاهر */
+    const chosen = selectedRecordIds.size ? visible.filter(function (r) { return selectedRecordIds.has(r.id); }) : visible;
+    const extra = selectedRecordIds.size ? records.filter(function (r) { return selectedRecordIds.has(r.id) && chosen.indexOf(r) === -1; }) : [];
+    crRecordIds = chosen.concat(extra).map(function (r) { return r.id; });
+    if (!crRecordIds.length) {
+        notify("لا توجد سجلات للتقرير. غيّر الفلترة أو حدّد سجلات.", "warning");
+        return;
+    }
+    const prefs = crLoadPrefs();
+    crState = crNormalize(prefs.last || CR_BUILTIN[1]);
+    renderCustomReportBuilder();
+}
+
+window.openCustomReport = openCustomReport;
+
+function crRecords() {
+    return crRecordIds.map(function (id) { return records.find(function (r) { return r.id === id; }); }).filter(Boolean);
+}
+
+/* صفوف التقرير: [{rep, cells:[قيم خام]}] بالفرز المختار */
+function crBuildRows(state) {
+    const cols = CR_COLUMNS[state.level].filter(function (c) { return state.columns.indexOf(c.key) !== -1; });
+    cols.sort(function (a, b) { return state.columns.indexOf(a.key) - state.columns.indexOf(b.key); });
+    const list = crRecords();
+    let items = [];
+    if (state.level === "record") {
+        list.forEach(function (r) { items.push({ record: r, stats: getRecordFinalStats(r) }); });
+    } else {
+        list.forEach(function (r) {
+            (r.agencies || []).slice().sort(function (a, b) { return String(a.number).localeCompare(String(b.number), "ar", { numeric: true }); })
+                .forEach(function (a) { items.push({ record: r, agency: a }); });
+        });
+    }
+    const repOf = function (it) { return String(it.record.representativeName || "").trim(); };
+    const sorters = {
+        keep: null,
+        rep: function (a, b) { return repOf(a).localeCompare(repOf(b), "ar") || getRecordDay(a.record).localeCompare(getRecordDay(b.record)); },
+        date: function (a, b) { return getRecordDay(a.record).localeCompare(getRecordDay(b.record)) || compareRecordNumbers(a.record, b.record); },
+        "date-desc": function (a, b) { return getRecordDay(b.record).localeCompare(getRecordDay(a.record)) || compareRecordNumbers(b.record, a.record); },
+        record: function (a, b) { return compareRecordNumbers(a.record, b.record); },
+        net: function (a, b) {
+            const v = function (it) { return it.stats ? it.stats.netDue : (it.agency.status === "cancelled" ? 0 : number(it.agency.representativeAmount)); };
+            return v(b) - v(a);
+        }
+    };
+    /* التجميع حسب المندوب يحتاج المندوب الواحد متتالياً */
+    const sorter = state.group ? function (a, b) { return repOf(a).localeCompare(repOf(b), "ar") || (sorters[state.sort] ? sorters[state.sort](a, b) : 0); } : sorters[state.sort];
+    if (sorter) items = items.slice().sort(sorter);
+    const rows = items.map(function (it) {
+        return {
+            rep: repOf(it),
+            cells: cols.map(function (c) { return it.stats ? c.get(it.record, it.stats) : c.get(it.record, it.agency); })
+        };
+    });
+    return { cols: cols, rows: rows, records: list };
+}
+
+function crCellText(col, value) {
+    if (col.type === "money") return money(value);
+    if (col.type === "num") return String(number(value));
+    return String(value === undefined || value === null ? "" : value);
+}
+
+function crSums(cols, rows) {
+    return cols.map(function (c, i) {
+        if (c.type !== "money" && c.type !== "num") return null;
+        return rows.reduce(function (s, r) { return s + (Number(r.cells[i]) || 0); }, 0);
+    });
+}
+
+function crIsLandscape(state, colCount) {
+    return state.orientation === "landscape" || (state.orientation === "auto" && colCount > 7);
+}
+
+/* مستند التقرير (للمعاينة والطباعة وPDF) */
+function buildCustomReportDoc(state, previewLimit) {
+    const data = crBuildRows(state);
+    const cols = data.cols;
+    if (!cols.length) return '<p class="doc-empty">اختر عموداً واحداً على الأقل.</p>';
+    const scale = reportPrefs().scale;
+    const subtitle = (state.level === "agency" ? data.rows.length + " وكالة من " : "") + data.records.length + " سجل — تاريخ الإصدار: " + todayArabic();
+    let html = '<div class="final-report doc doc-custom' + (crIsLandscape(state, cols.length) ? " doc-detailed" : "") + '"' + (scale !== 1 ? ' style="--doc-scale:' + scale + '"' : "") + ">";
+    html += docLetterhead(escapeHTML(state.title || "تقرير مخصّص"), subtitle);
+    html += '<div class="table-wrapper"><table class="doc-table cr-table"><thead><tr>' +
+        cols.map(function (c) { return "<th" + (c.type ? ' class="num"' : "") + ">" + c.label + "</th>"; }).join("") + "</tr></thead><tbody>";
+    const rowHTML = function (cells, cls) {
+        return "<tr" + (cls ? ' class="' + cls + '"' : "") + ">" + cells.map(function (v, i) {
+            return "<td" + (cols[i].type ? ' class="num"' : "") + ">" + escapeHTML(v === null ? "" : crCellText(cols[i], v)) + "</td>";
+        }).join("") + "</tr>";
+    };
+    const limit = previewLimit || Infinity;
+    let shown = 0;
+    if (state.group) {
+        const groups = [];
+        data.rows.forEach(function (r) {
+            if (!groups.length || groups[groups.length - 1].rep !== r.rep) groups.push({ rep: r.rep, rows: [] });
+            groups[groups.length - 1].rows.push(r);
+        });
+        groups.forEach(function (g) {
+            if (shown >= limit) return;
+            html += '<tr class="cr-group-head"><td colspan="' + cols.length + '">' + escapeHTML(g.rep || "—") + " (" + g.rows.length + ")</td></tr>";
+            g.rows.forEach(function (r) { if (shown++ < limit) html += rowHTML(r.cells); });
+            const sums = crSums(cols, g.rows);
+            if (sums.some(function (v) { return v !== null; })) {
+                const cells = sums.map(function (v, i) { return v === null ? (i === 0 ? "مجموع " + (g.rep || "") : null) : v; });
+                html += "<tr class=\"cr-subtotal\">" + cells.map(function (v, i) {
+                    return "<td" + (cols[i].type ? ' class="num"' : "") + ">" + (v === null ? "" : escapeHTML(typeof v === "string" ? v : crCellText(cols[i], v))) + "</td>";
+                }).join("") + "</tr>";
+            }
+        });
+    } else {
+        data.rows.forEach(function (r) { if (shown++ < limit) html += rowHTML(r.cells); });
+    }
+    html += "</tbody>";
+    if (state.totals) {
+        const sums = crSums(cols, data.rows);
+        html += "<tfoot><tr>" + sums.map(function (v, i) {
+            const label = i === 0 && v === null ? "الإجمالي (" + data.rows.length + ")" : "";
+            return "<td" + (cols[i].type ? ' class="num"' : "") + ">" + (v === null ? label : escapeHTML(crCellText(cols[i], v))) + "</td>";
+        }).join("") + "</tr></tfoot>";
+    }
+    html += "</table></div>";
+    if (previewLimit && data.rows.length > previewLimit) {
+        html += '<p class="cr-more no-print">المعاينة تعرض أول ' + previewLimit + " سطر من " + data.rows.length + "؛ الطباعة والملفات فيها الكل.</p>";
+    }
+    if (state.signatures) html += docSignatures();
+    html += "</div>";
+    return html;
+}
+
+function crFileTitle() {
+    return String((crState && crState.title) || "تقرير مخصّص").replace(/[\\/:*?"<>|]+/g, "-") + " - " + todayDay();
+}
+
+function renderCustomReportBuilder() {
+    const modalContent = document.getElementById("modalContent");
+    const modal = document.getElementById("recordModal");
+    if (!modalContent || !modal || !crState) return;
+    const prefs = crLoadPrefs();
+    const s = crState;
+    const colDefs = CR_COLUMNS[s.level];
+    const byKey = {};
+    colDefs.forEach(function (c) { byKey[c.key] = c; });
+    const templates = CR_BUILTIN.concat(prefs.templates);
+
+    let html = '<div class="cr-builder">' +
+        '<div class="cr-head"><h2><i class="ti ti-table-options" aria-hidden="true"></i> تقرير مخصّص</h2>' +
+        "<p>" + crRecordIds.length + " سجل " + (selectedRecordIds.size ? "محدد" : "(كل الظاهر حسب الفلترة الحالية)") + "</p></div>" +
+        '<div class="cr-grid">' +
+        '<div class="cr-panel">' +
+            '<label class="input-group"><span>قالب</span><select id="crTemplate"><option value="">— اختر قالباً —</option>' +
+                templates.map(function (t) { return '<option value="' + escapeHTML(t.id) + '">' + escapeHTML(t.name) + (String(t.id).indexOf("builtin") === 0 ? "" : " (محفوظ)") + "</option>"; }).join("") +
+            "</select></label>" +
+            '<div class="cr-row"><button type="button" class="secondary-btn" data-cr="save-template"><i class="ti ti-device-floppy"></i> حفظ كقالب</button>' +
+            '<button type="button" class="secondary-btn" data-cr="delete-template"><i class="ti ti-trash"></i> حذف القالب</button></div>' +
+            '<label class="input-group"><span>عنوان التقرير</span><input type="text" id="crTitle" value="' + escapeHTML(s.title || "") + '"></label>' +
+            '<div class="input-group"><span>المستوى</span><div class="cr-seg" role="radiogroup">' +
+                '<label><input type="radio" name="crLevel" value="record"' + (s.level === "record" ? " checked" : "") + "> سطر لكل سجل</label>" +
+                '<label><input type="radio" name="crLevel" value="agency"' + (s.level === "agency" ? " checked" : "") + "> سطر لكل وكالة</label></div></div>" +
+            '<label class="input-group"><span>الفرز</span><select id="crSort">' +
+                [["keep", "كما في جدول السجلات"], ["rep", "اسم المندوب (أبجدياً)"], ["date", "التاريخ (الأقدم أولاً)"], ["date-desc", "التاريخ (الأحدث أولاً)"], ["record", "رقم السجل"], ["net", "المبلغ (الأعلى أولاً)"]]
+                    .map(function (o) { return '<option value="' + o[0] + '"' + (s.sort === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") +
+            "</select></label>" +
+            '<label class="input-group"><span>اتجاه الصفحة</span><select id="crOrientation">' +
+                [["auto", "تلقائي (أفقي إن زادت الأعمدة عن 7)"], ["portrait", "عمودي"], ["landscape", "أفقي"]]
+                    .map(function (o) { return '<option value="' + o[0] + '"' + (s.orientation === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") +
+            "</select></label>" +
+            '<label class="cr-check"><input type="checkbox" id="crGroup"' + (s.group ? " checked" : "") + "> تجميع حسب المندوب مع مجموع لكل مندوب</label>" +
+            '<label class="cr-check"><input type="checkbox" id="crTotals"' + (s.totals ? " checked" : "") + "> سطر الإجمالي</label>" +
+            '<label class="cr-check"><input type="checkbox" id="crSignatures"' + (s.signatures ? " checked" : "") + "> التوقيعات في آخر التقرير</label>" +
+        "</div>" +
+        '<div class="cr-panel"><h3>الأعمدة <small>(' + s.columns.length + " مختار — رتّبها بالأسهم)</small></h3><ol class=\"cr-columns\">" +
+            s.order.map(function (k, i) {
+                const c = byKey[k];
+                const on = s.columns.indexOf(k) !== -1;
+                return '<li class="' + (on ? "is-on" : "") + '"><label><input type="checkbox" data-cr-col="' + k + '"' + (on ? " checked" : "") + "> " + c.label + "</label>" +
+                    '<span class="cr-move"><button type="button" data-cr-up="' + k + '" aria-label="تقديم ' + c.label + '"' + (i === 0 ? " disabled" : "") + '><i class="ti ti-chevron-up"></i></button>' +
+                    '<button type="button" data-cr-down="' + k + '" aria-label="تأخير ' + c.label + '"' + (i === s.order.length - 1 ? " disabled" : "") + '><i class="ti ti-chevron-down"></i></button></span></li>';
+            }).join("") +
+        "</ol>" +
+        '<div class="cr-row"><button type="button" class="act-btn" data-cr="all-cols">الكل</button><button type="button" class="act-btn" data-cr="no-cols">لا شيء</button></div></div>' +
+        "</div>" +
+        '<div class="cr-actions">' +
+            '<button type="button" class="primary-btn" data-cr="pdf"><i class="ti ti-download"></i> تنزيل PDF</button>' +
+            '<button type="button" class="secondary-btn" data-cr="print"><i class="ti ti-printer"></i> طباعة / حفظ PDF</button>' +
+            '<button type="button" class="secondary-btn" data-cr="excel"><i class="ti ti-file-spreadsheet"></i> Excel</button>' +
+            '<button type="button" class="secondary-btn" data-cr="csv"><i class="ti ti-file-type-csv"></i> CSV</button>' +
+            '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button>' +
+        "</div>" +
+        '<h3 class="cr-preview-title">معاينة</h3><div class="cr-preview" id="crPreview"></div>' +
+        "</div>";
+
+    modalContent.innerHTML = html;
+    modal.classList.remove("hidden");
+    crRefreshPreview();
+}
+
+function crRefreshPreview() {
+    const box = document.getElementById("crPreview");
+    if (box && crState) box.innerHTML = buildCustomReportDoc(crState, 60);
+    const prefs = crLoadPrefs();
+    prefs.last = crStatePublic();
+    crSavePrefs(prefs);
+}
+
+function crStatePublic() {
+    return { level: crState.level, columns: crState.columns.slice(), title: crState.title, sort: crState.sort, group: !!crState.group, totals: !!crState.totals, signatures: !!crState.signatures, orientation: crState.orientation };
+}
+
+/* التفاعل داخل نافذة البناء (تفويض على محتوى النافذة) */
+document.getElementById("modalContent")?.addEventListener("change", function (event) {
+    if (!crState || !event.target.closest(".cr-builder")) return;
+    const t = event.target;
+    if (t.name === "crLevel") {
+        crState = crNormalize(Object.assign(crStatePublic(), { level: t.value, columns: t.value === "agency" ? CR_BUILTIN[3].columns : CR_BUILTIN[1].columns }));
+        renderCustomReportBuilder();
+        return;
+    }
+    if (t.id === "crTemplate" && t.value) {
+        const tpl = CR_BUILTIN.concat(crLoadPrefs().templates).find(function (x) { return x.id === t.value; });
+        if (tpl) { crState = crNormalize(tpl); crState.templateId = tpl.id; renderCustomReportBuilder(); document.getElementById("crTemplate").value = tpl.id; }
+        return;
+    }
+    if (t.dataset.crCol) {
+        const k = t.dataset.crCol;
+        if (t.checked && crState.columns.indexOf(k) === -1) {
+            /* العمود الجديد يأخذ مكانه حسب ترتيب القائمة */
+            crState.columns.push(k);
+            crState.columns.sort(function (a, b) { return crState.order.indexOf(a) - crState.order.indexOf(b); });
+        }
+        if (!t.checked) crState.columns = crState.columns.filter(function (x) { return x !== k; });
+        t.closest("li")?.classList.toggle("is-on", t.checked);
+        const count = document.querySelector(".cr-panel h3 small");
+        if (count) count.textContent = "(" + crState.columns.length + " مختار — رتّبها بالأسهم)";
+    }
+    if (t.id === "crSort") crState.sort = t.value;
+    if (t.id === "crOrientation") crState.orientation = t.value;
+    if (t.id === "crGroup") crState.group = t.checked;
+    if (t.id === "crTotals") crState.totals = t.checked;
+    if (t.id === "crSignatures") crState.signatures = t.checked;
+    crRefreshPreview();
+});
+
+document.getElementById("modalContent")?.addEventListener("input", function (event) {
+    if (!crState || event.target.id !== "crTitle") return;
+    crState.title = event.target.value;
+    clearTimeout(crRefreshPreview._t);
+    crRefreshPreview._t = setTimeout(crRefreshPreview, 250);
+});
+
+document.getElementById("modalContent")?.addEventListener("click", function (event) {
+    if (!crState || !event.target.closest(".cr-builder")) return;
+    const up = event.target.closest("[data-cr-up]");
+    const down = event.target.closest("[data-cr-down]");
+    if (up || down) {
+        const k = (up || down).dataset[up ? "crUp" : "crDown"];
+        const i = crState.order.indexOf(k);
+        const j = up ? i - 1 : i + 1;
+        if (j < 0 || j >= crState.order.length) return;
+        crState.order.splice(i, 1);
+        crState.order.splice(j, 0, k);
+        crState.columns.sort(function (a, b) { return crState.order.indexOf(a) - crState.order.indexOf(b); });
+        renderCustomReportBuilder();
+        document.querySelector('[data-cr-' + (up ? "up" : "down") + '="' + k + '"]')?.focus();
+        return;
+    }
+    const btn = event.target.closest("[data-cr]");
+    if (!btn) return;
+    const action = btn.dataset.cr;
+    if (action === "all-cols") { crState.columns = crState.order.slice(); renderCustomReportBuilder(); return; }
+    if (action === "no-cols") { crState.columns = []; renderCustomReportBuilder(); return; }
+    if (action === "save-template") { crSaveTemplate(); return; }
+    if (action === "delete-template") { crDeleteTemplate(); return; }
+    if (!crState.columns.length) { notify("اختر عموداً واحداً على الأقل.", "warning"); return; }
+    if (action === "print") openReportDocument(buildCustomReportDoc(crState), crFileTitle(), { landscape: crIsLandscape(crState, crState.columns.length) });
+    if (action === "pdf") downloadReportPDF(buildCustomReportDoc(crState), crFileTitle(), crIsLandscape(crState, crState.columns.length));
+    if (action === "excel") crExportExcel();
+    if (action === "csv") crExportCSV();
+});
+
+function crSaveTemplate() {
+    const name = (crState.title || "").trim() || "قالب " + (crLoadPrefs().templates.length + 1);
+    const prefs = crLoadPrefs();
+    const existing = prefs.templates.find(function (t) { return t.name === name; });
+    const tpl = Object.assign(crStatePublic(), { id: existing ? existing.id : "tpl-" + Date.now().toString(36), name: name });
+    if (existing) prefs.templates[prefs.templates.indexOf(existing)] = tpl; else prefs.templates.push(tpl);
+    crSavePrefs(prefs);
+    crState.templateId = tpl.id;
+    renderCustomReportBuilder();
+    document.getElementById("crTemplate").value = tpl.id;
+    notify("حُفظ القالب «" + escapeHTML(name) + "» على هذا الجهاز.", "success");
+}
+
+function crDeleteTemplate() {
+    const id = document.getElementById("crTemplate")?.value || crState.templateId;
+    if (!id || String(id).indexOf("builtin") === 0) {
+        notify("اختر قالباً محفوظاً لحذفه (القوالب الجاهزة لا تُحذف).", "warning");
+        return;
+    }
+    const prefs = crLoadPrefs();
+    prefs.templates = prefs.templates.filter(function (t) { return t.id !== id; });
+    crSavePrefs(prefs);
+    crState.templateId = null;
+    renderCustomReportBuilder();
+    notify("حُذف القالب.", "success");
+}
+
+function crExportExcel() {
+    if (typeof XLSX === "undefined") {
+        notify("تعذر تحميل مكتبة الإكسل. تأكد من الاتصال بالإنترنت ثم حدّث الصفحة.", "error");
+        return;
+    }
+    const data = crBuildRows(crState);
+    const cols = data.cols;
+    const rows = data.rows.map(function (r) { return r.cells.map(function (v, i) { return cols[i].type ? (Number(v) || 0) : String(v === null || v === undefined ? "" : v); }); });
+    const sums = crSums(cols, data.rows);
+    const sheet = buildStyledTableSheet({
+        title: crState.title || "تقرير مخصّص",
+        subtitle: data.records.length + " سجل — " + todayArabic(),
+        headers: cols.map(function (c) { return c.label; }),
+        rows: rows,
+        moneyCols: cols.map(function (c, i) { return c.type === "money" ? i : -1; }).filter(function (i) { return i >= 0; }),
+        totalRow: crState.totals ? sums.map(function (v, i) { return v === null ? (i === 0 ? "الإجمالي" : "") : v; }) : undefined,
+        widths: cols.map(function (c) { return c.type ? 16 : c.key === "notes" || c.key === "note" || c.key === "deductionReason" || c.key === "additionsText" ? 34 : 20; })
+    });
+    const wb = xlWorkbook();
+    XLSX.utils.book_append_sheet(wb, sheet, "التقرير");
+    XLSX.writeFile(wb, crFileTitle() + ".xlsx");
+}
+
+function crExportCSV() {
+    const data = crBuildRows(crState);
+    const cols = data.cols;
+    const esc = function (v) {
+        const s = String(v === null || v === undefined ? "" : v);
+        return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [cols.map(function (c) { return esc(c.label); }).join(",")];
+    data.rows.forEach(function (r) {
+        lines.push(r.cells.map(function (v, i) { return esc(cols[i].type ? (Number(v) || 0) : v); }).join(","));
+    });
+    if (crState.totals) {
+        lines.push(crSums(cols, data.rows).map(function (v, i) { return esc(v === null ? (i === 0 ? "الإجمالي" : "") : v); }).join(","));
+    }
+    /* BOM حتى يفتح Excel العربية صحيحة */
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = crFileTitle() + ".csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
 }
 
 /* =========================================================
@@ -6383,7 +6972,8 @@ function hasUnsavedRecordForm() {
     if (!editingId) return true;
     const saved = records.find(function (r) { return r.id === editingId; });
     return !saved || JSON.stringify(saved.agencies || []) !== JSON.stringify(pendingAgencies) ||
-        getRecordNote(saved) !== getFormRecordNote();
+        getRecordNote(saved) !== getFormRecordNote() ||
+        JSON.stringify(getRecordDeduction(saved)) !== JSON.stringify(getFormDeduction());
 }
 
 /* تأكيد قبل ترك نموذج فيه تغييرات غير محفوظة */
@@ -6501,6 +7091,8 @@ if (recordDateInput) {
 setFormAuditors(getRecordAuditors(record));
 
 setFormRecordNote(getRecordNote(record));
+
+setFormDeduction(record.deduction);
 
 
 pendingAgencies =
@@ -6913,6 +7505,10 @@ function getRecordFinalStats(record) {
         additionsCount: additionsCount,
         signatureCount: signatureCount,
         representativeTotal: representativeTotal,
+        /* المقاصة على مستوى السجل (سجلات وهمية من التقارير العامة: صفر) */
+        deduction: getRecordDeduction(record).amount,
+        deductionReason: getRecordDeduction(record).reason,
+        netDue: representativeTotal - getRecordDeduction(record).amount,
         transport: transport,
         committees: sumCommittees(active, getRecordDay(record))
     };
@@ -7430,7 +8026,11 @@ function buildFinalRecordReport(record, mode, forPrint) {
     }
 
     html += '<div class="doc-summary-row">' +
-        '<div class="doc-due"><span>المبلغ المستحق على المندوب</span><strong>' + money(stats.representativeTotal) + "</strong>" +
+        (stats.deduction > 0
+            ? '<div class="doc-due"><span>الصافي المستحق على المندوب (بعد المقاصة)</span><strong>' + money(stats.netDue) + "</strong>" +
+              '<small class="doc-deduction">المطلوب قبل الحسم ' + money(stats.representativeTotal) + " — حسم (مقاصة) " + money(stats.deduction) +
+              (stats.deductionReason ? "<br>سبب الحسم: " + escapeHTML(stats.deductionReason) : "") + "</small>"
+            : '<div class="doc-due"><span>المبلغ المستحق على المندوب</span><strong>' + money(stats.representativeTotal) + "</strong>") +
         "<small>عن " + stats.active.length + " وكالة غير ملغاة</small>" +
         '<div class="doc-grand"><span>إجمالي مبلغ السجل</span><b>' + money(stats.grandTotal) + "</b>" +
         "<small>سعر الوكالات + الإضافات (الطوابع والنقدية) + بدل الانتقال</small></div></div>" +
@@ -8591,7 +9191,10 @@ function buildGeneralReportDoc() {
     const filterActive = isReportFilterActive(filter);
     const matched = getFilteredAgencies(filter);
     const all = matched.map(function (m) { return m.agency; });
-    const recordCount = new Set(matched.map(function (m) { return m.record.id; })).size;
+    const matchedIds = new Set(matched.map(function (m) { return m.record.id; }));
+    const recordCount = matchedIds.size;
+    /* حسومات المقاصة للسجلات المطابقة (كل سجل مرة واحدة) */
+    const genDeductions = records.reduce(function (s, r) { return matchedIds.has(r.id) ? s + getRecordDeduction(r).amount : s; }, 0);
 
     const pseudo = getRecordFinalStats({ agencies: all });
     const baseTotal = Object.keys(pseudo.byType).reduce(function (s, t) { return s + pseudo.byType[t].total; }, 0);
@@ -8613,7 +9216,8 @@ function buildGeneralReportDoc() {
     );
 
     html += '<div class="doc-summary-row">' +
-        '<div class="doc-due"><span>' + (filterActive ? "المطلوب (حسب التصفية)" : "المطلوب من جميع المندوبين") + "</span><strong>" + money(pseudo.representativeTotal) + "</strong>" +
+        '<div class="doc-due"><span>' + (filterActive ? "المطلوب (حسب التصفية)" : "المطلوب من جميع المندوبين") + (genDeductions > 0 ? " — الصافي بعد المقاصة" : "") + "</span><strong>" + money(pseudo.representativeTotal - genDeductions) + "</strong>" +
+        (genDeductions > 0 ? '<small class="doc-deduction">قبل الحسم ' + money(pseudo.representativeTotal) + " — حسومات المقاصة " + money(genDeductions) + "</small>" : "") +
         "<small>عن " + pseudo.active.length + " وكالة غير ملغاة في " + recordCount + " سجل</small></div>" +
         '<dl class="doc-kpis">' +
             "<div><dt>فعالة</dt><dd>" + (pseudo.active.length - pseudo.missingAgenciesCount) + "</dd></div>" +
@@ -8663,17 +9267,31 @@ function buildGeneralReportDoc() {
         map[name].total += m.agency.status === "cancelled" ? 0 : number(m.agency.representativeAmount);
     });
 
-    const names = Object.keys(map).sort(function (a, b) { return map[b].total - map[a].total; });
+    /* المقاصة على مستوى السجل: حسم كل سجل مطابق يُحسب مرة واحدة لمندوبه */
+    let allDeductions = 0;
+    Object.keys(map).forEach(function (name) {
+        map[name].deduction = 0;
+        map[name].ids.forEach(function (id) {
+            const r = records.find(function (x) { return x.id === id; });
+            map[name].deduction += getRecordDeduction(r).amount;
+        });
+        allDeductions += map[name].deduction;
+    });
+
+    const names = Object.keys(map).sort(function (a, b) { return (map[b].total - map[b].deduction) - (map[a].total - map[a].deduction); });
 
     html += '<section class="doc-section">' + secTitle("المطلوب من كل مندوب") +
-        '<table class="doc-table"><thead><tr><th>المندوب</th><th class="num">السجلات</th><th class="num">الوكالات</th><th class="num">حصته من بدل الانتقال</th><th class="num">المطلوب</th></tr></thead><tbody>' +
+        '<table class="doc-table"><thead><tr><th>المندوب</th><th class="num">السجلات</th><th class="num">الوكالات</th><th class="num">حصته من بدل الانتقال</th><th class="num">المطلوب</th>' +
+        (allDeductions > 0 ? '<th class="num">الحسم (مقاصة)</th><th class="num">الصافي</th>' : "") + "</tr></thead><tbody>" +
         (names.length === 0
-            ? '<tr><td colspan="5">لا توجد بيانات.</td></tr>'
+            ? '<tr><td colspan="7">لا توجد بيانات.</td></tr>'
             : names.map(function (name) {
                 const item = map[name];
-                return "<tr><td>" + escapeHTML(name) + '</td><td class="num">' + item.records + '</td><td class="num">' + item.agencies + '</td><td class="num">' + money(item.share) + '</td><td class="num"><strong>' + money(item.total) + "</strong></td></tr>";
+                return "<tr><td>" + escapeHTML(name) + '</td><td class="num">' + item.records + '</td><td class="num">' + item.agencies + '</td><td class="num">' + money(item.share) + '</td><td class="num"><strong>' + money(item.total) + "</strong></td>" +
+                    (allDeductions > 0 ? '<td class="num">' + money(item.deduction) + '</td><td class="num"><strong>' + money(item.total - item.deduction) + "</strong></td>" : "") + "</tr>";
             }).join("")) +
-        '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + recordCount + '</td><td class="num">' + pseudo.agencies.length + '</td><td class="num">' + money(pseudo.transport.share) + '</td><td class="num">' + money(pseudo.representativeTotal) + "</td></tr></tfoot></table></section>";
+        '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + recordCount + '</td><td class="num">' + pseudo.agencies.length + '</td><td class="num">' + money(pseudo.transport.share) + '</td><td class="num">' + money(pseudo.representativeTotal) + "</td>" +
+        (allDeductions > 0 ? '<td class="num">' + money(allDeductions) + '</td><td class="num">' + money(pseudo.representativeTotal - allDeductions) + "</td>" : "") + "</tr></tfoot></table></section>";
 
     if (filterActive) {
         html += '<section class="doc-section doc-section-flow">' + secTitle("الوكالات المطابقة للتصفية") +
@@ -10867,6 +11485,11 @@ const matchedRecordIds =
         )
     );
 
+/* حسومات المقاصة للسجلات المطابقة (كل سجل مرة واحدة) */
+const reportDeductions = records.reduce(function (s, r) {
+    return matchedRecordIds.has(r.id) ? s + getRecordDeduction(r).amount : s;
+}, 0);
+
 const resultCounter =
     document.getElementById(
         "filterResultCount"
@@ -11139,9 +11762,10 @@ let html = `
 
                 <strong class="report-number">
                     ${money(
-                        totalRepresentative
+                        totalRepresentative - reportDeductions
                     )}
                 </strong>
+                ${reportDeductions > 0 ? '<small class="report-deduction">بعد حسومات المقاصة ' + money(reportDeductions) + " (قبلها " + money(totalRepresentative) + ")</small>" : ""}
 
             </div>
 
@@ -11751,6 +12375,16 @@ allAgencies.forEach(
 );
 
 
+/* المقاصة: حسم كل سجل مطابق يُحسب مرة واحدة لمندوبه */
+Object.keys(representativeMap).forEach(function (name) {
+    const item = representativeMap[name];
+    item.deduction = 0;
+    item.recordIds.forEach(function (id) {
+        const r = records.find(function (x) { return x.id === id; });
+        item.deduction += getRecordDeduction(r).amount;
+    });
+});
+
 const representatives =
     Object.keys(
         representativeMap
@@ -11814,9 +12448,10 @@ if (
 
                         <strong>
                             ${money(
-                                item.amount
+                                item.amount - item.deduction
                             )}
                         </strong>
+                        ${item.deduction > 0 ? '<small class="deduction-note">بعد حسم ' + money(item.deduction) + "</small>" : ""}
 
                     </td>
 
@@ -13931,6 +14566,7 @@ function activityTotals(from, to) {
         const day = getRecordDay(record);
         if (!day || day < from || day > to) return;
         t.records += 1;
+        t.due -= getRecordDeduction(record).amount;
         (record.agencies || []).forEach(function (a) {
             if (a.status === "cancelled") return;
             t.agencies += 1;
@@ -14161,9 +14797,10 @@ function updateDashboard() {
     const activeCount = agencies.length - cancelled - missingCount;
 
     /* مثل التقارير: الوكالة الملغاة لا مطلوب عليها (حتى لو بقي مبلغ في سجل قديم) */
+    /* المقاصة: حسومات السجلات تنقص المطلوب من المندوبين */
     const representativeTotal = agencies.reduce(function (sum, agency) {
         return agency.status === "cancelled" ? sum : sum + number(agency.representativeAmount);
-    }, 0);
+    }, 0) - sumDeductions(records);
 
     const setText = function (id, value) {
         const el = document.getElementById(id);
@@ -14250,7 +14887,7 @@ function updateDashboard() {
         records.forEach(function (record) {
             const name = (record.representativeName || "-").trim() || "-";
             if (!map[name]) map[name] = { name: name, total: 0, records: 0 };
-            map[name].total += getRecordRepresentativeTotal(record);
+            map[name].total += getRecordNetDue(record);
             map[name].records += 1;
         });
         const reps = Object.values(map).sort(function (a, b) { return b.total - a.total; }).slice(0, 5);
@@ -14290,7 +14927,7 @@ function updateDashboard() {
                 "<td>" + escapeHTML(record.officeName) + "</td>" +
                 "<td>" + escapeHTML(record.representativeName) + "</td>" +
                 '<td class="num">' + (record.agencies || []).length + "</td>" +
-                '<td class="num money-cell">' + money(getRecordRepresentativeTotal(record)) + "</td>" +
+                '<td class="num money-cell">' + money(getRecordNetDue(record)) + "</td>" +
                 '<td><button type="button" class="link-btn" onclick="showFinalRecordReport(\'' + record.id + '\', \'summary\')">التقرير</button></td>' +
                 "</tr>";
         }).join("") +
@@ -16456,8 +17093,12 @@ function exportRecordToExcel(id) {
         { label: "حصة لجنة الإسعاف", value: stats.committees.ambulance, money: true },
         { label: "حصة لجنة التعاون", value: stats.committees.cooperation, money: true },
         { gap: true },
-        { label: "المبلغ المستحق على المندوب", value: stats.representativeTotal, money: true, due: true }
-    ]));
+        { label: stats.deduction > 0 ? "المطلوب قبل الحسم" : "المبلغ المستحق على المندوب", value: stats.representativeTotal, money: true, due: !(stats.deduction > 0) }
+    ].concat(stats.deduction > 0 ? [
+        { label: "حسم (مقاصة)", value: stats.deduction, money: true },
+        { label: "سبب الحسم", value: stats.deductionReason },
+        { label: "الصافي المستحق على المندوب", value: stats.netDue, money: true, due: true }
+    ] : [])));
 
     /* 2) الوكالات */
     const sorted = stats.agencies.slice().sort(function (a, b) { return number(a.number) - number(b.number); });
@@ -16546,20 +17187,21 @@ function exportAllRecordsToExcel() {
 
     const subtitle = "كل السجلات حتى " + todayArabic() + " — " + records.length + " سجل";
 
-    let tBase = 0, tTransport = 0, tShare = 0, tAdd = 0, tMissing = 0, tRep = 0, tAg = 0, tActive = 0, tCancelled = 0, tLost = 0, tAmb = 0, tCoop = 0;
+    let tBase = 0, tTransport = 0, tShare = 0, tAdd = 0, tMissing = 0, tRep = 0, tDed = 0, tAg = 0, tActive = 0, tCancelled = 0, tLost = 0, tAmb = 0, tCoop = 0;
 
     const rows = records.map(function (record) {
         const stats = getRecordFinalStats(record);
         const base = Object.keys(stats.byType).reduce(function (s, t) { return s + stats.byType[t].total; }, 0);
         const active = stats.active.length - stats.missingAgenciesCount;
         tBase += base; tTransport += stats.transport.total; tShare += stats.transport.share;
-        tAdd += stats.additionsTotal; tMissing += stats.missingValue; tRep += stats.representativeTotal;
+        tAdd += stats.additionsTotal; tMissing += stats.missingValue; tRep += stats.representativeTotal; tDed += stats.deduction;
         tAg += stats.agencies.length; tActive += active; tCancelled += stats.cancelled; tLost += stats.missingAgenciesCount;
         tAmb += stats.committees.ambulance; tCoop += stats.committees.cooperation;
         return [
             String(record.recordNumber), record.officeName, record.representativeName,
             stats.agencies.length, active, stats.missingAgenciesCount, stats.cancelled,
-            base, stats.transport.total, stats.transport.share, stats.additionsTotal, stats.missingValue, stats.representativeTotal
+            base, stats.transport.total, stats.transport.share, stats.additionsTotal, stats.missingValue, stats.representativeTotal,
+            stats.deduction, stats.netDue, stats.deductionReason
         ];
     });
 
@@ -16579,17 +17221,20 @@ function exportAllRecordsToExcel() {
         { label: "حصة لجنة الإسعاف", value: tAmb, money: true },
         { label: "حصة لجنة التعاون", value: tCoop, money: true },
         { gap: true },
-        { label: "المطلوب من جميع المندوبين", value: tRep, money: true, due: true }
-    ]);
+        { label: tDed > 0 ? "المطلوب قبل حسومات المقاصة" : "المطلوب من جميع المندوبين", value: tRep, money: true, due: !(tDed > 0) }
+    ].concat(tDed > 0 ? [
+        { label: "حسومات المقاصة", value: tDed, money: true },
+        { label: "الصافي المطلوب من جميع المندوبين", value: tRep - tDed, money: true, due: true }
+    ] : []));
 
     const recordsSheet = buildStyledTableSheet({
         title: "السجلات",
         subtitle: subtitle,
-        headers: ["رقم السجل", "المكتب", "المندوب", "الوكالات", "فعالة", "مفقودة", "ملغاة", "سعر الوكالات", "بدل الانتقال", "حصة المندوب من الانتقال", "الإضافات النقدية", "الطوابع الناقصة", "المطلوب من المندوب"],
+        headers: ["رقم السجل", "المكتب", "المندوب", "الوكالات", "فعالة", "مفقودة", "ملغاة", "سعر الوكالات", "بدل الانتقال", "حصة المندوب من الانتقال", "الإضافات النقدية", "الطوابع الناقصة", "المطلوب من المندوب", "حسم (مقاصة)", "الصافي المطلوب", "سبب الحسم"],
         rows: rows,
-        moneyCols: [7, 8, 9, 10, 11, 12],
-        totalRow: ["الإجمالي", "", "", tAg, tActive, tLost, tCancelled, tBase, tTransport, tShare, tAdd, tMissing, tRep],
-        widths: [12, 24, 22, 10, 9, 9, 9, 16, 14, 16, 16, 16, 20]
+        moneyCols: [7, 8, 9, 10, 11, 12, 13, 14],
+        totalRow: ["الإجمالي", "", "", tAg, tActive, tLost, tCancelled, tBase, tTransport, tShare, tAdd, tMissing, tRep, tDed, tRep - tDed, ""],
+        widths: [12, 24, 22, 10, 9, 9, 9, 16, 14, 16, 16, 16, 20, 14, 18, 30]
     });
 
     /* حسب المندوب */
@@ -16599,7 +17244,7 @@ function exportAllRecordsToExcel() {
         if (!map[name]) map[name] = { records: 0, agencies: 0, total: 0 };
         map[name].records += 1;
         map[name].agencies += (record.agencies || []).length;
-        map[name].total += getRecordRepresentativeTotal(record);
+        map[name].total += getRecordNetDue(record);
     });
 
     const repRows = Object.keys(map)
@@ -16694,6 +17339,7 @@ function saveRecordDraft() {
             recordDate: getFieldValue("recordDate"),
             auditors: getFormAuditors(),
             recordNote: getFormRecordNote(),
+            deduction: getFormDeduction(),
             pendingAgencies: pendingAgencies,
             savedAt: new Date().toISOString()
         };
@@ -16791,6 +17437,7 @@ function importRecordDraftFromFile(file) {
             setValue("recordDate", data.recordDate || todayDay());
             if (Array.isArray(data.auditors)) setFormAuditors(data.auditors);
             setFormRecordNote(data.recordNote || "");
+            setFormDeduction(data.deduction || null);
             updateRepresentativeTypeHint();
 
             pendingAgencies = list;
@@ -16906,6 +17553,7 @@ function applyRecordDraft(draft) {
     setValue("recordDate", draft.recordDate || todayDay());
     if (Array.isArray(draft.auditors)) setFormAuditors(draft.auditors);
     setFormRecordNote(draft.recordNote || "");
+    setFormDeduction(draft.deduction || null);
     updateRepresentativeTypeHint();
 
     pendingAgencies = Array.isArray(draft.pendingAgencies)

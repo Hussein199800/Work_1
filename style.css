@@ -7460,3 +7460,277 @@ html.theme-switching *::after {
         white-space: nowrap;
     }
 }
+
+/* ================= المقاصة: حسم للمندوب (بيانات السجل + التقرير) ================= */
+
+.deduction-group {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+    gap: 14px;
+    margin-top: 14px;
+}
+
+@media screen and (max-width: 640px) {
+    .deduction-group {
+        grid-template-columns: 1fr;
+    }
+}
+
+.doc-due .doc-deduction {
+    display: block;
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-radius: var(--r-sm);
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.86);
+    line-height: 1.7;
+}
+
+.deduction-note {
+    display: block;
+    color: var(--warning);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+}
+
+.report-deduction {
+    display: block;
+    margin-top: 4px;
+    font-size: var(--fs-xs);
+    opacity: 0.85;
+}
+
+/* ================= التقارير المخصّصة (19/11/2026) =================
+   تحديد السجلات في الجدول، ونافذة بناء التقرير: إعدادات | أعمدة، ثم المعاينة. */
+
+.sel-cell {
+    width: 36px;
+    padding-inline: 6px 2px !important;
+    text-align: center;
+}
+
+.sel-cell input {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+tr.is-selected td {
+    background: var(--accent-soft) !important;
+}
+
+/* block لا flex: الحاوية المرنة تُحشر بجانب زر الإغلاق العائم فتضيق على الجوال */
+.cr-builder {
+    display: block;
+}
+
+.cr-builder > * + * {
+    margin-top: 16px;
+}
+
+.cr-head h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-xl);
+    color: var(--heading);
+}
+
+.cr-head p {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+}
+
+.cr-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+}
+
+@media screen and (max-width: 1024px) {
+    .cr-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.cr-builder,
+.cr-panel {
+    min-width: 0;
+}
+
+.cr-panel select,
+.cr-panel input[type="text"] {
+    width: 100%;
+    min-width: 0;
+}
+
+.cr-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+}
+
+.cr-panel h3 {
+    font-size: var(--fs-md);
+    color: var(--heading);
+}
+
+.cr-panel h3 small {
+    color: var(--text-3);
+    font-weight: 500;
+}
+
+.cr-panel .input-group > span {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-2);
+}
+
+.cr-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.cr-seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.cr-seg label,
+.cr-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.cr-seg label {
+    padding: 8px 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface-2);
+}
+
+.cr-seg label:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-weight: 600;
+}
+
+.cr-columns {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 420px;
+    overflow: auto;
+    padding: 2px;
+}
+
+.cr-columns li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 6px 4px 10px;
+    border-radius: var(--r-sm);
+    border: 1px solid transparent;
+    color: var(--text-3);
+}
+
+.cr-columns li.is-on {
+    border-color: var(--line);
+    background: var(--surface-2);
+    color: var(--heading);
+    font-weight: 600;
+}
+
+.cr-columns label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+    font-size: var(--fs-sm);
+}
+
+.cr-move {
+    display: inline-flex;
+    gap: 2px;
+}
+
+.cr-move button {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-2);
+}
+
+.cr-move button:hover:not(:disabled) {
+    background: var(--accent-soft);
+    color: var(--accent-text);
+}
+
+.cr-move button:disabled {
+    opacity: 0.3;
+}
+
+.cr-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.cr-preview-title {
+    font-size: var(--fs-md);
+    color: var(--text-2);
+}
+
+.cr-preview {
+    padding: 16px;
+    border-radius: var(--r-lg);
+    background: var(--surface-3);
+}
+
+.cr-preview .doc {
+    max-width: none;
+}
+
+.cr-table .cr-group-head td {
+    background: var(--surface-3) !important;
+    font-weight: 700;
+    color: var(--heading);
+}
+
+.cr-table .cr-subtotal td {
+    font-weight: 700;
+    border-top: 1px solid var(--line-strong);
+}
+
+.cr-more {
+    margin-top: 10px;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+}
+
+/* زر الإغلاق العائم لا يضيّق لوحات نافذة البناء */
+.cr-grid,
+.cr-actions,
+.cr-preview {
+    clear: both;
+}
