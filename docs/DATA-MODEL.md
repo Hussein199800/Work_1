@@ -21,7 +21,7 @@
 | `audit_record_draft` | مسودة السجل غير المحفوظ |
 | `currentUser`, `activeSection` | الجلسة والقسم المفتوح |
 
-تفضيلات واجهة (ليست بيانات، يمكن أن تضيع دون ضرر): `audit_ui_theme`, `audit_ui_records_view`, `audit_ui_activity_period`, `audit_ui_last_auditors`, `audit_ui_backup_state`, `audit_ui_seq_check`, `audit_ui_font_scale` (حجم خط الموقع 0.85–1.3)، `audit_ui_report` (`{scale, recovery}`: حجم خط التقرير 0.8–1.4 وإدراج بيان الاستدراك)، `audit_ui_telegram` (رمز البوت — لا يدخل النسخ الاحتياطية ولا المستودع)، `audit_ui_firebase` (حالة المزامنة لهذا الجهاز: `signedIn, uid, base{id:hash}, lastPull, settingsBase, settingsLocalHash, settingsChangedAt, lastSyncAt` — حذفه يعني فقط مزامنة أولى جديدة).
+تفضيلات واجهة (ليست بيانات، يمكن أن تضيع دون ضرر): `audit_ui_theme`, `audit_ui_records_view`, `audit_ui_activity_period`, `audit_ui_last_auditors`, `audit_ui_backup_state`, `audit_ui_seq_check`, `audit_ui_font_scale` (حجم خط الموقع 0.85–1.3)، `audit_ui_report` (`{scale, recovery}`: حجم خط التقرير 0.8–1.4 وإدراج بيان الاستدراك)، `audit_ui_custom_reports` (`{templates, last}`: قوالب التقارير المخصّصة لهذا الجهاز)، `audit_ui_telegram` (رمز البوت — لا يدخل النسخ الاحتياطية ولا المستودع)، `audit_ui_firebase` (حالة المزامنة لهذا الجهاز: `signedIn, uid, base{id:hash}, lastPull, settingsBase, settingsLocalHash, settingsChangedAt, lastSyncAt` — حذفه يعني فقط مزامنة أولى جديدة).
 
 ## Firebase (اختياري)
 نسخة متزامنة على Firestore في مساحة مشتركة: `workspaces/idlib/records/{id}` و`workspaces/idlib/meta/settings`. التفاصيل والقواعد في [`FIREBASE.md`](FIREBASE.md). البيانات المحلية تبقى الأصل.
@@ -40,6 +40,7 @@
   agencies: [ /* وكالات */ ],
   auditors: ["اسم", "اسم"],          // اختياري، داخل البرنامج فقط، لا يظهر في التقارير
   recovery: { centralReceipt, centralDate, branchReceipt, branchDate, text },  // اختياري (16/11/2026): إيصالات «بيان استدراك النقص» — تُكتب من نافذة التقرير
+  deduction: { amount, reason },     // اختياري (19/11/2026): المقاصة — حسم للمندوب وسببه؛ ينقص المطلوب منه فقط (getRecordNetDue)
   recordNote: "نص",                  // اختياري (3/11/2026): ملاحظة على السجل كاملاً — مربع في التقرير وExcel؛ يُحفظ فقط إن كُتب
   createdAt, updatedAt               // ISO
 }
