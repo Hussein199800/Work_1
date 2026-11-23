@@ -202,6 +202,32 @@ const printDoc = await ev(function () {
 });
 check("مستند الطباعة فيه كل الأسطر، وأفقي لـ 9 أعمدة", printDoc.rows >= 4 && printDoc.landscape === true, JSON.stringify(printDoc));
 
+/* 4) توقيعات لجنة التدقيق (23/11/2026) */
+await ev(function () { closeRecordModal(true); switchSection("pricesSection"); });
+await page.waitForTimeout(400);
+await page.fill("#acChair", "أ. خالد الرئيس");
+await page.fill("#acMember1", "عضو أول");
+await page.fill("#acMember3", "عضو ثالث");
+await page.click("#saveAuditCommitteeBtn");
+await page.waitForTimeout(300);
+const stored = await ev(function () { return JSON.parse(localStorage.getItem("audit_audit_committee")); });
+check("حفظ أسماء لجنة التدقيق (الرئيس + 4 أعضاء)", stored.chair === "أ. خالد الرئيس" && stored.members.length === 4 && stored.members[0] === "عضو أول" && stored.members[1] === "" && stored.members[2] === "عضو ثالث", JSON.stringify(stored));
+const sig = await ev(function () {
+    const r = records.find(function (x) { return x.id === "b1"; });
+    const off = buildFinalRecordReport(r, "summary", true);
+    saveReportPrefs({ committeeSign: true });
+    const on = buildFinalRecordReport(r, "detailed", true);
+    const custom = buildCustomReportDoc(Object.assign({}, crState, { signatures: true }));
+    const backup = JSON.parse(buildBackupJSON());
+    saveReportPrefs({ committeeSign: false });
+    return { off: off.indexOf("doc-committee-sign") === -1, on: /رئيس لجنة التدقيق[\s\S]*أ. خالد الرئيس/.test(on) && (on.match(/عضو اللجنة/g) || []).length >= 4 && on.indexOf("المدقق") !== -1,
+        custom: custom.indexOf("أ. خالد الرئيس") !== -1, backup: backup.auditCommittee && backup.auditCommittee.chair === "أ. خالد الرئيس", fb: FB_SETTINGS_KEYS.indexOf("audit_audit_committee") !== -1 };
+});
+check("توقيعات اللجنة مطفأة افتراضياً", sig.off);
+check("عند تفعيلها: الرئيس و4 أعضاء تحت توقيعَي المدقق ورئيس المكتب", sig.on);
+check("تظهر في التقرير المخصّص أيضاً", sig.custom);
+check("الأسماء في النسخة الاحتياطية والمزامنة", sig.backup && sig.fb, JSON.stringify(sig));
+
 check("لا أخطاء JavaScript", errors.length === 0, errors.join(" | "));
 
 await browser.close();

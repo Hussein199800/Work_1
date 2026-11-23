@@ -7734,3 +7734,89 @@ tr.is-selected td {
 .cr-preview {
     clear: both;
 }
+
+/* ================= توقيعات لجنة التدقيق (23/11/2026) =================
+   الرئيس + 4 أعضاء في صف واحد على الورق، والاسم فوق خط التوقيع. */
+
+.doc-committee-sign {
+    margin-top: 22px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+.doc-committee-sign h4 {
+    margin-bottom: 10px;
+    text-align: center;
+    font-size: var(--fs-sm);
+    color: var(--heading);
+}
+
+.committee-sign-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.committee-sign-grid div {
+    text-align: center;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    font-weight: 600;
+}
+
+.committee-sign-grid b {
+    display: block;
+    min-height: 1.6em;
+    margin-top: 4px;
+    font-size: var(--fs-sm);
+    color: var(--heading);
+}
+
+.committee-sign-grid i {
+    display: block;
+    height: 36px;
+    border-bottom: 1px solid var(--line-strong);
+}
+
+@media screen and (max-width: 640px) {
+    .committee-sign-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.audit-committee-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin: 12px 0 16px;
+}
+
+.audit-committee-form .input-group > span {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-2);
+}
+
+.doc-sign-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+@media print {
+    .doc-sign-block .doc-sign {
+        margin-top: 16px;
+        padding-top: 10px;
+    }
+
+    .doc-sign-block .doc-sign i {
+        height: 30px;
+    }
+
+    .doc-committee-sign {
+        margin-top: 12px;
+    }
+
+    .committee-sign-grid i {
+        height: 26px;
+    }
+}

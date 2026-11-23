@@ -270,7 +270,7 @@ const DATA_SETTINGS_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations"
+    "audit_fee_destinations", "audit_audit_committee"
 ];
 let settingsLoadFailed = [];
 const settingsCorruptRaw = {};
@@ -344,7 +344,7 @@ if ([
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_records", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations"
+    "audit_fee_destinations", "audit_audit_committee"
 ].indexOf(key) !== -1) {
     try { markDataChanged(); } catch (e) {}
     /* قبل تحميل قسم Firebase يرمي (منطقة TDZ) ويُتجاهل: حفظ الإعدادات عند فتح الصفحة ليس تعديلاً */
@@ -401,6 +401,24 @@ DEFAULT_STAMP_PRICES
 const FEE_DESTINATIONS_KEY = "audit_fee_destinations";
 const DEFAULT_FEE_DESTINATIONS = { pleading: "central", ambulance: "central", aid: "central", receipt: "branch" };
 const FEE_DESTINATION_NAMES = { central: "النقابة المركزية", branch: "الفرع" };
+
+/*
+    لجنة التدقيق (23/11/2026): أسماء رئيسها وأعضائها الأربعة، تُطبع تحت توقيعات التقرير
+    عند اختيار «مع توقيعات لجنة التدقيق». إعداد مشترك (نسخة احتياطية + مزامنة)، إضافي؛
+    الاسم الفارغ يُطبع خطاً فارغاً للكتابة باليد.
+*/
+const AUDIT_COMMITTEE_KEY = "audit_audit_committee";
+const AUDIT_COMMITTEE_MEMBERS = 4;
+
+function normalizeAuditCommittee(value) {
+    const v = value && typeof value === "object" ? value : {};
+    const members = Array.isArray(v.members) ? v.members : [];
+    const out = { chair: String(v.chair || "").trim(), members: [] };
+    for (let i = 0; i < AUDIT_COMMITTEE_MEMBERS; i++) out.members.push(String(members[i] || "").trim());
+    return out;
+}
+
+let auditCommittee = normalizeAuditCommittee(loadData(AUDIT_COMMITTEE_KEY, null));
 
 let feeDestinations = (function () {
     const saved = loadData(FEE_DESTINATIONS_KEY, null);
@@ -6371,6 +6389,7 @@ function renderCustomReportBuilder() {
             '<label class="cr-check"><input type="checkbox" id="crGroup"' + (s.group ? " checked" : "") + "> تجميع حسب المندوب مع مجموع لكل مندوب</label>" +
             '<label class="cr-check"><input type="checkbox" id="crTotals"' + (s.totals ? " checked" : "") + "> سطر الإجمالي</label>" +
             '<label class="cr-check"><input type="checkbox" id="crSignatures"' + (s.signatures ? " checked" : "") + "> التوقيعات في آخر التقرير</label>" +
+            '<label class="cr-check"><input type="checkbox" id="crCommitteeSign"' + (reportPrefs().committeeSign ? " checked" : "") + "> مع توقيعات لجنة التدقيق</label>" +
         "</div>" +
         '<div class="cr-panel"><h3>الأعمدة <small>(' + s.columns.length + " مختار — رتّبها بالأسهم)</small></h3><ol class=\"cr-columns\">" +
             s.order.map(function (k, i) {
@@ -6441,6 +6460,11 @@ document.getElementById("modalContent")?.addEventListener("change", function (ev
     if (t.id === "crGroup") crState.group = t.checked;
     if (t.id === "crTotals") crState.totals = t.checked;
     if (t.id === "crSignatures") crState.signatures = t.checked;
+    if (t.id === "crCommitteeSign") {
+        saveReportPrefs({ committeeSign: t.checked });
+        /* توقيعات اللجنة تحتاج قسم التوقيعات */
+        if (t.checked && !crState.signatures) { crState.signatures = true; const sg = document.getElementById("crSignatures"); if (sg) sg.checked = true; }
+    }
     crRefreshPreview();
 });
 
@@ -7711,10 +7735,23 @@ function docLetterhead(title, subtitle) {
 }
 
 function docSignatures() {
-    return '<footer class="doc-sign">' +
+    const main = '<footer class="doc-sign">' +
         "<div><span>المدقق</span><i></i></div>" +
         "<div><span>رئيس مكتب المحاسبة</span><i></i></div>" +
         "</footer>";
+    /* مع توقيعات اللجنة: كتلة واحدة لا تنقسم بين صفحتين (لا تبقى اللجنة وحدها في صفحة) */
+    return reportPrefs().committeeSign ? '<div class="doc-sign-block">' + main + committeeSignaturesHTML() + "</div>" : main;
+}
+
+/* توقيعات لجنة التدقيق: الرئيس ثم الأعضاء الأربعة، الاسم من الإعدادات أو خط فارغ للكتابة باليد */
+function committeeSignaturesHTML() {
+    const c = auditCommittee;
+    const cell = function (role, name) {
+        return '<div><span>' + role + "</span>" + (name ? "<b>" + escapeHTML(name) + "</b>" : '<b class="sign-blank"></b>') + "<i></i></div>";
+    };
+    let html = '<section class="doc-committee-sign"><h4>لجنة التدقيق</h4><div class="committee-sign-grid">' + cell("رئيس لجنة التدقيق", c.chair);
+    c.members.forEach(function (name, i) { html += cell("عضو اللجنة " + (i + 1), name); });
+    return html + "</div></section>";
 }
 
 /* =========================================================
@@ -7733,7 +7770,9 @@ function reportPrefs() {
     const scale = Number(p.scale);
     return {
         scale: Number.isFinite(scale) ? Math.min(REPORT_SCALE_MAX, Math.max(REPORT_SCALE_MIN, scale)) : 1,
-        recovery: p.recovery !== false
+        recovery: p.recovery !== false,
+        /* توقيعات لجنة التدقيق: تُختار وقت الطباعة (مطفأة افتراضياً) */
+        committeeSign: p.committeeSign === true
     };
 }
 
@@ -7751,6 +7790,13 @@ function toggleReportRecovery(id, mode, on) {
     saveReportPrefs({ recovery: !!on });
     showFinalRecordReport(id, mode, true);
 }
+
+function toggleCommitteeSign(id, mode, on) {
+    saveReportPrefs({ committeeSign: !!on });
+    showFinalRecordReport(id, mode, true);
+}
+
+window.toggleCommitteeSign = toggleCommitteeSign;
 
 window.changeReportScale = changeReportScale;
 window.toggleReportRecovery = toggleReportRecovery;
@@ -7771,6 +7817,8 @@ function reportToolsHTML(record, mode, hasRecovery) {
             ? '<label class="report-toggle"><input type="checkbox"' + (prefs.recovery ? " checked" : "") +
                 " onchange=\"toggleReportRecovery('" + id + "', '" + mode + "', this.checked)\"> مع بيان استدراك النقص</label>"
             : "") +
+        '<label class="report-toggle"><input type="checkbox"' + (prefs.committeeSign ? " checked" : "") +
+            " onchange=\"toggleCommitteeSign('" + id + "', '" + mode + "', this.checked)\"> مع توقيعات لجنة التدقيق</label>" +
         "</span>";
 }
 
@@ -8730,6 +8778,7 @@ function settingMemoryValue(key) {
         case "audit_committee_rates": return committeeRates;
         case "audit_council_saved": return councilSaved;
         case "audit_fee_destinations": return feeDestinations;
+        case "audit_audit_committee": return auditCommittee;
         default: return undefined;
     }
 }
@@ -13372,6 +13421,35 @@ document.getElementById("bulkPriceBox")?.addEventListener("click", function (eve
 renderBulkPrice();
 
 /* =========================================================
+لجنة التدقيق (أسماء التوقيعات) في صفحة الأسعار
+========================================================= */
+
+function renderAuditCommitteeForm() {
+    const set = function (id, v) { const el = document.getElementById(id); if (el) el.value = v || ""; };
+    set("acChair", auditCommittee.chair);
+    auditCommittee.members.forEach(function (name, i) { set("acMember" + (i + 1), name); });
+}
+
+document.getElementById("saveAuditCommitteeBtn")?.addEventListener("click", function () {
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("حفظ أسماء اللجنة للمدير فقط.", "error");
+        return;
+    }
+    const val = function (id) { return (document.getElementById(id)?.value || "").trim(); };
+    const next = normalizeAuditCommittee({ chair: val("acChair"), members: [1, 2, 3, 4].map(function (i) { return val("acMember" + i); }) });
+    try {
+        saveData(AUDIT_COMMITTEE_KEY, next);
+    } catch (error) {
+        notify("<strong>لم تُحفظ أسماء اللجنة</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        return;
+    }
+    auditCommittee = next;
+    notify("حُفظت أسماء لجنة التدقيق.", "success");
+});
+
+onReady(renderAuditCommitteeForm);
+
+/* =========================================================
 أسعار الإضافات
 ========================================================= */
 
@@ -15224,6 +15302,7 @@ function downloadBackup() {
         priceSchedule: priceSchedule,
         councilSaved: councilSaved,
         feeDestinations: feeDestinations,
+        auditCommittee: auditCommittee,
         records: records
     };
 
@@ -15316,6 +15395,7 @@ function buildBackupJSON() {
         priceSchedule: priceSchedule,
         councilSaved: councilSaved,
         feeDestinations: feeDestinations,
+        auditCommittee: auditCommittee,
         records: records
     }, null, 2);
 }
@@ -15982,7 +16062,7 @@ function backupDataProblem(data) {
         if (badUser) return "في قائمة المستخدمين حساب تالف.";
         if (!data.users.some(function (u) { return u.role === "manager"; })) return "لا يوجد مدير في قائمة المستخدمين.";
     }
-    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations"];
+    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations", "auditCommittee"];
     for (let i = 0; i < objects.length; i++) {
         const v = data[objects[i]];
         if (v !== undefined && (!v || typeof v !== "object" || Array.isArray(v))) return "الإعداد " + objects[i] + " تالف.";
@@ -16003,7 +16083,7 @@ function backupDataProblem(data) {
 const RESTORE_SETTING_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_committee_shares",
-    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations"
+    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations", "audit_audit_committee"
 ];
 
 function applyBackupData(data) {
@@ -16102,6 +16182,11 @@ function writeBackupSettings(data) {
     /* جهة رسوم النقص: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
     if (data.feeDestinations && typeof data.feeDestinations === "object") {
         write(FEE_DESTINATIONS_KEY, data.feeDestinations, true);
+    }
+
+    /* لجنة التدقيق (أسماء التوقيعات): من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+    if (data.auditCommittee && typeof data.auditCommittee === "object") {
+        write(AUDIT_COMMITTEE_KEY, normalizeAuditCommittee(data.auditCommittee), true);
     }
 
     /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
@@ -16216,7 +16301,7 @@ const FB_SETTINGS_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations"
+    "audit_fee_destinations", "audit_audit_committee"
 ];
 
 let fbState = loadData(FB_STATE_KEY, null);

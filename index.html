@@ -1677,6 +1677,7 @@
                                 <li>تقرير مخصّص لعدة سجلات مرة واحدة: تحديد السجلات من الجدول، سطر لكل سجل أو لكل وكالة، اختيار الأعمدة وترتيبها (4 أو 7 أو أكثر)، الفرز، التجميع حسب المندوب مع المجاميع، وقوالب جاهزة ومحفوظة؛ طباعة وPDF وExcel وCSV.</li>
                                 <li>المقاصة: حسم للمندوب من المطلوب منه مع سبب إلزامي، يظهر في التقرير والجدول ولوحة التحكم والتقارير وExcel، ولا يغيّر سعر الوكالات ولا إجمالي السجل ولا حصص اللجان.</li>
                                 <li>فرز السجلات أبجدياً حسب اسم المندوب، وفلترتها باسم مندوب معيّن.</li>
+                                <li>توقيعات لجنة التدقيق (23/11/2026): رئيس اللجنة وأربعة أعضاء بأسمائهم من صفحة الأسعار، تُضاف تحت توقيعَي المدقق ورئيس مكتب المحاسبة بخيار وقت الطباعة، ولا تنقسم بين صفحتين.</li>
                             </ul>
                         </div>
                     </li>
@@ -1780,6 +1781,27 @@
                     </h4>
 
                     <div id="stampPricesContainer"></div>
+
+                </div>
+
+                <!-- لجنة التدقيق: أسماء تُطبع تحت توقيعات التقارير عند اختيار «مع توقيعات لجنة التدقيق» -->
+                <div class="content-card" id="auditCommitteeCard">
+
+                    <h3>
+                        <i class="ti ti-users-group"></i> لجنة التدقيق (توقيعات التقارير)
+                    </h3>
+
+                    <p class="field-hint">تظهر تحت توقيعَي المدقق ورئيس مكتب المحاسبة في التقرير المختصر والمفصل وبيان الاستدراك والتقرير المخصّص، عند تفعيل «مع توقيعات لجنة التدقيق» وقت الطباعة. الخانة الفارغة تُطبع خطاً فارغاً للكتابة باليد.</p>
+
+                    <div class="audit-committee-form">
+                        <label class="input-group"><span>رئيس لجنة التدقيق</span><input type="text" id="acChair" autocomplete="off"></label>
+                        <label class="input-group"><span>عضو اللجنة 1</span><input type="text" id="acMember1" autocomplete="off"></label>
+                        <label class="input-group"><span>عضو اللجنة 2</span><input type="text" id="acMember2" autocomplete="off"></label>
+                        <label class="input-group"><span>عضو اللجنة 3</span><input type="text" id="acMember3" autocomplete="off"></label>
+                        <label class="input-group"><span>عضو اللجنة 4</span><input type="text" id="acMember4" autocomplete="off"></label>
+                    </div>
+
+                    <button type="button" class="primary-btn" id="saveAuditCommitteeBtn"><i class="ti ti-device-floppy"></i> حفظ أسماء اللجنة</button>
 
                 </div>
 

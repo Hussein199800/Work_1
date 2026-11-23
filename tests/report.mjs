@@ -174,7 +174,7 @@ check("سجل بلا نقص: لا بيان", await ev(function () {
     const r = { id: "z", recordNumber: "1", officeName: "o", representativeName: "r", recordDate: "2026-09-12",
         agencies: [buildAgency({ number: "1", type: "special", status: "active", additions: {}, missing: { pleading: 0, ambulance: 0, aid: 0 } }, getPricingForType("special", "2026-09-12"))] };
     const html = buildFinalRecordReport(r, "summary");
-    return html.indexOf("doc-recovery") === -1 && html.indexOf("report-toggle") === -1;
+    return html.indexOf("doc-recovery") === -1 && html.indexOf("مع بيان استدراك النقص") === -1;
 }));
 
 /* 8) تنزيل PDF مباشر (يحتاج الإنترنت لتحميل المكتبات) */

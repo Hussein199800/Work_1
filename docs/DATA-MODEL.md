@@ -17,6 +17,7 @@
 | `audit_committee_shares` | مبالغ الحصص الثابتة (للتوافق فقط) |
 | `audit_committee_rates` | نسب الحصص % من سعر الوكالة لكل نوع `{type:{ambulance, cooperation}}` |
 | `audit_council_share`, `audit_council_saved` | حصة المجلس |
+| `audit_audit_committee` | (23/11/2026) أسماء لجنة التدقيق للتوقيعات: `{chair, members:[4]}`. في النسخة الاحتياطية (`auditCommittee`) والمزامنة |
 | `audit_fee_destinations` | (16/11/2026) جهة رسوم كل بند نقص: `{pleading, ambulance, aid, receipt}` = `"central"` (النقابة المركزية) أو `"branch"` (الفرع). الافتراضي: الطوابع للمركزية والإيصال للفرع. يدخل النسخة الاحتياطية (`feeDestinations`) ومزامنة Firebase |
 | `audit_record_draft` | مسودة السجل غير المحفوظ |
 | `currentUser`, `activeSection` | الجلسة والقسم المفتوح |
