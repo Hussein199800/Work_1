@@ -7753,7 +7753,7 @@ tr.is-selected td {
 
 .committee-sign-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--sign-cols, 5), minmax(0, 1fr));
     gap: 16px;
 }
 
@@ -7910,3 +7910,124 @@ tr.is-recovered.is-selected td {
     width: 34%;
     text-align: right;
 }
+
+/* زر «إضافة سجل مسترد» ظاهر بلون المستردة (لا يُخلط مع زر إنشاء سجل) */
+.recovered-actions {
+    display: inline-flex;
+    align-items: stretch;
+    border-radius: 999px;
+    box-shadow: 0 0 0 1.5px #4a6a8a inset;
+    overflow: hidden;
+}
+
+.recovered-add-btn,
+.recovered-more-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 40px;
+    padding: 0 16px;
+    border: 0;
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.recovered-add-btn {
+    color: #ffffff;
+    background: linear-gradient(180deg, #557799, #3f5d7c);
+}
+
+.recovered-add-btn:hover { background: linear-gradient(180deg, #4d6e8f, #36516e); }
+
+.recovered-more-btn {
+    color: #3f5d7c;
+    background: color-mix(in srgb, #4a6a8a 10%, var(--surface, #fff));
+}
+
+[data-theme="dark"] .recovered-more-btn { color: #c9d9ea; }
+
+.recovered-add-btn.page-title-action {
+    margin-inline-start: auto;
+    border-radius: 999px;
+    align-self: center;
+}
+
+.recovered-add-btn:focus-visible,
+.recovered-more-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+    .recovered-actions { width: 100%; }
+    .recovered-add-btn { flex: 1; justify-content: center; }
+    .recovered-more-btn { padding: 0 12px; }
+    .recovered-add-btn.page-title-action span { display: none; }
+}
+
+/* ================= الإدارة: تبويبات فرعية (23/11/2026) ================= */
+
+.admin-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+    padding: 6px;
+    border-radius: 999px;
+    background: var(--surface-2, color-mix(in srgb, var(--line) 30%, transparent));
+    width: fit-content;
+    max-width: 100%;
+}
+
+.admin-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 999px;
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text);
+    background: transparent;
+    cursor: pointer;
+}
+
+.admin-tab:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.admin-tab.active {
+    color: #ffffff;
+    background: var(--grad-primary, var(--accent));
+}
+
+.admin-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+    .admin-tabs { border-radius: 14px; width: 100%; }
+    .admin-tab { flex: 1 1 calc(50% - 6px); justify-content: center; padding: 0 10px; }
+}
+
+/* توقيعات التقارير: خمس خانات صفة + اسم */
+.audit-committee-form .sign-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 8px;
+}
+
+.audit-committee-form .sign-row > b {
+    align-self: center;
+    text-align: center;
+    color: var(--text-muted, var(--text));
+}
+
+.sign-heading { max-width: 420px; margin-bottom: 12px; }
+
+@media (max-width: 640px) {
+    .audit-committee-form .sign-row { grid-template-columns: 22px minmax(0, 1fr); }
+    .audit-committee-form .sign-row > label:last-child { grid-column: 2; }
+}
+
+#auditCommitteeCard .audit-committee-form { display: block; }
