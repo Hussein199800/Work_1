@@ -64,7 +64,10 @@ const baseline = await ev(function () {
 });
 
 /* 1) النموذج السريع */
-await ev(function () { switchSection("recordsSection"); openRecoveredForm(); });
+await ev(function () { switchSection("recordsSection"); });
+await page.waitForTimeout(200);
+check("زر «إضافة سجل مسترد» ظاهر مباشرة في شريط السجلات", await page.locator("#recoveredAddBtn").isVisible());
+await page.click("#recoveredAddBtn");
 await page.waitForTimeout(300);
 await page.click(".recovered-form .primary-btn");
 await page.waitForTimeout(200);

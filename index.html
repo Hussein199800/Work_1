@@ -252,11 +252,6 @@
                     <span class="nav-text"><b>حصص اللجان</b><small>الإسعاف والتعاون</small></span>
                 </button>
 
-                <button type="button" class="tab-btn" data-section="calculatorSection">
-                    <i class="ti ti-calculator nav-icon"></i>
-                    <span class="nav-text"><b>الحاسبة</b><small>حسابات سريعة وحصة المجلس</small></span>
-                </button>
-
                 <button type="button" class="tab-btn" data-section="guideSection">
                     <i class="ti ti-book-2 nav-icon"></i>
                     <span class="nav-text"><b>دليل النظام</b><small>الألوان والشرح والإرشادات</small></span>
@@ -272,9 +267,10 @@
                     <span class="nav-text"><b>الأسعار</b><small>أسعار الوكالات والإضافات</small></span>
                 </button>
 
-                <button type="button" class="tab-btn manager-only" data-section="usersSection">
-                    <i class="ti ti-users nav-icon"></i>
-                    <span class="nav-text"><b>المستخدمون</b><small>الحسابات والنسخ الاحتياطي</small></span>
+                <!-- الإدارة (23/11/2026): الحاسبة، الطباعة والتخصيص، المستخدمون، النسخ الاحتياطي كتبويبات فرعية -->
+                <button type="button" class="tab-btn" data-section="adminSection">
+                    <i class="ti ti-settings nav-icon"></i>
+                    <span class="nav-text"><b>الإدارة</b><small>الحاسبة، الطباعة، المستخدمون، النسخ</small></span>
                 </button>
 
             </nav>
@@ -440,9 +436,15 @@
                         placeholder="ابحث برقم السجل أو المكتب أو المندوب…"
                     >
 
-                    <button type="button" class="secondary-btn" id="recoveredMenuBtn" onclick="openRecoveredMenu(this)" aria-haspopup="menu" title="إضافة سجلات دُقّقت خارج هذا الموقع (موقع آخر أو تدقيق يدوي) للمطابقة">
-                        <i class="ti ti-world-download"></i> <span>سجلات مستردة</span>
-                    </button>
+                    <!-- السجلات المستردة: زر إضافة مباشر ظاهر + قائمة للاستيراد والمطابقة -->
+                    <span class="recovered-actions" role="group" aria-label="السجلات المستردة">
+                        <button type="button" class="recovered-add-btn" id="recoveredAddBtn" onclick="openRecoveredForm()" title="إضافة سجل دُقّق خارج هذا الموقع (موقع تدقيق آخر أو تدقيق يدوي) للمطابقة">
+                            <i class="ti ti-file-import"></i> <span>إضافة سجل مسترد</span>
+                        </button>
+                        <button type="button" class="recovered-more-btn" id="recoveredMenuBtn" onclick="openRecoveredMenu(this)" aria-haspopup="menu" title="استيراد سجلات مستردة من Excel/CSV، القالب، مطابقة السجلات" aria-label="المزيد: استيراد ومطابقة">
+                            <i class="ti ti-chevron-down"></i> <span>استيراد ومطابقة</span>
+                        </button>
+                    </span>
 
                     <button type="button" class="secondary-btn" id="customReportBtn" onclick="openCustomReport()" title="طباعة أو حفظ عدة سجلات مرة واحدة بالأعمدة التي تختارها (PDF، Excel، CSV)">
                         <i class="ti ti-table-options"></i> <span>تقرير مخصّص</span>
@@ -634,6 +636,10 @@
                         أدخل بيانات السجل ثم أضف الوكالات
                     </p>
                     </div>
+
+                    <button type="button" class="recovered-add-btn page-title-action" onclick="openRecoveredForm()" title="سجل دُقّق في موقع تدقيق آخر أو يدوياً: يُضاف ملخّصاً للمطابقة بدون وكالات">
+                        <i class="ti ti-file-import"></i> <span>سجل مسترد؟</span>
+                    </button>
 
                 </div>
 
@@ -1412,6 +1418,7 @@
             <section
                 id="calculatorSection"
                 class="section"
+                data-admin
             >
 
                 <div class="page-title">
@@ -1692,7 +1699,7 @@
                                 <li>تقرير مخصّص لعدة سجلات مرة واحدة: تحديد السجلات من الجدول، سطر لكل سجل أو لكل وكالة، اختيار الأعمدة وترتيبها (4 أو 7 أو أكثر)، الفرز، التجميع حسب المندوب مع المجاميع، وقوالب جاهزة ومحفوظة؛ طباعة وPDF وExcel وCSV.</li>
                                 <li>المقاصة: حسم للمندوب من المطلوب منه مع سبب إلزامي، يظهر في التقرير والجدول ولوحة التحكم والتقارير وExcel، ولا يغيّر سعر الوكالات ولا إجمالي السجل ولا حصص اللجان.</li>
                                 <li>فرز السجلات أبجدياً حسب اسم المندوب، وفلترتها باسم مندوب معيّن.</li>
-                                <li>توقيعات لجنة التدقيق (23/11/2026): رئيس اللجنة وأربعة أعضاء بأسمائهم من صفحة الأسعار، تُضاف تحت توقيعَي المدقق ورئيس مكتب المحاسبة بخيار وقت الطباعة، ولا تنقسم بين صفحتين.</li>
+                                <li>توقيعات لجنة التدقيق (23/11/2026): رئيس اللجنة وأربعة أعضاء بأسمائهم، بخيار وقت الطباعة، ولا تنقسم بين صفحتين.</li>
                             </ul>
                         </div>
                     </li>
@@ -1706,6 +1713,19 @@
                                 <li>إضافة سجلات دُقّقت خارج هذا الموقع (موقع تدقيق آخر أو تدقيق يدوي) ملخّصةً: رقم السجل والمندوب والمكتب والتاريخ وعدد الوكالات والمبلغ، بنموذج سريع أو باستيراد من Excel/CSV مع معاينة وتنبيه للمكرر.</li>
                                 <li>شارة «مسترد» وفلتر «المصدر» في قائمة السجلات، ولا تدخل في أرقام تدقيق الموقع.</li>
                                 <li>«مطابقة السجلات»: كم دُقّق هنا وكم استُرد، والأرقام المكررة، والأرقام الناقصة في التسلسل (لم تُدقَّق ولم تُسترد)، مع الطباعة.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-settings"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">23 تشرين الثاني 2026</p>
+                            <h3>تبويب «الإدارة» وتوقيعات لجنة التدقيق</h3>
+                            <ul class="devlog-list">
+                                <li>تبويب رئيسي واحد «الإدارة» بدل «الحاسبة» و«المستخدمون»، فيه تبويبات فرعية: الحاسبة، الطباعة والتخصيص، المستخدمون، النسخ الاحتياطي.</li>
+                                <li>التوقيعات في آخر التقارير صارت للجنة التدقيق فقط (الرئيس وأربعة أعضاء) بدل المدقق ورئيس مكتب المحاسبة، والصفات والأسماء وعنوان القسم قابلة للتعديل من «الطباعة والتخصيص».</li>
+                                <li>زر ظاهر «إضافة سجل مسترد» في صفحة السجلات، و«سجل مسترد؟» في صفحة إنشاء سجل.</li>
                             </ul>
                         </div>
                     </li>
@@ -1812,27 +1832,6 @@
 
                 </div>
 
-                <!-- لجنة التدقيق: أسماء تُطبع تحت توقيعات التقارير عند اختيار «مع توقيعات لجنة التدقيق» -->
-                <div class="content-card" id="auditCommitteeCard">
-
-                    <h3>
-                        <i class="ti ti-users-group"></i> لجنة التدقيق (توقيعات التقارير)
-                    </h3>
-
-                    <p class="field-hint">تظهر تحت توقيعَي المدقق ورئيس مكتب المحاسبة في التقرير المختصر والمفصل وبيان الاستدراك والتقرير المخصّص، عند تفعيل «مع توقيعات لجنة التدقيق» وقت الطباعة. الخانة الفارغة تُطبع خطاً فارغاً للكتابة باليد.</p>
-
-                    <div class="audit-committee-form">
-                        <label class="input-group"><span>رئيس لجنة التدقيق</span><input type="text" id="acChair" autocomplete="off"></label>
-                        <label class="input-group"><span>عضو اللجنة 1</span><input type="text" id="acMember1" autocomplete="off"></label>
-                        <label class="input-group"><span>عضو اللجنة 2</span><input type="text" id="acMember2" autocomplete="off"></label>
-                        <label class="input-group"><span>عضو اللجنة 3</span><input type="text" id="acMember3" autocomplete="off"></label>
-                        <label class="input-group"><span>عضو اللجنة 4</span><input type="text" id="acMember4" autocomplete="off"></label>
-                    </div>
-
-                    <button type="button" class="primary-btn" id="saveAuditCommitteeBtn"><i class="ti ti-device-floppy"></i> حفظ أسماء اللجنة</button>
-
-                </div>
-
                 <div class="content-card" id="committeePricesCard">
 
                     <h3>
@@ -1869,6 +1868,7 @@
             <section
                 id="usersSection"
                 class="section manager-section"
+                data-admin
             >
 
                 <div class="page-title">
@@ -1876,11 +1876,11 @@
                     <div class="page-title-text">
 
                     <h2>
-                        إدارة المستخدمين
+                        المستخدمون
                     </h2>
 
                     <p>
-                        الحسابات والصلاحيات والنسخ الاحتياطي
+                        الحسابات والصلاحيات
                     </p>
                     </div>
 
@@ -1994,6 +1994,96 @@
 
                 </div>
 
+            </section>
+
+            <!-- ================= ADMIN: الطباعة والتخصيص ================= -->
+
+            <section
+                id="printSettingsSection"
+                class="section manager-section"
+                data-admin
+            >
+
+                <div class="page-title">
+                    <span class="page-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></svg></span>
+                    <div class="page-title-text">
+                        <h2>الطباعة والتخصيص</h2>
+                        <p>توقيعات التقارير وخيارات العمل</p>
+                    </div>
+                </div>
+
+                <!-- توقيعات التقارير: لجنة التدقيق (رئيس + 4 أعضاء)، الصفة والاسم قابلان للتعديل -->
+                <div class="content-card" id="auditCommitteeCard">
+
+                    <h3>
+                        <i class="ti ti-signature"></i> توقيعات التقارير (لجنة التدقيق)
+                    </h3>
+
+                    <p class="field-hint">تُطبع في آخر كل تقارير التدقيق (المختصر والمفصل وبيان الاستدراك والتقرير المخصّص وغيرها): خمس خانات بالترتيب، لكل خانة صفة واسم. الاسم الفارغ يُطبع خطاً فارغاً للكتابة باليد، والخانة التي صفتها واسمها فارغان لا تُطبع.</p>
+
+                    <label class="input-group sign-heading"><span>عنوان قسم التوقيعات <small>(فارغ = بدون عنوان)</small></span><input type="text" id="acHeading" autocomplete="off"></label>
+
+                    <div class="audit-committee-form">
+                        <div class="sign-row"><b>1</b>
+                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle0" autocomplete="off"></label>
+                            <label class="input-group"><span>الاسم</span><input type="text" id="acName0" autocomplete="off"></label>
+                        </div>
+                        <div class="sign-row"><b>2</b>
+                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle1" autocomplete="off"></label>
+                            <label class="input-group"><span>الاسم</span><input type="text" id="acName1" autocomplete="off"></label>
+                        </div>
+                        <div class="sign-row"><b>3</b>
+                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle2" autocomplete="off"></label>
+                            <label class="input-group"><span>الاسم</span><input type="text" id="acName2" autocomplete="off"></label>
+                        </div>
+                        <div class="sign-row"><b>4</b>
+                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle3" autocomplete="off"></label>
+                            <label class="input-group"><span>الاسم</span><input type="text" id="acName3" autocomplete="off"></label>
+                        </div>
+                        <div class="sign-row"><b>5</b>
+                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle4" autocomplete="off"></label>
+                            <label class="input-group"><span>الاسم</span><input type="text" id="acName4" autocomplete="off"></label>
+                        </div>
+                    </div>
+
+                    <div class="button-row">
+                        <button type="button" class="primary-btn" id="saveAuditCommitteeBtn"><i class="ti ti-device-floppy"></i> حفظ التوقيعات</button>
+                        <button type="button" class="secondary-btn" id="resetAuditTitlesBtn"><i class="ti ti-restore"></i> الصفات الافتراضية</button>
+                    </div>
+
+                </div>
+
+                <div class="content-card" id="workOptionsCard">
+
+                    <h3>
+                        <i class="ti ti-adjustments"></i> خيارات العمل
+                    </h3>
+
+                    <label class="checkbox-row" for="seqCheckToggle">
+                        <input type="checkbox" id="seqCheckToggle">
+                        فحص تسلسل أرقام الوكالات (الناقصة والمكررة) عند حفظ السجل
+                    </label>
+
+                </div>
+
+            </section>
+
+            <!-- ================= ADMIN: النسخ الاحتياطي ================= -->
+
+            <section
+                id="backupSection"
+                class="section manager-section"
+                data-admin
+            >
+
+                <div class="page-title">
+                    <span class="page-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
+                    <div class="page-title-text">
+                        <h2>النسخ الاحتياطي</h2>
+                        <p>التحميل والاستعادة والنسخ التلقائي والمزامنة</p>
+                    </div>
+                </div>
+
                 <div class="content-card">
 
                     <h3>
@@ -2082,11 +2172,6 @@
                         </small>
                     </details>
 
-                    <label class="checkbox-row" for="seqCheckToggle">
-                        <input type="checkbox" id="seqCheckToggle">
-                        فحص تسلسل أرقام الوكالات (الناقصة والمكررة) عند حفظ السجل
-                    </label>
-
                     <div class="button-row">
 
                         <button
@@ -2117,6 +2202,7 @@
                 </div>
 
             </section>
+
 
         </main>
 

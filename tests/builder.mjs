@@ -202,31 +202,52 @@ const printDoc = await ev(function () {
 });
 check("مستند الطباعة فيه كل الأسطر، وأفقي لـ 9 أعمدة", printDoc.rows >= 4 && printDoc.landscape === true, JSON.stringify(printDoc));
 
-/* 4) توقيعات لجنة التدقيق (23/11/2026) */
-await ev(function () { closeRecordModal(true); switchSection("pricesSection"); });
-await page.waitForTimeout(400);
-await page.fill("#acChair", "أ. خالد الرئيس");
-await page.fill("#acMember1", "عضو أول");
-await page.fill("#acMember3", "عضو ثالث");
+/* 4) توقيعات لجنة التدقيق (23/11/2026): من «الإدارة ← الطباعة والتخصيص»، صفات قابلة للتعديل، بدون المدقق ورئيس مكتب المحاسبة */
+await ev(function () { closeRecordModal(true); switchSection("adminSection"); });
+await page.waitForTimeout(300);
+await page.click('#calculatorSection .admin-tab[data-section="printSettingsSection"]');
+await page.waitForTimeout(300);
+const adminNav = await ev(function () {
+    return { active: document.querySelector(".tab-btn.active")?.dataset.section, shown: document.getElementById("printSettingsSection").classList.contains("active-section"),
+        noOldTabs: !document.querySelector('.tab-btn[data-section="usersSection"]') && !document.querySelector('.tab-btn[data-section="calculatorSection"]'),
+        notInPrices: !document.querySelector("#pricesSection #auditCommitteeCard") };
+});
+check("تبويب «الإدارة» يفتح «الطباعة والتخصيص» وبطاقة التوقيعات خرجت من الأسعار", adminNav.active === "adminSection" && adminNav.shown && adminNav.noOldTabs && adminNav.notInPrices, JSON.stringify(adminNav));
+await page.fill("#acName0", "أ. خالد الرئيس");
+await page.fill("#acName1", "عضو أول");
+await page.fill("#acName3", "عضو ثالث");
+await page.fill("#acTitle4", "مقرر اللجنة");
 await page.click("#saveAuditCommitteeBtn");
 await page.waitForTimeout(300);
 const stored = await ev(function () { return JSON.parse(localStorage.getItem("audit_audit_committee")); });
-check("حفظ أسماء لجنة التدقيق (الرئيس + 4 أعضاء)", stored.chair === "أ. خالد الرئيس" && stored.members.length === 4 && stored.members[0] === "عضو أول" && stored.members[1] === "" && stored.members[2] === "عضو ثالث", JSON.stringify(stored));
+check("حفظ الأسماء والصفات (الرئيس + 4 أعضاء)", stored.chair === "أ. خالد الرئيس" && stored.members.length === 4 && stored.members[0] === "عضو أول" && stored.members[1] === "" && stored.members[2] === "عضو ثالث" && stored.memberTitles[3] === "مقرر اللجنة" && stored.chairTitle === "رئيس لجنة التدقيق", JSON.stringify(stored));
 const sig = await ev(function () {
     const r = records.find(function (x) { return x.id === "b1"; });
-    const off = buildFinalRecordReport(r, "summary", true);
-    saveReportPrefs({ committeeSign: true });
     const on = buildFinalRecordReport(r, "detailed", true);
+    saveReportPrefs({ signatures: false });
+    const off = buildFinalRecordReport(r, "summary", true);
+    saveReportPrefs({ signatures: true });
     const custom = buildCustomReportDoc(Object.assign({}, crState, { signatures: true }));
+    const old = normalizeAuditCommittee({ chair: "س", members: ["a", "b"] });
     const backup = JSON.parse(buildBackupJSON());
-    saveReportPrefs({ committeeSign: false });
-    return { off: off.indexOf("doc-committee-sign") === -1, on: /رئيس لجنة التدقيق[\s\S]*أ. خالد الرئيس/.test(on) && (on.match(/عضو اللجنة/g) || []).length >= 4 && on.indexOf("المدقق") !== -1,
-        custom: custom.indexOf("أ. خالد الرئيس") !== -1, backup: backup.auditCommittee && backup.auditCommittee.chair === "أ. خالد الرئيس", fb: FB_SETTINGS_KEYS.indexOf("audit_audit_committee") !== -1 };
+    return { off: off.indexOf("doc-committee-sign") === -1, on: /رئيس لجنة التدقيق[\s\S]*أ. خالد الرئيس/.test(on) && (on.match(/عضو لجنة التدقيق/g) || []).length % 3 === 0 && on.indexOf("عضو لجنة التدقيق") !== -1 && on.indexOf("مقرر اللجنة") !== -1,
+        noOld: on.indexOf("رئيس مكتب المحاسبة") === -1 && on.indexOf("<span>المدقق</span>") === -1,
+        oldShape: old.chairTitle === "رئيس لجنة التدقيق" && old.memberTitles.length === 4 && old.members[3] === "",
+        custom: custom.indexOf("أ. خالد الرئيس") !== -1, backup: backup.auditCommittee && backup.auditCommittee.chair === "أ. خالد الرئيس" && backup.auditCommittee.memberTitles[3] === "مقرر اللجنة", fb: FB_SETTINGS_KEYS.indexOf("audit_audit_committee") !== -1 };
 });
-check("توقيعات اللجنة مطفأة افتراضياً", sig.off);
-check("عند تفعيلها: الرئيس و4 أعضاء تحت توقيعَي المدقق ورئيس المكتب", sig.on);
+check("التوقيعات ظاهرة افتراضياً، وتُخفى بخيار الطباعة", sig.off && sig.on, JSON.stringify(sig));
+check("لا توقيع للمدقق ولا لرئيس مكتب المحاسبة", sig.noOld);
+check("الإعداد القديم (بدون صفات) يُقرأ بالصفات الافتراضية", sig.oldShape);
 check("تظهر في التقرير المخصّص أيضاً", sig.custom);
-check("الأسماء في النسخة الاحتياطية والمزامنة", sig.backup && sig.fb, JSON.stringify(sig));
+check("الأسماء والصفات في النسخة الاحتياطية والمزامنة", sig.backup && sig.fb, JSON.stringify(sig));
+const viewerTabs = await ev(function () {
+    const saved = currentUser; currentUser = Object.assign({}, saved, { role: "viewer" }); applyPermissions();
+    switchSection("backupSection");
+    const res = { sec: document.querySelector(".section.active-section").id, visible: Array.from(document.querySelectorAll("#calculatorSection .admin-tab")).filter(function (b) { return !b.classList.contains("hidden"); }).length };
+    currentUser = saved; applyPermissions();
+    return res;
+});
+check("المشاهد يرى الحاسبة فقط داخل الإدارة", viewerTabs.sec === "calculatorSection" && viewerTabs.visible === 1, JSON.stringify(viewerTabs));
 
 check("لا أخطاء JavaScript", errors.length === 0, errors.join(" | "));
 

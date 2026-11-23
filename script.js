@@ -410,12 +410,36 @@ const FEE_DESTINATION_NAMES = { central: "النقابة المركزية", bran
 const AUDIT_COMMITTEE_KEY = "audit_audit_committee";
 const AUDIT_COMMITTEE_MEMBERS = 4;
 
+/* الصفات قابلة للتعديل (23/11/2026، إضافي): chairTitle / memberTitles / heading؛ الغائب = الافتراضي */
+const AUDIT_CHAIR_TITLE = "رئيس لجنة التدقيق";
+const AUDIT_MEMBER_TITLE = "عضو لجنة التدقيق";
+const AUDIT_SIGN_HEADING = "لجنة التدقيق";
+
 function normalizeAuditCommittee(value) {
     const v = value && typeof value === "object" ? value : {};
     const members = Array.isArray(v.members) ? v.members : [];
-    const out = { chair: String(v.chair || "").trim(), members: [] };
-    for (let i = 0; i < AUDIT_COMMITTEE_MEMBERS; i++) out.members.push(String(members[i] || "").trim());
+    const titles = Array.isArray(v.memberTitles) ? v.memberTitles : [];
+    const text = function (x) { return typeof x === "string" ? x.trim() : (x == null ? "" : String(x).trim()); };
+    const out = {
+        chair: text(v.chair),
+        members: [],
+        chairTitle: typeof v.chairTitle === "string" ? v.chairTitle.trim() : AUDIT_CHAIR_TITLE,
+        memberTitles: [],
+        heading: typeof v.heading === "string" ? v.heading.trim() : AUDIT_SIGN_HEADING
+    };
+    for (let i = 0; i < AUDIT_COMMITTEE_MEMBERS; i++) {
+        out.members.push(text(members[i]));
+        out.memberTitles.push(typeof titles[i] === "string" ? titles[i].trim() : AUDIT_MEMBER_TITLE);
+    }
     return out;
+}
+
+/* الخانات الخمس بالترتيب: الرئيس ثم الأعضاء — { title, name } */
+function auditSigners(c) {
+    c = c || auditCommittee;
+    const list = [{ title: c.chairTitle, name: c.chair }];
+    c.members.forEach(function (name, i) { list.push({ title: c.memberTitles[i], name: name }); });
+    return list;
 }
 
 let auditCommittee = normalizeAuditCommittee(loadData(AUDIT_COMMITTEE_KEY, null));
@@ -1850,7 +1874,67 @@ function (button) {
     }
 );
 
+/* =========================================================
+الإدارة (23/11/2026): تبويب رئيسي واحد بدل «الحاسبة» و«المستخدمون»، فيه تبويبات فرعية
+لكل واحد قسمه (section) المعتاد بنفس معرّفه، فكل الكود القديم يعمل كما هو.
+آخر تبويب فرعي مفتوح تفضيل واجهة (audit_ui_admin_tab).
+========================================================= */
+
+const ADMIN_TABS = [
+    { id: "calculatorSection", icon: "ti-calculator", text: "الحاسبة" },
+    { id: "printSettingsSection", icon: "ti-printer", text: "الطباعة والتخصيص", manager: true },
+    { id: "usersSection", icon: "ti-users", text: "المستخدمون", manager: true },
+    { id: "backupSection", icon: "ti-database", text: "النسخ الاحتياطي", manager: true }
+];
+const ADMIN_TAB_KEY = "audit_ui_admin_tab";
+
+function isAdminSection(id) {
+    return ADMIN_TABS.some(function (t) { return t.id === id; });
+}
+
+function adminTabAllowed(id) {
+    const tab = ADMIN_TABS.find(function (t) { return t.id === id; });
+    return !!tab && (!tab.manager || !!(currentUser && currentUser.role === "manager"));
+}
+
+/* شريط التبويبات الفرعية أعلى كل قسم من أقسام الإدارة */
+(function buildAdminTabs() {
+    ADMIN_TABS.forEach(function (owner) {
+        const section = document.getElementById(owner.id);
+        if (!section || section.querySelector(".admin-tabs")) return;
+        const bar = document.createElement("div");
+        bar.className = "admin-tabs no-print";
+        bar.setAttribute("role", "tablist");
+        bar.setAttribute("aria-label", "أقسام الإدارة");
+        bar.innerHTML = ADMIN_TABS.map(function (t) {
+            const on = t.id === owner.id;
+            return '<button type="button" role="tab" class="admin-tab' + (t.manager ? " manager-only" : "") + (on ? " active" : "") +
+                '" data-section="' + t.id + '" aria-selected="' + on + '"><i class="ti ' + t.icon + '" aria-hidden="true"></i> ' + t.text + "</button>";
+        }).join("");
+        section.insertBefore(bar, section.firstChild);
+    });
+    document.addEventListener("click", function (event) {
+        const btn = event.target.closest && event.target.closest(".admin-tab[data-section]");
+        if (btn) switchSection(btn.dataset.section);
+    });
+})();
+
 function switchSection(id) {
+
+/* الإدارة: تبويبها الرئيسي يفتح آخر تبويب فرعي مسموح (أو الحاسبة) */
+if (id === "adminSection") {
+    let last = "";
+    try { last = localStorage.getItem(ADMIN_TAB_KEY) || ""; } catch (e) {}
+    id = adminTabAllowed(last) ? last : "calculatorSection";
+}
+
+if (isAdminSection(id) && !adminTabAllowed(id)) {
+    id = "calculatorSection";
+}
+
+if (isAdminSection(id)) {
+    try { localStorage.setItem(ADMIN_TAB_KEY, id); } catch (e) {}
+}
 
 /* لا فتح لقسم زرّه مخفي عن صلاحية المستخدم (مثل السجلات للمشاهد) */
 const allowedButton =
@@ -1901,8 +1985,14 @@ document
 
 const button =
     document.querySelector(
-        `.tab-btn[data-section="${id}"]`
+        `.tab-btn[data-section="${isAdminSection(id) ? "adminSection" : id}"]`
     );
+
+document.querySelectorAll(".admin-tab").forEach(function (tab) {
+    const on = tab.dataset.section === id;
+    tab.classList.toggle("active", on);
+    tab.setAttribute("aria-selected", on ? "true" : "false");
+});
 
 
 const section =
@@ -2000,6 +2090,20 @@ if (
 ) {
 
     renderUsers();
+
+}
+
+
+if (id === "backupSection" || id === "usersSection") {
+
+    if (typeof renderStorageInfo === "function") renderStorageInfo();
+
+}
+
+
+if (id === "printSettingsSection") {
+
+    renderAuditCommitteeForm();
 
 }
 
@@ -4154,7 +4258,7 @@ function checkAgencySequenceThen(agencies, next) {
         if (choice === "save") next();
         if (choice === "off") {
             setSeqCheck(false);
-            notify("أُوقف فحص التسلسل. يمكن تشغيله من «النسخ الاحتياطي» في قسم المستخدمين.", "info", 6000);
+            notify("أُوقف فحص التسلسل. يمكن تشغيله من «الإدارة ← الطباعة والتخصيص».", "info", 6000);
             next();
         }
         if (choice === "review") {
@@ -5552,7 +5656,7 @@ recordForm.addEventListener(
                 notify(
                     "<strong>لم يُحفظ السجل</strong><span>" +
                     (isQuotaError(error)
-                        ? "مساحة التخزين في المتصفح ممتلئة. حمّل نسخة احتياطية من قسم المستخدمين ثم أخبر المسؤول."
+                        ? "مساحة التخزين في المتصفح ممتلئة. حمّل نسخة احتياطية من «الإدارة ← النسخ الاحتياطي» ثم أخبر المسؤول."
                         : "حدث خطأ أثناء الحفظ: " + escapeHTML(error && error.message || error)) +
                     " بيانات السجل ما زالت في النموذج ولم تُمسح.</span>",
                     "error",
@@ -6915,8 +7019,7 @@ function renderCustomReportBuilder() {
             "</select></label>" +
             '<label class="cr-check"><input type="checkbox" id="crGroup"' + (s.group ? " checked" : "") + "> تجميع حسب المندوب مع مجموع لكل مندوب</label>" +
             '<label class="cr-check"><input type="checkbox" id="crTotals"' + (s.totals ? " checked" : "") + "> سطر الإجمالي</label>" +
-            '<label class="cr-check"><input type="checkbox" id="crSignatures"' + (s.signatures ? " checked" : "") + "> التوقيعات في آخر التقرير</label>" +
-            '<label class="cr-check"><input type="checkbox" id="crCommitteeSign"' + (reportPrefs().committeeSign ? " checked" : "") + "> مع توقيعات لجنة التدقيق</label>" +
+            '<label class="cr-check"><input type="checkbox" id="crSignatures"' + (s.signatures ? " checked" : "") + "> توقيعات لجنة التدقيق في آخر التقرير</label>" +
         "</div>" +
         '<div class="cr-panel"><h3>الأعمدة <small>(' + s.columns.length + " مختار — رتّبها بالأسهم)</small></h3><ol class=\"cr-columns\">" +
             s.order.map(function (k, i) {
@@ -6987,11 +7090,6 @@ document.getElementById("modalContent")?.addEventListener("change", function (ev
     if (t.id === "crGroup") crState.group = t.checked;
     if (t.id === "crTotals") crState.totals = t.checked;
     if (t.id === "crSignatures") crState.signatures = t.checked;
-    if (t.id === "crCommitteeSign") {
-        saveReportPrefs({ committeeSign: t.checked });
-        /* توقيعات اللجنة تحتاج قسم التوقيعات */
-        if (t.checked && !crState.signatures) { crState.signatures = true; const sg = document.getElementById("crSignatures"); if (sg) sg.checked = true; }
-    }
     crRefreshPreview();
 });
 
@@ -8315,23 +8413,26 @@ function docLetterhead(title, subtitle) {
 }
 
 function docSignatures() {
-    const main = '<footer class="doc-sign">' +
-        "<div><span>المدقق</span><i></i></div>" +
-        "<div><span>رئيس مكتب المحاسبة</span><i></i></div>" +
-        "</footer>";
-    /* مع توقيعات اللجنة: كتلة واحدة لا تنقسم بين صفحتين (لا تبقى اللجنة وحدها في صفحة) */
-    return reportPrefs().committeeSign ? '<div class="doc-sign-block">' + main + committeeSignaturesHTML() + "</div>" : main;
+    /* 23/11/2026 بطلب المستخدم: لا توقيع للمدقق ولا لرئيس مكتب المحاسبة؛ فقط رئيس لجنة التدقيق والأعضاء الأربعة.
+       كتلة واحدة لا تنقسم بين صفحتين. */
+    return '<div class="doc-sign-block">' + committeeSignaturesHTML() + "</div>";
 }
 
-/* توقيعات لجنة التدقيق: الرئيس ثم الأعضاء الأربعة، الاسم من الإعدادات أو خط فارغ للكتابة باليد */
+/* توقيعات التقرير المختصر والمفصل وما يتبعهما: حسب اختيار «مع التوقيعات» وقت الطباعة */
+function recordDocSignatures() {
+    return reportPrefs().signatures ? docSignatures() : "";
+}
+
+/* توقيعات لجنة التدقيق: الصفة والاسم من «الإدارة ← الطباعة والتخصيص»، الاسم الفارغ خط فارغ للكتابة باليد،
+   الخانة التي صفتها واسمها فارغان لا تُطبع */
 function committeeSignaturesHTML() {
     const c = auditCommittee;
-    const cell = function (role, name) {
-        return '<div><span>' + role + "</span>" + (name ? "<b>" + escapeHTML(name) + "</b>" : '<b class="sign-blank"></b>') + "<i></i></div>";
-    };
-    let html = '<section class="doc-committee-sign"><h4>لجنة التدقيق</h4><div class="committee-sign-grid">' + cell("رئيس لجنة التدقيق", c.chair);
-    c.members.forEach(function (name, i) { html += cell("عضو اللجنة " + (i + 1), name); });
-    return html + "</div></section>";
+    const cells = auditSigners(c).filter(function (x) { return x.title || x.name; }).map(function (x) {
+        return "<div><span>" + escapeHTML(x.title) + "</span>" + (x.name ? "<b>" + escapeHTML(x.name) + "</b>" : '<b class="sign-blank"></b>') + "<i></i></div>";
+    });
+    if (!cells.length) return "";
+    return '<section class="doc-committee-sign">' + (c.heading ? "<h4>" + escapeHTML(c.heading) + "</h4>" : "") +
+        '<div class="committee-sign-grid" style="--sign-cols:' + cells.length + '">' + cells.join("") + "</div></section>";
 }
 
 /* =========================================================
@@ -8351,8 +8452,9 @@ function reportPrefs() {
     return {
         scale: Number.isFinite(scale) ? Math.min(REPORT_SCALE_MAX, Math.max(REPORT_SCALE_MIN, scale)) : 1,
         recovery: p.recovery !== false,
-        /* توقيعات لجنة التدقيق: تُختار وقت الطباعة (مطفأة افتراضياً) */
-        committeeSign: p.committeeSign === true
+        /* التوقيعات (لجنة التدقيق) في التقرير المختصر والمفصل: تُختار وقت الطباعة (ظاهرة افتراضياً).
+           committeeSign القديم لم يعد مستعملاً */
+        signatures: p.signatures !== false
     };
 }
 
@@ -8372,7 +8474,7 @@ function toggleReportRecovery(id, mode, on) {
 }
 
 function toggleCommitteeSign(id, mode, on) {
-    saveReportPrefs({ committeeSign: !!on });
+    saveReportPrefs({ signatures: !!on });
     showFinalRecordReport(id, mode, true);
 }
 
@@ -8397,7 +8499,7 @@ function reportToolsHTML(record, mode, hasRecovery) {
             ? '<label class="report-toggle"><input type="checkbox"' + (prefs.recovery ? " checked" : "") +
                 " onchange=\"toggleReportRecovery('" + id + "', '" + mode + "', this.checked)\"> مع بيان استدراك النقص</label>"
             : "") +
-        '<label class="report-toggle"><input type="checkbox"' + (prefs.committeeSign ? " checked" : "") +
+        '<label class="report-toggle"><input type="checkbox"' + (prefs.signatures ? " checked" : "") +
             " onchange=\"toggleCommitteeSign('" + id + "', '" + mode + "', this.checked)\"> مع توقيعات لجنة التدقيق</label>" +
         "</span>";
 }
@@ -8555,7 +8657,7 @@ function recoveryPageHTML(record, stats, mode, forPrint) {
     html += "<p>وبذلك يُعدّ النقص المذكور مُستدرَكاً ومُسدّداً أصولاً، ولا تجوز المطالبة به مجدداً. " +
         "وقد حُرّر هذا البيان للعلم والاعتماد عند أي تدقيق لاحق.</p></div>";
 
-    html += docSignatures();
+    html += recordDocSignatures();
     html += "</section>";
     return html;
 }
@@ -8824,7 +8926,7 @@ function buildFinalRecordReport(record, mode, forPrint) {
     html += '<section class="doc-section">' + secTitle("حصص لجنتي الإسعاف والتعاون") +
         '<div class="table-wrapper">' + committeesByTypeTableHTML(stats.committees) + "</div></section>";
 
-    html += docSignatures();
+    html += recordDocSignatures();
 
     /* صفحة مستقلة بعد الجداول: بيان استدراك النقص */
     html += recoveryPageHTML(record, stats, mode, forPrint);
@@ -8942,7 +9044,7 @@ function buildTypeAgenciesDoc(record, type, backMode, forPrint) {
 
 
     if (forPrint) {
-        html += docSignatures();
+        html += recordDocSignatures();
     }
 
     html += "</div>";
@@ -9172,7 +9274,7 @@ function buildAgencyAuditDoc(record, filter, backMode, forPrint) {
     }
 
     if (forPrint) {
-        html += docSignatures();
+        html += recordDocSignatures();
     }
 
     html += "</div>";
@@ -9410,7 +9512,7 @@ onReady(function () {
     if (!settingsLoadFailed.length) return;
     notify("<strong>تعذرت قراءة إعدادات محفوظة (نص تالف)</strong>" +
         "<span>" + escapeHTML(settingsLoadFailed.join("، ")) + " — لم يُكتب فوقها شيء، وأُوقف حفظ السجلات حتى لا تُحسب بأسعار افتراضية. " +
-        "الأفضل: استعادة نسخة احتياطية (قسم المستخدمين)، أو المزامنة مع Firebase إن كانت مفعّلة.</span>" +
+        "الأفضل: استعادة نسخة احتياطية («الإدارة ← النسخ الاحتياطي»)، أو المزامنة مع Firebase إن كانت مفعّلة.</span>" +
         '<span class="toast-actions"><button type="button" class="act-btn" onclick="downloadCorruptSettings()">تنزيل النص التالف</button>' +
         '<button type="button" class="act-btn" onclick="acceptDefaultSettings()">اعتماد الافتراضي…</button></span>', "error", 600000, true);
 });
@@ -12047,7 +12149,7 @@ function renderGuide() {
             "<li><b>الحفظ التلقائي:</b> السجل غير المحفوظ يُستعاد تلقائياً إذا أُغلقت الصفحة أو انقطعت الكهرباء.</li>" +
             "<li><b>الحاسبة:</b> لحساب حصة أعضاء مجلس الفرع من بدل الانتقال لسجلات ومدى وكالات محددة، ولحساب وكالة دون إنشاء سجل، ولمطابقة ما سلّمه المندوب. كل ذلك منفصل ولا يغيّر أي رقم في السجلات.</li>" +
             "<li><b>حفظ PDF:</b> في نافذة الطباعة اختر «حفظ بتنسيق PDF» وفعّل «رسومات الخلفية» لتظهر الألوان.</li>" +
-            "<li><b>النسخ الاحتياطي:</b> البيانات محفوظة في هذا المتصفح فقط؛ حمّل نسخة احتياطية بانتظام من قسم المستخدمين، خصوصاً قبل أي تحديث.</li>" +
+            "<li><b>النسخ الاحتياطي:</b> البيانات محفوظة في هذا المتصفح فقط؛ حمّل نسخة احتياطية بانتظام من «الإدارة ← النسخ الاحتياطي»، خصوصاً قبل أي تحديث.</li>" +
         "</ul>"
     );
 
@@ -14007,27 +14109,49 @@ renderBulkPrice();
 لجنة التدقيق (أسماء التوقيعات) في صفحة الأسعار
 ========================================================= */
 
-function renderAuditCommitteeForm() {
+function renderAuditCommitteeForm(source) {
+    const c = source || auditCommittee;
     const set = function (id, v) { const el = document.getElementById(id); if (el) el.value = v || ""; };
-    set("acChair", auditCommittee.chair);
-    auditCommittee.members.forEach(function (name, i) { set("acMember" + (i + 1), name); });
+    set("acHeading", c.heading);
+    auditSigners(c).forEach(function (x, i) { set("acTitle" + i, x.title); set("acName" + i, x.name); });
+}
+
+function readAuditCommitteeForm() {
+    const val = function (id) { return (document.getElementById(id)?.value || "").trim(); };
+    const list = [0, 1, 2, 3, 4].map(function (i) { return { title: val("acTitle" + i), name: val("acName" + i) }; });
+    return normalizeAuditCommittee({
+        heading: val("acHeading"),
+        chair: list[0].name,
+        chairTitle: list[0].title,
+        members: list.slice(1).map(function (x) { return x.name; }),
+        memberTitles: list.slice(1).map(function (x) { return x.title; })
+    });
 }
 
 document.getElementById("saveAuditCommitteeBtn")?.addEventListener("click", function () {
     if (!currentUser || currentUser.role !== "manager") {
-        notify("حفظ أسماء اللجنة للمدير فقط.", "error");
+        notify("حفظ التوقيعات للمدير فقط.", "error");
         return;
     }
-    const val = function (id) { return (document.getElementById(id)?.value || "").trim(); };
-    const next = normalizeAuditCommittee({ chair: val("acChair"), members: [1, 2, 3, 4].map(function (i) { return val("acMember" + i); }) });
+    const next = readAuditCommitteeForm();
     try {
         saveData(AUDIT_COMMITTEE_KEY, next);
     } catch (error) {
-        notify("<strong>لم تُحفظ أسماء اللجنة</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        notify("<strong>لم تُحفظ التوقيعات</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
         return;
     }
     auditCommittee = next;
-    notify("حُفظت أسماء لجنة التدقيق.", "success");
+    notify("حُفظت توقيعات التقارير.", "success");
+});
+
+/* الصفات والعنوان الافتراضية في النموذج (الأسماء تبقى)؛ لا تُحفظ إلا بزر الحفظ */
+document.getElementById("resetAuditTitlesBtn")?.addEventListener("click", function () {
+    const c = readAuditCommitteeForm();
+    c.heading = AUDIT_SIGN_HEADING;
+    c.chairTitle = AUDIT_CHAIR_TITLE;
+    c.memberTitles = c.memberTitles.map(function () { return AUDIT_MEMBER_TITLE; });
+    renderAuditCommitteeForm(c);
+    notify("أُعيدت الصفات الافتراضية — اضغط «حفظ التوقيعات» لاعتمادها.", "info");
 });
 
 onReady(renderAuditCommitteeForm);
@@ -16420,7 +16544,7 @@ function retryTelegramBackup() {
 
 window.retryTelegramBackup = retryTelegramBackup;
 
-/* ---------- الإعداد في قسم المستخدمين ---------- */
+/* ---------- الإعداد في «الإدارة ← النسخ الاحتياطي» ---------- */
 
 function readTelegramForm() {
     const token = (document.getElementById("tgToken")?.value || "").trim();

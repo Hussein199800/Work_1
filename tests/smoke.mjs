@@ -139,7 +139,7 @@ const afterDate = await ev(function () { return pendingAgencies.map(function (a)
 check("تغيير التاريخ يعيد تسعير التلقائية فقط", afterDate === "1700,1050,1900", afterDate);
 
 /* 4) كل الصفحات تُفتح، والحاسبة تحسب، والتقارير تُبنى — دون أخطاء */
-const sections = ["dashboardSection", "recordsSection", "reportsSection", "committeesSection", "calculatorSection", "guideSection", "pricesSection", "usersSection", "devlogSection", "newRecordSection"];
+const sections = ["dashboardSection", "recordsSection", "reportsSection", "committeesSection", "calculatorSection", "guideSection", "pricesSection", "usersSection", "printSettingsSection", "backupSection", "devlogSection", "newRecordSection"];
 for (const id of sections) {
     await ev(function (s) { switchSection(s); }, id);
     await page.waitForTimeout(250);
