@@ -7734,3 +7734,179 @@ tr.is-selected td {
 .cr-preview {
     clear: both;
 }
+
+/* ================= توقيعات لجنة التدقيق (23/11/2026) =================
+   الرئيس + 4 أعضاء في صف واحد على الورق، والاسم فوق خط التوقيع. */
+
+.doc-committee-sign {
+    margin-top: 22px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+.doc-committee-sign h4 {
+    margin-bottom: 10px;
+    text-align: center;
+    font-size: var(--fs-sm);
+    color: var(--heading);
+}
+
+.committee-sign-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.committee-sign-grid div {
+    text-align: center;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    font-weight: 600;
+}
+
+.committee-sign-grid b {
+    display: block;
+    min-height: 1.6em;
+    margin-top: 4px;
+    font-size: var(--fs-sm);
+    color: var(--heading);
+}
+
+.committee-sign-grid i {
+    display: block;
+    height: 36px;
+    border-bottom: 1px solid var(--line-strong);
+}
+
+@media screen and (max-width: 640px) {
+    .committee-sign-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.audit-committee-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin: 12px 0 16px;
+}
+
+.audit-committee-form .input-group > span {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-2);
+}
+
+.doc-sign-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+@media print {
+    .doc-sign-block .doc-sign {
+        margin-top: 16px;
+        padding-top: 10px;
+    }
+
+    .doc-sign-block .doc-sign i {
+        height: 30px;
+    }
+
+    .doc-committee-sign {
+        margin-top: 12px;
+    }
+
+    .committee-sign-grid i {
+        height: 26px;
+    }
+}
+
+/* ================= السجلات المستردة والمطابقة (23/11/2026) ================= */
+
+.recovered-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-inline-start: 6px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    color: #ffffff;
+    background: #5b6b7a;
+    vertical-align: middle;
+}
+
+.recovered-badge.is-site { background: #4a6a8a; }
+.recovered-badge.is-manual { background: #7a5a3a; }
+
+tr.is-recovered td {
+    background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--line) 35%, transparent) 10px 11px) !important;
+}
+
+tr.is-recovered.is-selected td {
+    background: var(--accent-soft) !important;
+}
+
+.recovered-form h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-xl);
+    color: var(--heading);
+    margin-bottom: 6px;
+}
+
+.recovered-form > * + * {
+    margin-top: 14px;
+}
+
+.recovered-form .input-group > span {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-2);
+}
+
+.recovered-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+}
+
+.recovered-form input[type="text"],
+.recovered-form input[type="date"],
+.recovered-form textarea {
+    width: 100%;
+    min-width: 0;
+}
+
+.import-status {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.import-status.is-new { background: var(--success-bg); color: var(--success); }
+.import-status.is-dup { background: var(--warning-bg); color: var(--warning); }
+.import-status.is-bad { background: var(--danger-bg); color: var(--danger); }
+
+.matching-kpis {
+    margin-bottom: 18px;
+}
+
+.matching-gaps {
+    direction: ltr;
+    text-align: right;
+    line-height: 2;
+    font-weight: 600;
+    color: var(--danger);
+    word-break: break-word;
+}
+
+.doc-recovered .recovered-table th {
+    width: 34%;
+    text-align: right;
+}

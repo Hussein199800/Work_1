@@ -270,7 +270,7 @@ const DATA_SETTINGS_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations"
+    "audit_fee_destinations", "audit_audit_committee"
 ];
 let settingsLoadFailed = [];
 const settingsCorruptRaw = {};
@@ -344,7 +344,7 @@ if ([
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_records", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations"
+    "audit_fee_destinations", "audit_audit_committee"
 ].indexOf(key) !== -1) {
     try { markDataChanged(); } catch (e) {}
     /* قبل تحميل قسم Firebase يرمي (منطقة TDZ) ويُتجاهل: حفظ الإعدادات عند فتح الصفحة ليس تعديلاً */
@@ -401,6 +401,24 @@ DEFAULT_STAMP_PRICES
 const FEE_DESTINATIONS_KEY = "audit_fee_destinations";
 const DEFAULT_FEE_DESTINATIONS = { pleading: "central", ambulance: "central", aid: "central", receipt: "branch" };
 const FEE_DESTINATION_NAMES = { central: "النقابة المركزية", branch: "الفرع" };
+
+/*
+    لجنة التدقيق (23/11/2026): أسماء رئيسها وأعضائها الأربعة، تُطبع تحت توقيعات التقرير
+    عند اختيار «مع توقيعات لجنة التدقيق». إعداد مشترك (نسخة احتياطية + مزامنة)، إضافي؛
+    الاسم الفارغ يُطبع خطاً فارغاً للكتابة باليد.
+*/
+const AUDIT_COMMITTEE_KEY = "audit_audit_committee";
+const AUDIT_COMMITTEE_MEMBERS = 4;
+
+function normalizeAuditCommittee(value) {
+    const v = value && typeof value === "object" ? value : {};
+    const members = Array.isArray(v.members) ? v.members : [];
+    const out = { chair: String(v.chair || "").trim(), members: [] };
+    for (let i = 0; i < AUDIT_COMMITTEE_MEMBERS; i++) out.members.push(String(members[i] || "").trim());
+    return out;
+}
+
+let auditCommittee = normalizeAuditCommittee(loadData(AUDIT_COMMITTEE_KEY, null));
 
 let feeDestinations = (function () {
     const saved = loadData(FEE_DESTINATIONS_KEY, null);
@@ -5827,7 +5845,7 @@ onReady(function () {
 ========================================================= */
 
 const RECORDS_VIEW_KEY = "audit_ui_records_view";
-const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", repName: "all", office: "all", auditor: "all", sort: "date-desc" };
+const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", repName: "all", office: "all", auditor: "all", source: "all", sort: "date-desc" };
 
 function loadRecordsView() {
     try {
@@ -5875,6 +5893,10 @@ function getVisibleRecords() {
         if (view.rep !== "all" && (record.representativeType === "external" ? "external" : "internal") !== view.rep) return false;
         if (view.office !== "all" && String(record.officeName || "").trim() !== view.office) return false;
         if (view.repName !== "all" && String(record.representativeName || "").trim() !== view.repName) return false;
+        /* المصدر: تدقيقنا / المستردة (من موقع أو يدوي) */
+        if (view.source === "own" && isRecoveredRecord(record)) return false;
+        if (view.source === "recovered" && !isRecoveredRecord(record)) return false;
+        if ((view.source === "site" || view.source === "manual") && !(isRecoveredRecord(record) && record.source.kind === view.source)) return false;
         if (view.auditor !== "all" && getRecordAuditors(record).indexOf(view.auditor) === -1) return false;
         if (q) {
             const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, getRecordAuditors(record).join(" "), formatDay(getRecordDay(record))].join(" ")).toLowerCase();
@@ -5954,6 +5976,7 @@ function syncRecordsFilters() {
     set("rfTo", recordsView.to);
     set("rfRep", recordsView.rep);
     set("rfRepName", recordsView.repName);
+    set("rfSource", recordsView.source);
     set("rfOffice", recordsView.office);
     set("rfSort", recordsView.sort);
 
@@ -5963,7 +5986,7 @@ function syncRecordsFilters() {
 }
 
 document.getElementById("recordsFilters")?.addEventListener("change", function (event) {
-    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfRepName: "repName", rfOffice: "office", rfAuditor: "auditor", rfSort: "sort" };
+    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfRepName: "repName", rfSource: "source", rfOffice: "office", rfAuditor: "auditor", rfSort: "sort" };
     const key = map[event.target.id];
     if (!key) return;
     recordsView[key] = event.target.value;
@@ -6039,6 +6062,26 @@ function renderRecords() {
         const date = formatDay(getRecordDay(record));
 
         const sel = selectedRecordIds.has(record.id);
+
+        /* سجل مسترد: ملخّص بلا وكالات، بشارة ولون مميز */
+        if (isRecoveredRecord(record)) {
+            const sum = recoveredSummary(record);
+            return '<tr class="is-recovered' + (sel ? " is-selected" : "") + '">' +
+                '<td class="sel-cell"><input type="checkbox" data-sel="' + escapeHTML(record.id) + '"' + (sel ? " checked" : "") + ' aria-label="تحديد السجل ' + escapeHTML(record.recordNumber) + ' للتقرير المخصّص"></td>' +
+                '<td><span class="record-tag">' + escapeHTML(record.recordNumber) + "</span>" + recoveredBadgeHTML(record) + "</td>" +
+                "<td><strong>" + escapeHTML(record.officeName) + "</strong><small class=\"auditor-note\">" + escapeHTML(recoveredSourceText(record)) + "</small></td>" +
+                "<td>" + escapeHTML(record.representativeName) + "</td>" +
+                '<td class="num">' + (sum.agencyCount ? '<span class="agency-count">' + sum.agencyCount + "</span>" : "—") + "</td>" +
+                '<td class="num">—</td><td class="num">—</td>' +
+                '<td class="num">' + (sum.amountDue ? money(sum.amountDue) + '<small class="deduction-note">حسب المصدر</small>' : "—") + "</td>" +
+                '<td class="date-cell">' + formatDay(getRecordDay(record)) + "</td>" +
+                '<td><div class="action-group">' +
+                    '<button type="button" class="act-btn act-primary" onclick="showRecoveredDoc(\'' + record.id + '\')"><i class="ti ti-eye" aria-hidden="true"></i> عرض</button>' +
+                    (canEdit ? '<button type="button" class="act-btn" onclick="openRecoveredForm(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                    '<button type="button" class="act-btn act-more" aria-haspopup="menu" aria-label="إجراءات أخرى للسجل ' + escapeHTML(record.recordNumber) + '" onclick="openRecordMenu(this, \'' + record.id + '\')"><i class="ti ti-dots-vertical" aria-hidden="true"></i></button>' +
+                "</div></td></tr>";
+        }
+
         return "<tr" + (sel ? ' class="is-selected"' : "") + ">" +
             '<td class="sel-cell"><input type="checkbox" data-sel="' + escapeHTML(record.id) + '"' + (sel ? " checked" : "") + ' aria-label="تحديد السجل ' + escapeHTML(record.recordNumber) + ' للتقرير المخصّص"></td>' +
             '<td><span class="record-tag">' + escapeHTML(record.recordNumber) + "</span></td>" +
@@ -6066,6 +6109,507 @@ function renderRecords() {
 }
 
 /* =========================================================
+السجلات المستردة من مواقع تدقيق أخرى أو من تدقيق يدوي (23/11/2026)
+الغاية: كل سجلات الفرع في قائمة واحدة للمطابقة (من دُقّق هنا ومن لا).
+السجل المسترد سجل «ملخّص» بلا وكالات: agencies = [] و
+  source  = { kind: "site" | "manual", name: "اسم الموقع أو المدقق" }
+  summary = { agencyCount, amountDue }   (اختياريان، كما في المصدر)
+حقول إضافية؛ لا تدخل في أرقام تدقيقنا (لا وكالات لها)، ولها فلتر «المصدر».
+========================================================= */
+
+const RECOVERED_SOURCES = { site: "موقع تدقيق آخر", manual: "تدقيق يدوي" };
+
+function isRecoveredRecord(record) {
+    return !!(record && record.source && RECOVERED_SOURCES[record.source.kind]);
+}
+
+function recoveredSummary(record) {
+    const s = (record && record.summary) || {};
+    return { agencyCount: number(s.agencyCount), amountDue: number(s.amountDue) };
+}
+
+function recoveredSourceText(record) {
+    if (!isRecoveredRecord(record)) return "تدقيق هذا الموقع";
+    const name = String(record.source.name || "").trim();
+    return RECOVERED_SOURCES[record.source.kind] + (name ? " — " + name : "");
+}
+
+function recoveredBadgeHTML(record) {
+    if (!isRecoveredRecord(record)) return "";
+    return '<span class="recovered-badge is-' + record.source.kind + '" title="' + escapeHTML(recoveredSourceText(record)) + '">' +
+        '<i class="ti ' + (record.source.kind === "manual" ? "ti-writing" : "ti-world-download") + '" aria-hidden="true"></i> مسترد</span>';
+}
+
+/* ---------- النموذج السريع (إضافة / تعديل) ---------- */
+
+function openRecoveredForm(id) {
+
+    if (!currentUser || currentUser.role === "viewer") {
+        notify("ليس لديك صلاحية.", "error");
+        return;
+    }
+
+    const record = id ? records.find(function (r) { return r.id === id; }) : null;
+    const src = record && record.source ? record.source : { kind: "site", name: "" };
+    const sum = record ? recoveredSummary(record) : { agencyCount: 0, amountDue: 0 };
+    const field = function (fid, label, value, extra) {
+        return '<label class="input-group"><span>' + label + '</span><input type="text" id="' + fid + '" value="' + escapeHTML(value === undefined || value === null ? "" : value) + '"' + (extra || "") + "></label>";
+    };
+
+    const html = '<div class="recovered-form" data-record-id="' + escapeHTML(id || "") + '">' +
+        '<h2><i class="ti ti-world-download" aria-hidden="true"></i> ' + (record ? "تعديل سجل مسترد" : "إضافة سجل مسترد") + "</h2>" +
+        '<p class="field-hint">سجل دُقّق خارج هذا الموقع، يُحفظ ملخصاً للمطابقة فقط ولا يدخل في أرقام تدقيقنا.</p>' +
+        '<div class="input-group"><span>المصدر</span><div class="cr-seg" role="radiogroup">' +
+            Object.keys(RECOVERED_SOURCES).map(function (k) {
+                return '<label><input type="radio" name="rvKind" value="' + k + '"' + (src.kind === k ? " checked" : "") + "> " + RECOVERED_SOURCES[k] + "</label>";
+            }).join("") + "</div></div>" +
+        '<div class="recovered-grid">' +
+            field("rvSourceName", "اسم الموقع أو المدقق (اختياري)", src.name, ' autocomplete="off" placeholder="مثال: موقع شذى البكور، أو اسم المدقق"') +
+            field("rvNumber", "رقم السجل *", record ? record.recordNumber : "", ' inputmode="numeric" autocomplete="off"') +
+            field("rvRep", "اسم المندوب *", record ? record.representativeName : "", ' autocomplete="off" list="rvRepNames"') +
+            field("rvOffice", "المكتب / المنطقة *", record ? record.officeName : "", ' autocomplete="off" list="rvOfficeNames"') +
+            '<label class="input-group"><span>تاريخ السجل</span><input type="date" id="rvDate" lang="en-GB" dir="ltr" value="' + escapeHTML(record ? getRecordDay(record) : todayDay()) + '"></label>' +
+            field("rvAgencies", "عدد الوكالات (اختياري)", sum.agencyCount || "", ' inputmode="numeric" data-num="int" autocomplete="off"') +
+            field("rvAmount", "المبلغ المطلوب من المندوب (اختياري)", sum.amountDue || "", ' inputmode="decimal" data-num="dec" autocomplete="off"') +
+        "</div>" +
+        '<label class="input-group"><span>ملاحظة (اختياري)</span><textarea id="rvNote" rows="2">' + escapeHTML(record ? getRecordNote(record) : "") + "</textarea></label>" +
+        '<datalist id="rvRepNames">' + uniqueRecordValues("representativeName").map(function (n) { return '<option value="' + escapeHTML(n) + '"></option>'; }).join("") + "</datalist>" +
+        '<datalist id="rvOfficeNames">' + uniqueRecordValues("officeName").map(function (n) { return '<option value="' + escapeHTML(n) + '"></option>'; }).join("") + "</datalist>" +
+        '<div class="cr-actions"><button type="button" class="primary-btn" onclick="saveRecoveredForm()"><i class="ti ti-device-floppy"></i> حفظ السجل المسترد</button>' +
+        (record ? "" : '<button type="button" class="secondary-btn" onclick="saveRecoveredForm(true)"><i class="ti ti-plus"></i> حفظ وإضافة آخر</button>') +
+        '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إلغاء</button></div>' +
+        "</div>";
+
+    document.getElementById("modalContent").innerHTML = html;
+    document.getElementById("recordModal").classList.remove("hidden");
+    setTimeout(function () { document.getElementById(record ? "rvNumber" : "rvNumber")?.focus(); }, 30);
+}
+
+function uniqueRecordValues(field) {
+    return Array.from(new Set(records.map(function (r) { return String(r[field] || "").trim(); }).filter(Boolean)))
+        .sort(function (a, b) { return a.localeCompare(b, "ar"); });
+}
+
+function saveRecoveredForm(addAnother) {
+
+    const box = document.querySelector(".recovered-form");
+    if (!box) return;
+    const id = box.dataset.recordId || "";
+    const val = function (fid) { return (document.getElementById(fid)?.value || "").trim(); };
+    const kind = (document.querySelector('input[name="rvKind"]:checked') || {}).value || "site";
+
+    const recordNumber = normalizeDigits(val("rvNumber"));
+    const rep = val("rvRep");
+    const office = val("rvOffice");
+    if (!recordNumber || !rep || !office) {
+        notify("املأ رقم السجل واسم المندوب والمكتب.", "error");
+        (document.getElementById(!recordNumber ? "rvNumber" : !rep ? "rvRep" : "rvOffice"))?.focus();
+        return;
+    }
+
+    const old = id ? records.find(function (r) { return r.id === id; }) : null;
+    const now = new Date().toISOString();
+    const record = Object.assign({}, old ? JSON.parse(JSON.stringify(old)) : {}, {
+        id: old ? old.id : generateId(),
+        recordNumber: recordNumber,
+        officeName: office,
+        representativeName: rep,
+        representativeType: old && old.representativeType ? old.representativeType : "internal",
+        recordDate: val("rvDate") || todayDay(),
+        agencies: old && Array.isArray(old.agencies) ? old.agencies : [],
+        source: { kind: kind, name: val("rvSourceName") },
+        summary: { agencyCount: number(val("rvAgencies")), amountDue: number(val("rvAmount")) },
+        recordNote: val("rvNote") || undefined,
+        createdAt: old ? old.createdAt : now,
+        updatedAt: now
+    });
+
+    const doSave = function () {
+        const before = records.slice();
+        const idx = records.findIndex(function (r) { return r.id === record.id; });
+        if (idx === -1) records.push(record); else records[idx] = record;
+        persistRecords().then(function () {
+            notify("<strong>حُفظ السجل المسترد " + escapeHTML(recordNumber) + "</strong><span>" + escapeHTML(recoveredSourceText(record)) + "</span>", "success", 3500, true);
+            try { renderRecords(); updateDashboard(); } catch (e) {}
+            if (addAnother) openRecoveredForm(); else closeRecordModal(true);
+        }).catch(function (error) {
+            records = before;
+            notify("<strong>لم يُحفظ</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        });
+    };
+
+    /* رقم موجود (مدقّق هنا أو مسترد قبلاً): تنبيه للمطابقة قبل الحفظ */
+    const same = records.filter(function (r) { return r.id !== record.id && String(r.recordNumber).trim() === recordNumber; });
+    if (same.length) {
+        appChoose({
+            title: "رقم السجل " + recordNumber + " موجود مسبقاً",
+            message: same.map(function (r) { return (isRecoveredRecord(r) ? "مسترد" : "مدقّق هنا") + ": " + (r.representativeName || "") + " — " + (r.officeName || "") + " — " + formatDay(getRecordDay(r)); }).join(" | ") +
+                ". هل هو سجل مختلف فعلاً؟",
+            choices: [{ value: "save", label: "احفظه رغم التكرار", kind: "primary" }]
+        }).then(function (choice) { if (choice === "save") doSave(); });
+        return;
+    }
+    doSave();
+}
+
+window.openRecoveredForm = openRecoveredForm;
+window.saveRecoveredForm = saveRecoveredForm;
+
+/* عرض سجل مسترد (بدل التقرير): ملخص قابل للطباعة */
+function buildRecoveredDoc(record) {
+    const sum = recoveredSummary(record);
+    const row = function (k, v) { return "<tr><th>" + k + "</th><td>" + v + "</td></tr>"; };
+    return '<div class="final-report doc doc-summary doc-recovered">' +
+        docLetterhead("سجل مسترد", "مصدره: " + escapeHTML(recoveredSourceText(record)) + " — تاريخ الإصدار: " + todayArabic()) +
+        '<table class="doc-table recovered-table"><tbody>' +
+        row("رقم السجل", escapeHTML(record.recordNumber)) +
+        row("المندوب", escapeHTML(record.representativeName)) +
+        row("المكتب / المنطقة", escapeHTML(record.officeName)) +
+        row("تاريخ السجل", formatDay(getRecordDay(record))) +
+        row("المصدر", escapeHTML(recoveredSourceText(record))) +
+        row("عدد الوكالات", sum.agencyCount ? String(sum.agencyCount) : "—") +
+        row("المبلغ المطلوب من المندوب", sum.amountDue ? money(sum.amountDue) : "—") +
+        (getRecordNote(record) ? row("ملاحظة", formatNotesHTML(getRecordNote(record))) : "") +
+        "</tbody></table>" +
+        '<p class="doc-empty">سجل دُقّق خارج هذا الموقع ومحفوظ هنا للمطابقة؛ لا تفاصيل وكالات له، ولا يدخل في أرقام تدقيق هذا الموقع.</p>' +
+        "</div>";
+}
+
+function showRecoveredDoc(id) {
+    const record = records.find(function (r) { return r.id === id; });
+    if (!record) return;
+    const canEdit = currentUser && currentUser.role !== "viewer";
+    document.getElementById("modalContent").innerHTML =
+        '<div class="report-actions no-print">' +
+            '<button type="button" class="secondary-btn" onclick="openReportDocument(buildRecoveredDoc(records.find(function (r) { return r.id === \'' + escapeHTML(id) + '\'; })), \'سجل مسترد ' + escapeHTML(record.recordNumber).replace(/'/g, "") + '\')"><i class="ti ti-printer"></i> طباعة</button>' +
+            (canEdit ? '<button type="button" class="secondary-btn" onclick="openRecoveredForm(\'' + escapeHTML(id) + '\')"><i class="ti ti-edit"></i> تعديل</button>' : "") +
+            '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button>' +
+        "</div>" + buildRecoveredDoc(record);
+    document.getElementById("recordModal").classList.remove("hidden");
+}
+
+window.showRecoveredDoc = showRecoveredDoc;
+window.buildRecoveredDoc = buildRecoveredDoc;
+
+/* ---------- استيراد سجلات مستردة من Excel / CSV ---------- */
+
+/* أسماء الأعمدة المقبولة (عربي أو إنكليزي، بأي ترتيب) */
+const RECOVERED_HEADERS = {
+    number: ["رقم السجل", "السجل", "رقم", "record", "record number", "number"],
+    rep: ["المندوب", "اسم المندوب", "representative", "rep"],
+    office: ["المكتب", "المنطقة", "اسم المنطقة", "اسم المكتب", "office", "region"],
+    date: ["التاريخ", "تاريخ السجل", "date"],
+    agencies: ["عدد الوكالات", "الوكالات", "agencies"],
+    amount: ["المبلغ", "المطلوب", "المبلغ المطلوب", "المطلوب من المندوب", "amount"],
+    source: ["المصدر", "نوع المصدر", "source"],
+    sourceName: ["اسم المصدر", "الموقع", "اسم الموقع", "المدقق", "source name"],
+    note: ["ملاحظة", "ملاحظات", "note", "notes"]
+};
+
+let recoveredImport = null;
+
+function normalizeHeader(text) {
+    return normalizeDigits(String(text || "")).replace(/[ً-ْـ]/g, "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function mapRecoveredHeaders(row) {
+    const map = {};
+    (row || []).forEach(function (cell, i) {
+        const h = normalizeHeader(cell);
+        Object.keys(RECOVERED_HEADERS).forEach(function (key) {
+            if (map[key] !== undefined) return;
+            if (RECOVERED_HEADERS[key].some(function (name) { return normalizeHeader(name) === h; })) map[key] = i;
+        });
+    });
+    return map;
+}
+
+function parseCSVText(text) {
+    text = String(text || "").replace(/^﻿/, "");
+    const first = text.split(/\r?\n/)[0] || "";
+    const delim = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ";" : (first.indexOf("\t") !== -1 && first.indexOf(",") === -1 ? "\t" : ",");
+    const rows = [];
+    let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (q) {
+            if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+            else if (c === '"') q = false;
+            else cell += c;
+        } else if (c === '"') q = true;
+        else if (c === delim) { row.push(cell); cell = ""; }
+        else if (c === "\n" || c === "\r") {
+            if (c === "\r" && text[i + 1] === "\n") i++;
+            row.push(cell); rows.push(row); row = []; cell = "";
+        } else cell += c;
+    }
+    if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter(function (r) { return r.some(function (x) { return String(x).trim() !== ""; }); });
+}
+
+/* تاريخ من الملف: YYYY-MM-DD، أو يوم/شهر/سنة، أو رقم تاريخ Excel */
+function importedDay(value) {
+    if (value === null || value === undefined || value === "") return "";
+    if (typeof value === "number" && value > 20000 && value < 80000) {
+        return new Date(Math.round((value - 25569) * 86400000)).toISOString().slice(0, 10);
+    }
+    const s = normalizeDigits(String(value)).trim();
+    let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+    if (m) return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+    m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+    if (m) return m[3] + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0");
+    return "";
+}
+
+function pickRecoveredImportFile() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,.xlsx,.xls,text/csv";
+    input.addEventListener("change", function () {
+        const file = input.files && input.files[0];
+        if (file) readRecoveredFile(file);
+    });
+    input.click();
+}
+
+function readRecoveredFile(file) {
+    const isCSV = /\.csv$/i.test(file.name) || /text/.test(file.type);
+    const done = function (rows) {
+        if (!rows || rows.length < 2) { notify("الملف فارغ أو بلا أسطر بيانات.", "error"); return; }
+        prepareRecoveredImport(rows, file.name);
+    };
+    if (isCSV) {
+        file.text().then(function (t) { done(parseCSVText(t)); }).catch(function (e) { notify("تعذر قراءة الملف: " + escapeHTML(e && e.message || e), "error"); });
+        return;
+    }
+    if (typeof XLSX === "undefined") {
+        notify("قراءة Excel تحتاج اتصالاً بالإنترنت (مكتبة الإكسل). احفظ الملف بصيغة CSV أو اتصل ثم أعد المحاولة.", "error", 9000);
+        return;
+    }
+    file.arrayBuffer().then(function (buf) {
+        const wb = XLSX.read(buf, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        done(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" }));
+    }).catch(function (e) { notify("تعذر قراءة الملف: " + escapeHTML(e && e.message || e), "error"); });
+}
+
+function prepareRecoveredImport(rows, fileName) {
+    const map = mapRecoveredHeaders(rows[0]);
+    if (map.number === undefined || map.rep === undefined || map.office === undefined) {
+        notify("<strong>لم أجد الأعمدة المطلوبة في السطر الأول</strong><span>المطلوب: «رقم السجل» و«المندوب» و«المكتب» (أو «المنطقة»). اختياري: التاريخ، عدد الوكالات، المبلغ، المصدر، اسم المصدر، ملاحظة. نزّل قالب الاستيراد للمثال.</span>", "error", 12000, true);
+        return;
+    }
+    const get = function (row, key) { return map[key] === undefined ? "" : row[map[key]]; };
+    const existing = {};
+    records.forEach(function (r) {
+        const n = String(r.recordNumber).trim();
+        existing[n] = existing[n] || [];
+        existing[n].push(r);
+    });
+    const inFile = {};
+    const items = rows.slice(1).map(function (row, i) {
+        const srcText = String(get(row, "source") || "");
+        return {
+            line: i + 2,
+            number: normalizeDigits(String(get(row, "number") || "")).trim(),
+            rep: String(get(row, "rep") || "").trim(),
+            office: String(get(row, "office") || "").trim(),
+            day: importedDay(get(row, "date")),
+            agencies: number(get(row, "agencies")),
+            amount: number(get(row, "amount")),
+            kind: /يدوي|manual/i.test(srcText) ? "manual" : (srcText.trim() ? "site" : ""),
+            sourceName: String(get(row, "sourceName") || "").trim(),
+            note: String(get(row, "note") || "").trim()
+        };
+    });
+    items.forEach(function (it) {
+        if (!it.number || !it.rep || !it.office) it.status = "invalid";
+        else if (inFile[it.number]) it.status = "dup-file";
+        else if ((existing[it.number] || []).some(function (r) { return !isRecoveredRecord(r); })) it.status = "dup-own";
+        else if ((existing[it.number] || []).length) it.status = "dup-recovered";
+        else it.status = "new";
+        if (it.number) inFile[it.number] = true;
+    });
+    recoveredImport = { fileName: fileName, items: items, kind: "site", sourceName: "", includeDup: false };
+    renderRecoveredImport();
+}
+
+const IMPORT_STATUS = {
+    "new": ["جديد", "is-new"],
+    "dup-own": ["مدقّق هنا بنفس الرقم", "is-dup"],
+    "dup-recovered": ["مسترد سابقاً بنفس الرقم", "is-dup"],
+    "dup-file": ["مكرر في الملف", "is-dup"],
+    "invalid": ["ناقص (رقم/مندوب/مكتب)", "is-bad"]
+};
+
+function recoveredImportSelection() {
+    if (!recoveredImport) return [];
+    return recoveredImport.items.filter(function (it) {
+        return it.status === "new" || (recoveredImport.includeDup && (it.status === "dup-own" || it.status === "dup-recovered"));
+    });
+}
+
+function renderRecoveredImport() {
+    const st = recoveredImport;
+    const count = function (s) { return st.items.filter(function (it) { return it.status === s; }).length; };
+    const chosen = recoveredImportSelection();
+    const html = '<div class="recovered-form recovered-import">' +
+        '<h2><i class="ti ti-file-import" aria-hidden="true"></i> استيراد سجلات مستردة</h2>' +
+        '<p class="field-hint">الملف: ' + escapeHTML(st.fileName) + " — " + st.items.length + " سطر: " +
+            count("new") + " جديد، " + (count("dup-own") + count("dup-recovered") + count("dup-file")) + " مكرر، " + count("invalid") + " ناقص.</p>" +
+        '<div class="input-group"><span>المصدر (للأسطر التي ليس فيها عمود «المصدر»)</span><div class="cr-seg">' +
+            Object.keys(RECOVERED_SOURCES).map(function (k) { return '<label><input type="radio" name="riKind" value="' + k + '"' + (st.kind === k ? " checked" : "") + "> " + RECOVERED_SOURCES[k] + "</label>"; }).join("") +
+        "</div></div>" +
+        '<label class="input-group"><span>اسم الموقع أو المدقق (اختياري)</span><input type="text" id="riSourceName" value="' + escapeHTML(st.sourceName) + '"></label>' +
+        '<label class="cr-check"><input type="checkbox" id="riIncludeDup"' + (st.includeDup ? " checked" : "") + "> استيراد المكرر مع الموجود أيضاً (للمطابقة)</label>" +
+        '<div class="table-wrapper"><table class="doc-table import-table"><thead><tr><th>السطر</th><th>الحالة</th><th>رقم السجل</th><th>المندوب</th><th>المكتب</th><th>التاريخ</th><th class="num">الوكالات</th><th class="num">المبلغ</th></tr></thead><tbody>' +
+        st.items.slice(0, 300).map(function (it) {
+            const s = IMPORT_STATUS[it.status];
+            return '<tr><td>' + it.line + '</td><td><span class="import-status ' + s[1] + '">' + s[0] + "</span></td><td>" + escapeHTML(it.number) + "</td><td>" + escapeHTML(it.rep) + "</td><td>" + escapeHTML(it.office) +
+                "</td><td>" + (it.day ? formatDay(it.day) : "—") + '</td><td class="num">' + (it.agencies || "—") + '</td><td class="num">' + (it.amount ? money(it.amount) : "—") + "</td></tr>";
+        }).join("") +
+        "</tbody></table></div>" +
+        (st.items.length > 300 ? '<p class="cr-more">المعاينة تعرض أول 300 سطر.</p>' : "") +
+        '<div class="cr-actions"><button type="button" class="primary-btn" id="riImportBtn" onclick="applyRecoveredImport()"' + (chosen.length ? "" : " disabled") + '><i class="ti ti-download"></i> استيراد ' + chosen.length + " سجل</button>" +
+        '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إلغاء</button></div></div>';
+    document.getElementById("modalContent").innerHTML = html;
+    document.getElementById("recordModal").classList.remove("hidden");
+}
+
+document.getElementById("modalContent")?.addEventListener("change", function (event) {
+    if (!recoveredImport || !event.target.closest(".recovered-import")) return;
+    if (event.target.name === "riKind") recoveredImport.kind = event.target.value;
+    if (event.target.id === "riIncludeDup") { recoveredImport.includeDup = event.target.checked; renderRecoveredImport(); }
+});
+document.getElementById("modalContent")?.addEventListener("input", function (event) {
+    if (recoveredImport && event.target.id === "riSourceName") recoveredImport.sourceName = event.target.value;
+});
+
+function applyRecoveredImport() {
+    if (!currentUser || currentUser.role === "viewer") { notify("ليس لديك صلاحية.", "error"); return; }
+    const chosen = recoveredImportSelection();
+    if (!chosen.length) return;
+    const now = new Date().toISOString();
+    const added = chosen.map(function (it) {
+        return {
+            id: generateId(), recordNumber: it.number, officeName: it.office, representativeName: it.rep, representativeType: "internal",
+            recordDate: it.day || todayDay(), agencies: [],
+            source: { kind: it.kind || recoveredImport.kind, name: it.sourceName || String(recoveredImport.sourceName || "").trim() },
+            summary: { agencyCount: it.agencies, amountDue: it.amount },
+            recordNote: it.note || undefined, createdAt: now, updatedAt: now
+        };
+    });
+    const before = records.slice();
+    records = records.concat(added);
+    persistRecords().then(function () {
+        recoveredImport = null;
+        closeRecordModal(true);
+        try { renderRecords(); updateDashboard(); } catch (e) {}
+        notify("<strong>استُورد " + added.length + " سجل مسترد</strong><span>تظهر في قائمة السجلات بشارة «مسترد»، ولا تدخل في أرقام تدقيقكم.</span>", "success", 6000, true);
+    }).catch(function (error) {
+        records = before;
+        notify("<strong>لم يُستورد شيء</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+    });
+}
+
+function downloadRecoveredTemplate() {
+    const lines = ["رقم السجل,المندوب,المكتب,التاريخ,عدد الوكالات,المبلغ,المصدر,اسم المصدر,ملاحظة",
+        "250,أحمد محروق,الدانا,2026-09-17,40,12500,موقع تدقيق آخر,موقع التدقيق القديم,",
+        "251,سامر العلي,إدلب,17/09/2026,25,,تدقيق يدوي,أ. محمد,مدقق يدوياً على الدفتر"];
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "قالب-السجلات-المستردة.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+}
+
+window.pickRecoveredImportFile = pickRecoveredImportFile;
+window.applyRecoveredImport = applyRecoveredImport;
+window.downloadRecoveredTemplate = downloadRecoveredTemplate;
+
+/* ---------- مطابقة السجلات: من دُقّق هنا، ومن استُرد، والمكرر، والناقص ---------- */
+
+function recordsMatchingData() {
+    const own = records.filter(function (r) { return !isRecoveredRecord(r); });
+    const site = records.filter(function (r) { return isRecoveredRecord(r) && r.source.kind === "site"; });
+    const manual = records.filter(function (r) { return isRecoveredRecord(r) && r.source.kind === "manual"; });
+    const byNumber = {};
+    records.forEach(function (r) {
+        const n = String(r.recordNumber).trim();
+        (byNumber[n] = byNumber[n] || []).push(r);
+    });
+    const duplicates = Object.keys(byNumber).filter(function (n) { return byNumber[n].length > 1; })
+        .sort(function (a, b) { return a.localeCompare(b, "ar", { numeric: true }); })
+        .map(function (n) { return { number: n, list: byNumber[n] }; });
+    /* الأرقام الناقصة في التسلسل (الأرقام الصحيحة فقط) */
+    const nums = Object.keys(byNumber).filter(function (n) { return /^\d+$/.test(n); }).map(Number).sort(function (a, b) { return a - b; });
+    const gaps = [];
+    let missing = 0;
+    for (let i = 1; i < nums.length; i++) {
+        if (nums[i] - nums[i - 1] > 1) {
+            gaps.push([nums[i - 1] + 1, nums[i] - 1]);
+            missing += nums[i] - nums[i - 1] - 1;
+        }
+    }
+    const reps = {};
+    records.forEach(function (r) {
+        const name = String(r.representativeName || "").trim() || "—";
+        reps[name] = reps[name] || { own: 0, recovered: 0 };
+        if (isRecoveredRecord(r)) reps[name].recovered++; else reps[name].own++;
+    });
+    return { own: own, site: site, manual: manual, duplicates: duplicates, gaps: gaps, missing: missing, range: nums.length ? [nums[0], nums[nums.length - 1]] : null, reps: reps };
+}
+
+function buildRecordsMatchingDoc() {
+    const d = recordsMatchingData();
+    const srcOf = function (r) { return isRecoveredRecord(r) ? "مسترد — " + RECOVERED_SOURCES[r.source.kind] + (r.source.name ? " (" + escapeHTML(r.source.name) + ")" : "") : "مدقّق في هذا الموقع"; };
+    let html = '<div class="final-report doc doc-summary doc-matching">' + docLetterhead("مطابقة سجلات الفرع", "كل السجلات: المدقّقة هنا والمستردة — " + todayArabic());
+    html += '<dl class="doc-kpis matching-kpis">' +
+        "<div><dt>كل السجلات</dt><dd>" + records.length + "</dd></div>" +
+        "<div><dt>مدقّقة في هذا الموقع</dt><dd>" + d.own.length + "</dd></div>" +
+        "<div><dt>مستردة من موقع آخر</dt><dd>" + d.site.length + "</dd></div>" +
+        "<div><dt>مستردة من تدقيق يدوي</dt><dd>" + d.manual.length + "</dd></div>" +
+        "<div><dt>أرقام مكررة</dt><dd>" + d.duplicates.length + "</dd></div>" +
+        "<div><dt>أرقام ناقصة في التسلسل</dt><dd>" + d.missing + "</dd></div>" +
+        "</dl>";
+    html += '<section class="doc-section"><h3>الأرقام الناقصة في التسلسل' + (d.range ? " (من " + d.range[0] + " إلى " + d.range[1] + ")" : "") + "</h3>" +
+        (d.gaps.length
+            ? '<p class="matching-gaps">' + d.gaps.map(function (g) { return g[0] === g[1] ? String(g[0]) : g[0] + "–" + g[1]; }).join("، ") + "</p>" +
+              '<p class="doc-empty">أرقام سجلات لا توجد في أي مصدر: لم تُدقَّق هنا ولم تُسترد. راجعها مع الدفتر.</p>'
+            : '<p class="doc-empty">لا أرقام ناقصة بين أصغر رقم وأكبره.</p>') + "</section>";
+    html += '<section class="doc-section"><h3>أرقام مكررة (موجودة أكثر من مرة)</h3>' +
+        (d.duplicates.length
+            ? '<table class="doc-table"><thead><tr><th>رقم السجل</th><th>المصدر</th><th>المندوب</th><th>المكتب</th><th>التاريخ</th></tr></thead><tbody>' +
+              d.duplicates.map(function (g) {
+                  return g.list.map(function (r, i) {
+                      return "<tr" + (i === 0 ? ' class="dup-first"' : "") + "><td>" + (i === 0 ? "<strong>" + escapeHTML(g.number) + "</strong>" : "") + "</td><td>" + srcOf(r) + "</td><td>" + escapeHTML(r.representativeName) + "</td><td>" + escapeHTML(r.officeName) + "</td><td>" + formatDay(getRecordDay(r)) + "</td></tr>";
+                  }).join("");
+              }).join("") + "</tbody></table>"
+            : '<p class="doc-empty">لا أرقام مكررة.</p>') + "</section>";
+    const names = Object.keys(d.reps).sort(function (a, b) { return a.localeCompare(b, "ar"); });
+    html += '<section class="doc-section"><h3>حسب المندوب</h3><table class="doc-table"><thead><tr><th>المندوب</th><th class="num">مدقّقة هنا</th><th class="num">مستردة</th><th class="num">المجموع</th></tr></thead><tbody>' +
+        names.map(function (n) { const x = d.reps[n]; return "<tr><td>" + escapeHTML(n) + '</td><td class="num">' + x.own + '</td><td class="num">' + x.recovered + '</td><td class="num">' + (x.own + x.recovered) + "</td></tr>"; }).join("") +
+        '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + d.own.length + '</td><td class="num">' + (d.site.length + d.manual.length) + '</td><td class="num">' + records.length + "</td></tr></tfoot></table></section>";
+    html += docSignatures() + "</div>";
+    return html;
+}
+
+function showRecordsMatching() {
+    document.getElementById("modalContent").innerHTML =
+        '<div class="report-actions no-print">' +
+            '<button type="button" class="primary-btn" onclick="downloadReportPDF(buildRecordsMatchingDoc(), \'مطابقة سجلات الفرع - \' + todayDay(), false)"><i class="ti ti-download"></i> تنزيل PDF</button>' +
+            '<button type="button" class="secondary-btn" onclick="openReportDocument(buildRecordsMatchingDoc(), \'مطابقة سجلات الفرع - \' + todayDay())"><i class="ti ti-printer"></i> طباعة</button>' +
+            '<button type="button" class="secondary-btn" onclick="closeRecordModal(); recordsView.source = \'recovered\'; saveRecordsView(); renderRecords();">عرض المستردة في القائمة</button>' +
+            '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button>' +
+        "</div>" + buildRecordsMatchingDoc();
+    document.getElementById("recordModal").classList.remove("hidden");
+}
+
+window.showRecordsMatching = showRecordsMatching;
+window.buildRecordsMatchingDoc = buildRecordsMatchingDoc;
+
+/* =========================================================
 التقارير المخصّصة: طباعة وحفظ عدة سجلات مرة واحدة (19/11/2026)
 يختار المستخدم السجلات (المحددة في جدول السجلات، أو كل الظاهر حسب الفلترة)،
 والمستوى (سطر لكل سجل أو لكل وكالة)، والأعمدة وترتيبها، والعنوان والفرز
@@ -6087,7 +6631,8 @@ const CR_COLUMNS = {
         { key: "office", label: "المكتب", get: function (r) { return String(r.officeName || ""); } },
         { key: "rep", label: "المندوب", get: function (r) { return String(r.representativeName || "").trim(); } },
         { key: "repType", label: "نوع المندوب", get: function (r) { return r.representativeType === "external" ? "خارجي" : "داخلي"; } },
-        { key: "agencies", label: "عدد الوكالات", type: "num", get: function (r, st) { return st.agencies.length; } },
+        { key: "source", label: "المصدر", get: function (r) { return recoveredSourceText(r); } },
+        { key: "agencies", label: "عدد الوكالات", type: "num", get: function (r, st) { return isRecoveredRecord(r) ? recoveredSummary(r).agencyCount : st.agencies.length; } },
         { key: "active", label: "الفعالة", type: "num", get: function (r, st) { return st.active.length - st.missingAgenciesCount; } },
         { key: "lost", label: "المفقودة", type: "num", get: function (r, st) { return st.missingAgenciesCount; } },
         { key: "cancelled", label: "الملغاة", type: "num", get: function (r, st) { return st.cancelled; } },
@@ -6099,10 +6644,10 @@ const CR_COLUMNS = {
         { key: "transport", label: "بدل الانتقال", type: "money", get: function (r, st) { return st.transport.total; } },
         { key: "transportShare", label: "حصة المندوب من البدل", type: "money", get: function (r, st) { return st.transport.share; } },
         { key: "grand", label: "إجمالي السجل", type: "money", get: function (r, st) { return st.grandTotal; } },
-        { key: "due", label: "المطلوب من المندوب", type: "money", get: function (r, st) { return st.representativeTotal; } },
+        { key: "due", label: "المطلوب من المندوب", type: "money", get: function (r, st) { return isRecoveredRecord(r) ? recoveredSummary(r).amountDue : st.representativeTotal; } },
         { key: "deduction", label: "الحسم (مقاصة)", type: "money", get: function (r, st) { return st.deduction; } },
         { key: "deductionReason", label: "سبب الحسم", get: function (r, st) { return st.deductionReason; } },
-        { key: "net", label: "الصافي المطلوب", type: "money", get: function (r, st) { return st.netDue; } },
+        { key: "net", label: "الصافي المطلوب", type: "money", get: function (r, st) { return isRecoveredRecord(r) ? recoveredSummary(r).amountDue : st.netDue; } },
         { key: "ambulance", label: "حصة الإسعاف", type: "money", get: function (r, st) { return st.committees.ambulance; } },
         { key: "cooperation", label: "حصة التعاون", type: "money", get: function (r, st) { return st.committees.cooperation; } },
         { key: "note", label: "ملاحظة السجل", get: function (r) { return getRecordNote(r); } },
@@ -6371,6 +6916,7 @@ function renderCustomReportBuilder() {
             '<label class="cr-check"><input type="checkbox" id="crGroup"' + (s.group ? " checked" : "") + "> تجميع حسب المندوب مع مجموع لكل مندوب</label>" +
             '<label class="cr-check"><input type="checkbox" id="crTotals"' + (s.totals ? " checked" : "") + "> سطر الإجمالي</label>" +
             '<label class="cr-check"><input type="checkbox" id="crSignatures"' + (s.signatures ? " checked" : "") + "> التوقيعات في آخر التقرير</label>" +
+            '<label class="cr-check"><input type="checkbox" id="crCommitteeSign"' + (reportPrefs().committeeSign ? " checked" : "") + "> مع توقيعات لجنة التدقيق</label>" +
         "</div>" +
         '<div class="cr-panel"><h3>الأعمدة <small>(' + s.columns.length + " مختار — رتّبها بالأسهم)</small></h3><ol class=\"cr-columns\">" +
             s.order.map(function (k, i) {
@@ -6441,6 +6987,11 @@ document.getElementById("modalContent")?.addEventListener("change", function (ev
     if (t.id === "crGroup") crState.group = t.checked;
     if (t.id === "crTotals") crState.totals = t.checked;
     if (t.id === "crSignatures") crState.signatures = t.checked;
+    if (t.id === "crCommitteeSign") {
+        saveReportPrefs({ committeeSign: t.checked });
+        /* توقيعات اللجنة تحتاج قسم التوقيعات */
+        if (t.checked && !crState.signatures) { crState.signatures = true; const sg = document.getElementById("crSignatures"); if (sg) sg.checked = true; }
+    }
     crRefreshPreview();
 });
 
@@ -6812,6 +7363,53 @@ function closeRecordMenu() {
     }
 }
 
+/* قائمة أفعال عامة بنفس شكل قائمة ⋮ (تُغلق بالنقر خارجها) */
+function openActionMenu(button, items) {
+    const wasOpenForThis = document.getElementById("recordMenu")?._opener === button;
+    closeRecordMenu();
+    if (wasOpenForThis) return;
+    const menu = document.createElement("div");
+    menu.id = "recordMenu";
+    menu.className = "row-menu no-print";
+    menu.setAttribute("role", "menu");
+    menu._opener = button;
+    items.forEach(function (item) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.setAttribute("role", "menuitem");
+        b.className = "row-menu-item";
+        b.innerHTML = '<i class="ti ' + item.icon + '" aria-hidden="true"></i>';
+        b.appendChild(document.createTextNode(item.text));
+        b.addEventListener("click", function () { closeRecordMenu(); item.run(); });
+        menu.appendChild(b);
+    });
+    document.body.appendChild(menu);
+    button.setAttribute("aria-expanded", "true");
+    const r = button.getBoundingClientRect();
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    let left = Math.min(Math.max(8, r.right - mw), window.innerWidth - mw - 8);
+    let top = r.bottom + 6;
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+    menu.querySelector(".row-menu-item")?.focus();
+}
+
+function openRecoveredMenu(button) {
+    const canEdit = currentUser && currentUser.role !== "viewer";
+    const items = [];
+    if (canEdit) {
+        items.push({ icon: "ti-plus", text: "إضافة سجل مسترد", run: function () { openRecoveredForm(); } });
+        items.push({ icon: "ti-file-import", text: "استيراد من Excel / CSV", run: function () { pickRecoveredImportFile(); } });
+        items.push({ icon: "ti-file-download", text: "تنزيل قالب الاستيراد (CSV)", run: function () { downloadRecoveredTemplate(); } });
+    }
+    items.push({ icon: "ti-list-check", text: "مطابقة السجلات (من دُقّق ومن لا)", run: function () { showRecordsMatching(); } });
+    openActionMenu(button, items);
+}
+
+window.openRecoveredMenu = openRecoveredMenu;
+
 function openRecordMenu(button, id) {
 
     const wasOpenForThis = document.getElementById("recordMenu")?._opener === button;
@@ -6821,7 +7419,10 @@ function openRecordMenu(button, id) {
     const canEdit = currentUser && currentUser.role !== "viewer";
     const canDelete = currentUser && currentUser.role === "manager";
 
-    const items = [
+    const recovered = isRecoveredRecord(records.find(function (r) { return r.id === id; }));
+    const items = recovered ? [
+        { icon: "ti-eye", text: "عرض السجل المسترد", run: function () { showRecoveredDoc(id); } }
+    ] : [
         { icon: "ti-eye", text: "عرض التفاصيل", run: function () { viewRecord(id); } },
         { icon: "ti-file-description", text: "التقرير المفصل", run: function () { showFinalRecordReport(id, "detailed"); } },
         { icon: "ti-file-spreadsheet", text: "تصدير Excel", run: function () { exportRecordToExcel(id); } }
@@ -6990,6 +7591,9 @@ function confirmDiscardRecordForm(next) {
 
 /* then: ما يُنفَّذ بعد فتح السجل فعلاً (بعد التأكيد إن لزم) */
 function editRecord(id, then) {
+    /* السجل المسترد ملخّص بلا وكالات: يُعدَّل من نموذجه السريع */
+    const maybeRecovered = records.find(function (r) { return r.id === id; });
+    if (isRecoveredRecord(maybeRecovered)) { openRecoveredForm(id); return; }
     const open = function () {
         editRecordNow(id);
         if (typeof then === "function") then();
@@ -7711,10 +8315,23 @@ function docLetterhead(title, subtitle) {
 }
 
 function docSignatures() {
-    return '<footer class="doc-sign">' +
+    const main = '<footer class="doc-sign">' +
         "<div><span>المدقق</span><i></i></div>" +
         "<div><span>رئيس مكتب المحاسبة</span><i></i></div>" +
         "</footer>";
+    /* مع توقيعات اللجنة: كتلة واحدة لا تنقسم بين صفحتين (لا تبقى اللجنة وحدها في صفحة) */
+    return reportPrefs().committeeSign ? '<div class="doc-sign-block">' + main + committeeSignaturesHTML() + "</div>" : main;
+}
+
+/* توقيعات لجنة التدقيق: الرئيس ثم الأعضاء الأربعة، الاسم من الإعدادات أو خط فارغ للكتابة باليد */
+function committeeSignaturesHTML() {
+    const c = auditCommittee;
+    const cell = function (role, name) {
+        return '<div><span>' + role + "</span>" + (name ? "<b>" + escapeHTML(name) + "</b>" : '<b class="sign-blank"></b>') + "<i></i></div>";
+    };
+    let html = '<section class="doc-committee-sign"><h4>لجنة التدقيق</h4><div class="committee-sign-grid">' + cell("رئيس لجنة التدقيق", c.chair);
+    c.members.forEach(function (name, i) { html += cell("عضو اللجنة " + (i + 1), name); });
+    return html + "</div></section>";
 }
 
 /* =========================================================
@@ -7733,7 +8350,9 @@ function reportPrefs() {
     const scale = Number(p.scale);
     return {
         scale: Number.isFinite(scale) ? Math.min(REPORT_SCALE_MAX, Math.max(REPORT_SCALE_MIN, scale)) : 1,
-        recovery: p.recovery !== false
+        recovery: p.recovery !== false,
+        /* توقيعات لجنة التدقيق: تُختار وقت الطباعة (مطفأة افتراضياً) */
+        committeeSign: p.committeeSign === true
     };
 }
 
@@ -7751,6 +8370,13 @@ function toggleReportRecovery(id, mode, on) {
     saveReportPrefs({ recovery: !!on });
     showFinalRecordReport(id, mode, true);
 }
+
+function toggleCommitteeSign(id, mode, on) {
+    saveReportPrefs({ committeeSign: !!on });
+    showFinalRecordReport(id, mode, true);
+}
+
+window.toggleCommitteeSign = toggleCommitteeSign;
 
 window.changeReportScale = changeReportScale;
 window.toggleReportRecovery = toggleReportRecovery;
@@ -7771,6 +8397,8 @@ function reportToolsHTML(record, mode, hasRecovery) {
             ? '<label class="report-toggle"><input type="checkbox"' + (prefs.recovery ? " checked" : "") +
                 " onchange=\"toggleReportRecovery('" + id + "', '" + mode + "', this.checked)\"> مع بيان استدراك النقص</label>"
             : "") +
+        '<label class="report-toggle"><input type="checkbox"' + (prefs.committeeSign ? " checked" : "") +
+            " onchange=\"toggleCommitteeSign('" + id + "', '" + mode + "', this.checked)\"> مع توقيعات لجنة التدقيق</label>" +
         "</span>";
 }
 
@@ -8581,6 +9209,8 @@ window.printAgencyAudit = printAgencyAudit;
 
 /* keepScroll: إعادة بناء التقرير المفتوح (تغيير الخط أو حفظ الإيصالات) دون القفز إلى أعلاه */
 function showFinalRecordReport(id, mode, keepScroll) {
+    const maybeRecovered = records.find(function (item) { return item.id === id; });
+    if (isRecoveredRecord(maybeRecovered)) { showRecoveredDoc(id); return; }
     const record = records.find(function (item) { return item.id === id; });
     if (!record) return;
     const modalContent = document.getElementById("modalContent");
@@ -8730,6 +9360,7 @@ function settingMemoryValue(key) {
         case "audit_committee_rates": return committeeRates;
         case "audit_council_saved": return councilSaved;
         case "audit_fee_destinations": return feeDestinations;
+        case "audit_audit_committee": return auditCommittee;
         default: return undefined;
     }
 }
@@ -9527,6 +10158,7 @@ window.exportReportsToPDF = exportReportsToPDF;
 
 
 function viewRecord(id) {
+    if (isRecoveredRecord(records.find(function (r) { return r.id === id; }))) { showRecoveredDoc(id); return; }
 
 const record =
     records.find(
@@ -13372,6 +14004,35 @@ document.getElementById("bulkPriceBox")?.addEventListener("click", function (eve
 renderBulkPrice();
 
 /* =========================================================
+لجنة التدقيق (أسماء التوقيعات) في صفحة الأسعار
+========================================================= */
+
+function renderAuditCommitteeForm() {
+    const set = function (id, v) { const el = document.getElementById(id); if (el) el.value = v || ""; };
+    set("acChair", auditCommittee.chair);
+    auditCommittee.members.forEach(function (name, i) { set("acMember" + (i + 1), name); });
+}
+
+document.getElementById("saveAuditCommitteeBtn")?.addEventListener("click", function () {
+    if (!currentUser || currentUser.role !== "manager") {
+        notify("حفظ أسماء اللجنة للمدير فقط.", "error");
+        return;
+    }
+    const val = function (id) { return (document.getElementById(id)?.value || "").trim(); };
+    const next = normalizeAuditCommittee({ chair: val("acChair"), members: [1, 2, 3, 4].map(function (i) { return val("acMember" + i); }) });
+    try {
+        saveData(AUDIT_COMMITTEE_KEY, next);
+    } catch (error) {
+        notify("<strong>لم تُحفظ أسماء اللجنة</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        return;
+    }
+    auditCommittee = next;
+    notify("حُفظت أسماء لجنة التدقيق.", "success");
+});
+
+onReady(renderAuditCommitteeForm);
+
+/* =========================================================
 أسعار الإضافات
 ========================================================= */
 
@@ -14565,6 +15226,7 @@ function activityTotals(from, to) {
     records.forEach(function (record) {
         const day = getRecordDay(record);
         if (!day || day < from || day > to) return;
+        if (isRecoveredRecord(record)) return;
         t.records += 1;
         t.due -= getRecordDeduction(record).amount;
         (record.agencies || []).forEach(function (a) {
@@ -14807,7 +15469,9 @@ function updateDashboard() {
         if (el) el.textContent = value;
     };
 
-    setText("totalRecords", records.length);
+    /* السجلات المستردة للمطابقة فقط: لا تُعدّ في أرقام تدقيقنا */
+    const recoveredCount = records.filter(isRecoveredRecord).length;
+    setText("totalRecords", records.length - recoveredCount);
     setText("totalAgencies", agencies.length);
     setText("activeAgencies", activeCount);
     setText("cancelledAgencies", cancelled);
@@ -14816,7 +15480,7 @@ function updateDashboard() {
     setText(
         "dashDueNote",
         records.length
-            ? "مجموع " + records.length + " سجل و " + agencies.length + " وكالة"
+            ? "مجموع " + (records.length - recoveredCount) + " سجل و " + agencies.length + " وكالة" + (recoveredCount ? " (و " + recoveredCount + " سجل مسترد للمطابقة)" : "")
             : "لم يُسجَّل أي سجل بعد"
     );
 
@@ -15224,6 +15888,7 @@ function downloadBackup() {
         priceSchedule: priceSchedule,
         councilSaved: councilSaved,
         feeDestinations: feeDestinations,
+        auditCommittee: auditCommittee,
         records: records
     };
 
@@ -15316,6 +15981,7 @@ function buildBackupJSON() {
         priceSchedule: priceSchedule,
         councilSaved: councilSaved,
         feeDestinations: feeDestinations,
+        auditCommittee: auditCommittee,
         records: records
     }, null, 2);
 }
@@ -15982,7 +16648,7 @@ function backupDataProblem(data) {
         if (badUser) return "في قائمة المستخدمين حساب تالف.";
         if (!data.users.some(function (u) { return u.role === "manager"; })) return "لا يوجد مدير في قائمة المستخدمين.";
     }
-    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations"];
+    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations", "auditCommittee"];
     for (let i = 0; i < objects.length; i++) {
         const v = data[objects[i]];
         if (v !== undefined && (!v || typeof v !== "object" || Array.isArray(v))) return "الإعداد " + objects[i] + " تالف.";
@@ -16003,7 +16669,7 @@ function backupDataProblem(data) {
 const RESTORE_SETTING_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_committee_shares",
-    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations"
+    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations", "audit_audit_committee"
 ];
 
 function applyBackupData(data) {
@@ -16102,6 +16768,11 @@ function writeBackupSettings(data) {
     /* جهة رسوم النقص: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
     if (data.feeDestinations && typeof data.feeDestinations === "object") {
         write(FEE_DESTINATIONS_KEY, data.feeDestinations, true);
+    }
+
+    /* لجنة التدقيق (أسماء التوقيعات): من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+    if (data.auditCommittee && typeof data.auditCommittee === "object") {
+        write(AUDIT_COMMITTEE_KEY, normalizeAuditCommittee(data.auditCommittee), true);
     }
 
     /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
@@ -16216,7 +16887,7 @@ const FB_SETTINGS_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations"
+    "audit_fee_destinations", "audit_audit_committee"
 ];
 
 let fbState = loadData(FB_STATE_KEY, null);

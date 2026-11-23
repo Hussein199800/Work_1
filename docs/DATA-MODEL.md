@@ -17,6 +17,7 @@
 | `audit_committee_shares` | مبالغ الحصص الثابتة (للتوافق فقط) |
 | `audit_committee_rates` | نسب الحصص % من سعر الوكالة لكل نوع `{type:{ambulance, cooperation}}` |
 | `audit_council_share`, `audit_council_saved` | حصة المجلس |
+| `audit_audit_committee` | (23/11/2026) أسماء لجنة التدقيق للتوقيعات: `{chair, members:[4]}`. في النسخة الاحتياطية (`auditCommittee`) والمزامنة |
 | `audit_fee_destinations` | (16/11/2026) جهة رسوم كل بند نقص: `{pleading, ambulance, aid, receipt}` = `"central"` (النقابة المركزية) أو `"branch"` (الفرع). الافتراضي: الطوابع للمركزية والإيصال للفرع. يدخل النسخة الاحتياطية (`feeDestinations`) ومزامنة Firebase |
 | `audit_record_draft` | مسودة السجل غير المحفوظ |
 | `currentUser`, `activeSection` | الجلسة والقسم المفتوح |
@@ -40,6 +41,8 @@
   agencies: [ /* وكالات */ ],
   auditors: ["اسم", "اسم"],          // اختياري، داخل البرنامج فقط، لا يظهر في التقارير
   recovery: { centralReceipt, centralDate, branchReceipt, branchDate, text },  // اختياري (16/11/2026): إيصالات «بيان استدراك النقص» — تُكتب من نافذة التقرير
+  source: { kind: "site"|"manual", name },   // اختياري (23/11/2026): سجل مسترد من موقع تدقيق آخر أو تدقيق يدوي (agencies = [])
+  summary: { agencyCount, amountDue },       // اختياري: ملخص السجل المسترد كما في مصدره
   deduction: { amount, reason },     // اختياري (19/11/2026): المقاصة — حسم للمندوب وسببه؛ ينقص المطلوب منه فقط (getRecordNetDue)
   recordNote: "نص",                  // اختياري (3/11/2026): ملاحظة على السجل كاملاً — مربع في التقرير وExcel؛ يُحفظ فقط إن كُتب
   createdAt, updatedAt               // ISO
