@@ -440,6 +440,10 @@
                         placeholder="ابحث برقم السجل أو المكتب أو المندوب…"
                     >
 
+                    <button type="button" class="secondary-btn" id="recoveredMenuBtn" onclick="openRecoveredMenu(this)" aria-haspopup="menu" title="إضافة سجلات دُقّقت خارج هذا الموقع (موقع آخر أو تدقيق يدوي) للمطابقة">
+                        <i class="ti ti-world-download"></i> <span>سجلات مستردة</span>
+                    </button>
+
                     <button type="button" class="secondary-btn" id="customReportBtn" onclick="openCustomReport()" title="طباعة أو حفظ عدة سجلات مرة واحدة بالأعمدة التي تختارها (PDF، Excel، CSV)">
                         <i class="ti ti-table-options"></i> <span>تقرير مخصّص</span>
                     </button>
@@ -483,6 +487,17 @@
                         <span>اسم المندوب</span>
                         <select id="rfRepName">
                             <option value="all">كل المندوبين</option>
+                        </select>
+                    </label>
+
+                    <label class="filter-field">
+                        <span>المصدر</span>
+                        <select id="rfSource">
+                            <option value="all">كل السجلات</option>
+                            <option value="own">تدقيق هذا الموقع</option>
+                            <option value="recovered">المستردة (كلها)</option>
+                            <option value="site">مستردة من موقع تدقيق آخر</option>
+                            <option value="manual">مستردة من تدقيق يدوي</option>
                         </select>
                     </label>
 
@@ -1678,6 +1693,19 @@
                                 <li>المقاصة: حسم للمندوب من المطلوب منه مع سبب إلزامي، يظهر في التقرير والجدول ولوحة التحكم والتقارير وExcel، ولا يغيّر سعر الوكالات ولا إجمالي السجل ولا حصص اللجان.</li>
                                 <li>فرز السجلات أبجدياً حسب اسم المندوب، وفلترتها باسم مندوب معيّن.</li>
                                 <li>توقيعات لجنة التدقيق (23/11/2026): رئيس اللجنة وأربعة أعضاء بأسمائهم من صفحة الأسعار، تُضاف تحت توقيعَي المدقق ورئيس مكتب المحاسبة بخيار وقت الطباعة، ولا تنقسم بين صفحتين.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-world-download"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">23 تشرين الثاني 2026</p>
+                            <h3>السجلات المستردة ومطابقة سجلات الفرع</h3>
+                            <ul class="devlog-list">
+                                <li>إضافة سجلات دُقّقت خارج هذا الموقع (موقع تدقيق آخر أو تدقيق يدوي) ملخّصةً: رقم السجل والمندوب والمكتب والتاريخ وعدد الوكالات والمبلغ، بنموذج سريع أو باستيراد من Excel/CSV مع معاينة وتنبيه للمكرر.</li>
+                                <li>شارة «مسترد» وفلتر «المصدر» في قائمة السجلات، ولا تدخل في أرقام تدقيق الموقع.</li>
+                                <li>«مطابقة السجلات»: كم دُقّق هنا وكم استُرد، والأرقام المكررة، والأرقام الناقصة في التسلسل (لم تُدقَّق ولم تُسترد)، مع الطباعة.</li>
                             </ul>
                         </div>
                     </li>

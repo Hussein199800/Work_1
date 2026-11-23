@@ -41,6 +41,8 @@
   agencies: [ /* وكالات */ ],
   auditors: ["اسم", "اسم"],          // اختياري، داخل البرنامج فقط، لا يظهر في التقارير
   recovery: { centralReceipt, centralDate, branchReceipt, branchDate, text },  // اختياري (16/11/2026): إيصالات «بيان استدراك النقص» — تُكتب من نافذة التقرير
+  source: { kind: "site"|"manual", name },   // اختياري (23/11/2026): سجل مسترد من موقع تدقيق آخر أو تدقيق يدوي (agencies = [])
+  summary: { agencyCount, amountDue },       // اختياري: ملخص السجل المسترد كما في مصدره
   deduction: { amount, reason },     // اختياري (19/11/2026): المقاصة — حسم للمندوب وسببه؛ ينقص المطلوب منه فقط (getRecordNetDue)
   recordNote: "نص",                  // اختياري (3/11/2026): ملاحظة على السجل كاملاً — مربع في التقرير وExcel؛ يُحفظ فقط إن كُتب
   createdAt, updatedAt               // ISO
