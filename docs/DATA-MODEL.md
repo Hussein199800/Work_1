@@ -17,7 +17,7 @@
 | `audit_committee_shares` | مبالغ الحصص الثابتة (للتوافق فقط) |
 | `audit_committee_rates` | نسب الحصص % من سعر الوكالة لكل نوع `{type:{ambulance, cooperation}}` |
 | `audit_council_share`, `audit_council_saved` | حصة المجلس |
-| `audit_audit_committee` | (23/11/2026) توقيعات التقارير (لجنة التدقيق فقط): `{chair, members:[4], chairTitle?, memberTitles?:[4], heading?}` — الصفات والعنوان إضافية، الغائب = الافتراضي. في النسخة الاحتياطية (`auditCommittee`) والمزامنة |
+| `audit_audit_committee` | (23/11/2026) توقيعات التقارير (لجنة التدقيق فقط): `{chair, members:[4], chairTitle?, memberTitles?:[4], heading?, signers?:[{title, name}]}` — الصفات والعنوان إضافية، الغائب = الافتراضي. `signers` (24/11/2026، إضافي، حتى 12) هي القائمة المعتمدة للإضافة والحذف والترتيب؛ الغائب = الرئيس + 4 أعضاء، والحقول القديمة تبقى متزامنة مع أول خمس خانات. في النسخة الاحتياطية (`auditCommittee`) والمزامنة |
 | `audit_fee_destinations` | (16/11/2026) جهة رسوم كل بند نقص: `{pleading, ambulance, aid, receipt}` = `"central"` (النقابة المركزية) أو `"branch"` (الفرع). الافتراضي: الطوابع للمركزية والإيصال للفرع. يدخل النسخة الاحتياطية (`feeDestinations`) ومزامنة Firebase |
 | `audit_record_draft` | مسودة السجل غير المحفوظ |
 | `currentUser`, `activeSection` | الجلسة والقسم المفتوح |
@@ -44,7 +44,7 @@
   source: { kind: "site"|"manual", name },   // اختياري (23/11/2026): سجل مسترد من موقع تدقيق آخر أو تدقيق يدوي (agencies = [])
   summary: { agencyCount, amountDue },       // اختياري: ملخص السجل المسترد كما في مصدره
   deduction: { amount, reason },     // اختياري (19/11/2026): المقاصة — حسم للمندوب وسببه؛ ينقص المطلوب منه فقط (getRecordNetDue)
-  payment: { status: "paid", at, by }, // اختياري (24/11/2026): حالة القبض؛ الغياب = غير مقبوض
+  payment: { status: "paid", at, by, day, receipt }, // اختياري (24/11/2026): حالة القبض؛ الغياب = غير مقبوض. day = تاريخ القبض «YYYY-MM-DD» (القديم بلا day: يوم at)، receipt = رقم إيصال القبض (اختياري)
   history: [{ at, by, action, detail }], // اختياري (24/11/2026): سجل التعديلات (create/edit/paid/unpaid/recovery/price/import)، حد 200 سطر
   recordNote: "نص",                  // اختياري (3/11/2026): ملاحظة على السجل كاملاً — مربع في التقرير وExcel؛ يُحفظ فقط إن كُتب
   createdAt, updatedAt               // ISO

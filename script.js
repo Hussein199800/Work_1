@@ -80,6 +80,10 @@ function isTransportEligible(type) {
 /* كل الأرقام والتواريخ بالأرقام الغربية (0-9) */
 const NUMBER_LOCALE = "ar-SY-u-nu-latn";
 
+/* رقم الإصدار (24/11/2026): يزداد مع كل نشر على main؛ يظهر في «حول الموقع» ونافذة «ما الجديد» */
+const APP_VERSION = "2026.11.24.3";
+const APP_VERSION_SEEN_KEY = "audit_ui_seen_version";
+
 /* =========================================================
 الإضافات
 ========================================================= */
@@ -415,7 +419,36 @@ const AUDIT_CHAIR_TITLE = "رئيس لجنة التدقيق";
 const AUDIT_MEMBER_TITLE = "عضو لجنة التدقيق";
 const AUDIT_SIGN_HEADING = "لجنة التدقيق";
 
+/* قائمة التوقيعات قابلة للإضافة والحذف والترتيب (24/11/2026، إضافي): signers = [{ title, name }].
+   الغائب = تُشتق من الحقول القديمة (الرئيس + 4 أعضاء). الحقول القديمة تبقى متزامنة مع أول خمس خانات
+   حتى يقرأها جهاز بنسخة أقدم. */
+const AUDIT_SIGNERS_MAX = 12;
+
 function normalizeAuditCommittee(value) {
+    const out = normalizeAuditCommitteeLegacy(value);
+    const v = value && typeof value === "object" ? value : {};
+    const text = function (x) { return typeof x === "string" ? x.trim() : (x == null ? "" : String(x).trim()); };
+    let signers;
+    if (Array.isArray(v.signers)) {
+        signers = v.signers.filter(function (x) { return x && typeof x === "object"; })
+            .map(function (x) { return { title: text(x.title), name: text(x.name) }; })
+            .slice(0, AUDIT_SIGNERS_MAX);
+    } else {
+        signers = [{ title: out.chairTitle, name: out.chair }].concat(out.members.map(function (name, i) { return { title: out.memberTitles[i], name: name }; }));
+    }
+    out.signers = signers;
+    /* مزامنة الحقول القديمة مع أول خمس خانات (الخانة الغائبة = فارغة بلا صفة، فلا تُطبع في نسخة قديمة) */
+    out.chair = signers[0] ? signers[0].name : "";
+    out.chairTitle = signers[0] ? signers[0].title : "";
+    for (let i = 0; i < AUDIT_COMMITTEE_MEMBERS; i++) {
+        const x = signers[i + 1];
+        out.members[i] = x ? x.name : "";
+        out.memberTitles[i] = x ? x.title : "";
+    }
+    return out;
+}
+
+function normalizeAuditCommitteeLegacy(value) {
     const v = value && typeof value === "object" ? value : {};
     const members = Array.isArray(v.members) ? v.members : [];
     const titles = Array.isArray(v.memberTitles) ? v.memberTitles : [];
@@ -437,6 +470,7 @@ function normalizeAuditCommittee(value) {
 /* الخانات الخمس بالترتيب: الرئيس ثم الأعضاء — { title, name } */
 function auditSigners(c) {
     c = c || auditCommittee;
+    if (Array.isArray(c.signers)) return c.signers.map(function (x) { return { title: x.title, name: x.name }; });
     const list = [{ title: c.chairTitle, name: c.chair }];
     c.members.forEach(function (name, i) { list.push({ title: c.memberTitles[i], name: name }); });
     return list;
@@ -640,6 +674,8 @@ function moveRecordsToIDBNow() {
 function persistRecords() {
     return persistRecordsNow().then(function (value) {
         try { markDataChanged(); } catch (e) {}
+        /* ملف «جدول التدقيق» اليومي: أول حفظ في اليوم (إن كان مفعّلاً) */
+        try { maybeDailyAuditTable(); } catch (e) {}
         /* رفع التغيير إلى Firebase (إن كانت المزامنة مفعّلة على هذا الجهاز) */
         try { fbScheduleSync(); } catch (e) {}
         return value;
@@ -1348,8 +1384,20 @@ function normalizeDigits(text) {
 
 /* هوية السجل (24/11/2026): رقم السجل ليس فريداً؛ نفس الرقم مسموح لمندوب أو مكتب آخر.
    التكرار الحقيقي = نفس الرقم + نفس المندوب + نفس المكتب (بعد تنظيف المسافات والأرقام). */
+/* توحيد الكتابة العربية للمقارنة والبحث (24/11/2026): الأرقام، التشكيل والتطويل، الهمزات (أ إ آ ← ا)،
+   التاء المربوطة (ة ← ه)، الألف المقصورة (ى ← ي)، المسافات. للمقارنة فقط — النص المحفوظ لا يتغير. */
+function arabicFold(text) {
+    return normalizeDigits(String(text == null ? "" : text))
+        .replace(/[\u064B-\u0652\u0640]/g, "")
+        .replace(/[أإآٱ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .replace(/ى/g, "ي")
+        .replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/* «أحمد باكير» و«احمد باكير» نفس المندوب، و«أسعد إبراهيم» و«أسعد ابراهيم» كذلك */
 function identityPart(text) {
-    return normalizeDigits(String(text == null ? "" : text)).replace(/\s+/g, " ").trim();
+    return arabicFold(text);
 }
 
 function recordIdentityKey(record) {
@@ -1936,6 +1984,7 @@ function syncPersonalize() {
     if (rec) rec.checked = rp.recovery;
     const sig = document.getElementById("prefSignatures");
     if (sig) sig.checked = rp.signatures;
+    try { syncAuditTablePrefs(); } catch (e) {}
     syncUiFontScaleLabel();
 }
 
@@ -6329,7 +6378,7 @@ onReady(function () {
 ========================================================= */
 
 const RECORDS_VIEW_KEY = "audit_ui_records_view";
-const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", repName: "all", office: "all", auditor: "all", source: "all", paid: "all", sort: "date-desc" };
+const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", repName: "all", office: "all", auditor: "all", source: "all", paid: "all", sort: "date-desc", cols: {} };
 
 function loadRecordsView() {
     try {
@@ -6367,7 +6416,7 @@ function compareRecordNumbers(a, b) {
 function getVisibleRecords() {
 
     const view = recordsView;
-    const q = normalizeDigits(document.getElementById("recordSearch")?.value || "").trim().toLowerCase();
+    const q = arabicFold(document.getElementById("recordSearch")?.value || "");
     const range = recordsPeriodRange(view);
 
     const list = records.filter(function (record) {
@@ -6385,8 +6434,10 @@ function getVisibleRecords() {
         /* حالة القبض */
         if (view.paid === "paid" && !isRecordPaid(record)) return false;
         if (view.paid === "unpaid" && isRecordPaid(record)) return false;
+        /* فلاتر الأعمدة (مثل Excel) */
+        if (!passesColFilters(record)) return false;
         if (q) {
-            const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, getRecordAuditors(record).join(" "), formatDay(getRecordDay(record))].join(" ")).toLowerCase();
+            const hay = arabicFold([record.recordNumber, record.officeName, record.representativeName, getRecordAuditors(record).join(" "), formatDay(getRecordDay(record)), paymentReceipt(record)].join(" "));
             if (hay.indexOf(q) === -1) return false;
         }
         return true;
@@ -6409,6 +6460,8 @@ function getVisibleRecords() {
 
     if (sorters[view.sort]) {
         list.sort(sorters[view.sort]);
+    } else if (colSorter(view.sort)) {
+        list.sort(colSorter(view.sort));
     }
 
     return list;
@@ -6484,7 +6537,7 @@ document.getElementById("recordsFilters")?.addEventListener("change", function (
 });
 
 function resetRecordsView() {
-    recordsView = Object.assign({}, RECORDS_VIEW_DEFAULT);
+    recordsView = Object.assign({}, RECORDS_VIEW_DEFAULT, { cols: {} });
     saveRecordsView();
     const search = document.getElementById("recordSearch");
     if (search) search.value = "";
@@ -6495,6 +6548,332 @@ document.getElementById("rfReset")?.addEventListener("click", resetRecordsView);
 document.getElementById("recordsTableBody")?.addEventListener("click", function (event) {
     if (event.target.closest("[data-rf-reset]")) resetRecordsView();
 });
+
+/* =========================================================
+فلاتر الأعمدة مثل Excel (24/11/2026، بطلب حسين)
+سهم في رأس كل عمود من جدول السجلات يفتح: ترتيب تصاعدي/تنازلي، وقائمة القيم بمربعات اختيار
+(مع بحث و«تحديد الكل»)، أو «من – إلى» للأرقام والتواريخ. فلاتر الأعمدة تتجمّع مع بعضها ومع
+فلاتر الشريط والبحث (و). تُحفظ في تفضيل الواجهة نفسه: recordsView.cols = { facet: { vals } | { from, to } }.
+تاريخ التدقيق = وقت حفظ السجل أول مرة (createdAt)؛ للمستردة = وقت إدخالها في الموقع.
+========================================================= */
+
+/* يوم حفظ السجل أول مرة «YYYY-MM-DD» (createdAt، وإلا سطر «إنشاء» أو «استيراد» في سجل التعديلات) */
+function recordSavedDay(record) {
+    let at = record && record.createdAt;
+    if (!at) {
+        const first = getRecordHistory(record).find(function (h) { return h.action === "create" || h.action === "import"; });
+        at = first && first.at;
+    }
+    const d = new Date(at || "");
+    return isNaN(d.getTime()) ? "" : toDayString(d);
+}
+
+function savedNoteHTML(record) {
+    const d = recordSavedDay(record);
+    if (!d) return "";
+    return '<small class="saved-note" title="' + (isRecoveredRecord(record) ? "تاريخ إدخاله في الموقع" : "تاريخ التدقيق (أول حفظ للسجل)") + '">' + (isRecoveredRecord(record) ? "أُدخل " : "دُقّق ") + dayDMY(d) + "</small>";
+}
+
+function recordDueValue(record) {
+    try { return isRecoveredRecord(record) ? recoveredSummary(record).amountDue : getRecordNetDue(record); } catch (e) { return 0; }
+}
+
+/* الأوجه القابلة للتصفية؛ col = عمود الجدول الذي يفتحها */
+const COL_FACETS = {
+    number: { col: "number", label: "رقم السجل", kind: "values", get: function (r) { return String(r.recordNumber == null ? "" : r.recordNumber).trim(); }, numeric: true },
+    numberRange: { col: "number", label: "رقم السجل (من – إلى)", kind: "num", get: function (r) { const n = parseFloat(normalizeDigits(r.recordNumber)); return isNaN(n) ? null : n; } },
+    office: { col: "office", label: "المكتب", kind: "values", get: function (r) { return String(r.officeName || "").trim(); } },
+    auditor: { col: "office", label: "المدقق", kind: "values", get: function (r) { return getRecordAuditors(r).length ? getRecordAuditors(r) : [""]; }, empty: "بلا مدقق" },
+    rep: { col: "rep", label: "المندوب", kind: "values", get: function (r) { return String(r.representativeName || "").trim(); } },
+    source: { col: "rep", label: "المصدر", kind: "values", get: function (r) { return isRecoveredRecord(r) ? RECOVERED_SOURCES[r.source.kind] : "تدقيق هذا الموقع"; } },
+    agencies: { col: "agencies", label: "عدد الوكالات", kind: "num", get: function (r) { return isRecoveredRecord(r) ? (recoveredSummary(r).agencyCount || null) : (r.agencies || []).length; } },
+    base: { col: "base", label: "سعر الوكالات", kind: "num", get: function (r) { return isRecoveredRecord(r) ? null : getRecordBaseTotal(r); } },
+    total: { col: "total", label: "إجمالي السجل", kind: "num", get: function (r) { return isRecoveredRecord(r) ? null : getRecordGrandTotal(r); } },
+    due: { col: "due", label: "المطلوب من المندوب", kind: "num", get: recordDueValue },
+    paid: { col: "due", label: "حالة القبض", kind: "values", get: function (r) { return isRecordPaid(r) ? "مقبوض" : "غير مقبوض"; } },
+    paidDay: { col: "due", label: "تاريخ القبض", kind: "date", get: function (r) { return paymentDay(r) || null; } },
+    receipt: { col: "due", label: "رقم إيصال القبض", kind: "values", get: function (r) { return paymentReceipt(r); }, empty: "بلا إيصال" },
+    date: { col: "date", label: "تاريخ السجل", kind: "date", get: function (r) { return r.recordDate ? getRecordDay(r) : null; } },
+    saved: { col: "date", label: "تاريخ التدقيق (الحفظ)", kind: "date", get: function (r) { return recordSavedDay(r) || null; } }
+};
+
+const COL_TITLES = { number: "رقم السجل", office: "المكتب", rep: "المندوب", agencies: "عدد الوكالات", base: "سعر الوكالات", total: "إجمالي السجل", due: "المطلوب من المندوب", date: "التاريخ" };
+/* ترتيب كل عمود حسب وجهه الأساسي */
+const COL_SORT_FACET = { number: "numberRange", office: "office", rep: "rep", agencies: "agencies", base: "base", total: "total", due: "due", date: "date" };
+
+function colFilters() {
+    return recordsView.cols && typeof recordsView.cols === "object" ? recordsView.cols : {};
+}
+
+function facetValues(facet, record) {
+    const v = COL_FACETS[facet].get(record);
+    return Array.isArray(v) ? v : [v];
+}
+
+/* هل يمرّ السجل من فلتر وجه واحد */
+function passesFacet(key, f, record) {
+    const def = COL_FACETS[key];
+    if (!def || !f) return true;
+    if (def.kind === "values") {
+        if (!Array.isArray(f.vals)) return true;
+        return facetValues(key, record).some(function (v) { return f.vals.indexOf(v == null ? "" : String(v)) !== -1; });
+    }
+    const v = def.get(record);
+    const has = function (x) { return x !== undefined && x !== null && x !== ""; };
+    if (!has(f.from) && !has(f.to)) return true;
+    if (v === null || v === undefined || v === "") return false;
+    if (def.kind === "num") {
+        if (has(f.from) && v < Number(f.from)) return false;
+        if (has(f.to) && v > Number(f.to)) return false;
+    } else {
+        if (has(f.from) && v < f.from) return false;
+        if (has(f.to) && v > f.to) return false;
+    }
+    return true;
+}
+
+function passesColFilters(record) {
+    const cols = colFilters();
+    return Object.keys(cols).every(function (k) { return passesFacet(k, cols[k], record); });
+}
+
+function activeColFilterKeys() {
+    const cols = colFilters();
+    return Object.keys(cols).filter(function (k) {
+        const f = cols[k], def = COL_FACETS[k];
+        if (!def || !f) return false;
+        return def.kind === "values" ? Array.isArray(f.vals) : (f.from !== "" && f.from != null) || (f.to !== "" && f.to != null);
+    });
+}
+
+/* ترتيب «col:facet:asc|desc» */
+function colSorter(sort) {
+    const m = /^col:([a-zA-Z]+):(asc|desc)$/.exec(sort || "");
+    if (!m || !COL_FACETS[m[1]]) return null;
+    const def = COL_FACETS[m[1]], dir = m[2] === "asc" ? 1 : -1;
+    return function (a, b) {
+        let x = def.get(a), y = def.get(b);
+        if (Array.isArray(x)) x = x.join("، ");
+        if (Array.isArray(y)) y = y.join("، ");
+        const ex = x === null || x === undefined || x === "", ey = y === null || y === undefined || y === "";
+        if (ex !== ey) return ex ? 1 : -1;   /* الفارغ في الآخر دائماً */
+        let c;
+        if (typeof x === "number" && typeof y === "number") c = x - y;
+        else c = String(x).localeCompare(String(y), "ar", { numeric: true });
+        return c * dir || compareRecordNumbers(a, b);
+    };
+}
+
+/* ---------- النافذة المنبثقة ---------- */
+
+let colPopState = null;
+
+function closeColFilterPop() {
+    const pop = document.getElementById("colFilterPop");
+    if (pop) {
+        const opener = pop._opener;
+        pop.remove();
+        if (opener) { opener.setAttribute("aria-expanded", "false"); }
+    }
+    colPopState = null;
+}
+
+function facetOptions(key) {
+    const def = COL_FACETS[key];
+    const counts = {};
+    records.forEach(function (r) {
+        facetValues(key, r).forEach(function (v) { v = v == null ? "" : String(v); counts[v] = (counts[v] || 0) + 1; });
+    });
+    return Object.keys(counts).sort(function (a, b) {
+        if (!a) return 1; if (!b) return -1;
+        return def.numeric ? a.localeCompare(b, "en", { numeric: true }) : a.localeCompare(b, "ar", { numeric: true });
+    }).map(function (v) { return { value: v, label: v || def.empty || "(فارغ)", count: counts[v] }; });
+}
+
+function colFacetHTML(key) {
+    const def = COL_FACETS[key];
+    const f = colFilters()[key] || {};
+    const title = '<p class="cf-facet-title">' + escapeHTML(def.label) + "</p>";
+    if (def.kind === "values") {
+        const opts = facetOptions(key);
+        const sel = Array.isArray(f.vals) ? f.vals : null;
+        const allOn = !sel || opts.every(function (o) { return sel.indexOf(o.value) !== -1; });
+        return '<div class="cf-facet" data-facet="' + key + '">' + title +
+            (opts.length > 8 ? '<input type="search" class="cf-search" placeholder="بحث في القيم…" aria-label="بحث في قيم ' + escapeHTML(def.label) + '">' : "") +
+            '<label class="cf-opt cf-all"><input type="checkbox" data-cf-all' + (allOn ? " checked" : "") + "> <b>تحديد الكل</b></label>" +
+            '<div class="cf-list">' + opts.map(function (o) {
+                const on = !sel || sel.indexOf(o.value) !== -1;
+                return '<label class="cf-opt" data-fold="' + escapeHTML(arabicFold(o.label)) + '"><input type="checkbox" data-cf-val="' + escapeHTML(o.value) + '"' + (on ? " checked" : "") + "> <span>" + escapeHTML(o.label) + '</span><small>' + o.count + "</small></label>";
+            }).join("") + "</div></div>";
+    }
+    const type = def.kind === "date" ? "date" : "text";
+    const extra = def.kind === "date" ? ' lang="en-GB" dir="ltr"' : ' inputmode="decimal" dir="ltr" data-num';
+    return '<div class="cf-facet" data-facet="' + key + '">' + title + '<div class="cf-range">' +
+        '<label class="input-group"><span>من</span><input type="' + type + '" data-cf-from value="' + escapeHTML(f.from == null ? "" : f.from) + '"' + extra + "></label>" +
+        '<label class="input-group"><span>إلى</span><input type="' + type + '" data-cf-to value="' + escapeHTML(f.to == null ? "" : f.to) + '"' + extra + "></label>" +
+        "</div></div>";
+}
+
+function openColFilterPop(button) {
+    const col = button.dataset.colFilter;
+    const wasOpen = colPopState && colPopState.col === col;
+    closeColFilterPop();
+    if (wasOpen) return;
+    const facets = Object.keys(COL_FACETS).filter(function (k) { return COL_FACETS[k].col === col; });
+    const pop = document.createElement("div");
+    pop.id = "colFilterPop";
+    pop.className = "col-filter-pop no-print";
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "تصفية وترتيب عمود " + COL_TITLES[col]);
+    pop._opener = button;
+    const sf = COL_SORT_FACET[col];
+    pop.innerHTML =
+        '<div class="cf-sort">' +
+            '<button type="button" class="act-btn' + (recordsView.sort === "col:" + sf + ":asc" ? " is-on" : "") + '" data-cf-sort="asc"><i class="ti ti-sort-ascending" aria-hidden="true"></i> ترتيب تصاعدي</button>' +
+            '<button type="button" class="act-btn' + (recordsView.sort === "col:" + sf + ":desc" ? " is-on" : "") + '" data-cf-sort="desc"><i class="ti ti-sort-descending" aria-hidden="true"></i> تنازلي</button>' +
+        "</div>" +
+        facets.map(colFacetHTML).join("") +
+        '<div class="cf-actions">' +
+            '<button type="button" class="primary-btn" data-cf-apply>تطبيق</button>' +
+            '<button type="button" class="secondary-btn" data-cf-clear>مسح فلتر العمود</button>' +
+        "</div>";
+    document.body.appendChild(pop);
+    colPopState = { col: col, facets: facets };
+    button.setAttribute("aria-expanded", "true");
+    const r = button.getBoundingClientRect();
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    let left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8);
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    (pop.querySelector(".cf-search") || pop.querySelector("input") || pop.querySelector("button"))?.focus();
+}
+
+function readColFilterPop() {
+    const pop = document.getElementById("colFilterPop");
+    const cols = Object.assign({}, colFilters());
+    pop.querySelectorAll(".cf-facet").forEach(function (box) {
+        const key = box.dataset.facet, def = COL_FACETS[key];
+        if (def.kind === "values") {
+            const all = box.querySelectorAll("[data-cf-val]");
+            const on = Array.prototype.filter.call(all, function (c) { return c.checked; }).map(function (c) { return c.dataset.cfVal; });
+            if (on.length === all.length) delete cols[key]; else cols[key] = { vals: on };
+        } else {
+            const norm = function (v) { v = String(v || "").trim(); return def.kind === "num" ? (v === "" ? "" : String(number(v))) : v; };
+            const from = norm(box.querySelector("[data-cf-from]").value), to = norm(box.querySelector("[data-cf-to]").value);
+            if (from === "" && to === "") delete cols[key]; else cols[key] = { from: from, to: to };
+        }
+    });
+    return cols;
+}
+
+function applyColFilters(cols) {
+    recordsView.cols = cols;
+    saveRecordsView();
+    renderRecords();
+}
+
+document.addEventListener("click", function (event) {
+    const btn = event.target.closest("[data-col-filter]");
+    if (btn) { openColFilterPop(btn); return; }
+    const pop = document.getElementById("colFilterPop");
+    if (!pop) return;
+    if (!pop.contains(event.target)) { closeColFilterPop(); return; }
+    const sort = event.target.closest("[data-cf-sort]");
+    if (sort) {
+        recordsView.sort = "col:" + COL_SORT_FACET[colPopState.col] + ":" + sort.dataset.cfSort;
+        const cols = readColFilterPop();
+        closeColFilterPop();
+        applyColFilters(cols);
+        return;
+    }
+    if (event.target.closest("[data-cf-apply]")) {
+        const cols = readColFilterPop();
+        if (Object.keys(cols).some(function (k) { return COL_FACETS[k].kind === "values" && cols[k].vals.length === 0; })) {
+            notify("اختر قيمة واحدة على الأقل، أو «تحديد الكل».", "warning");
+            return;
+        }
+        const opener = pop._opener;
+        closeColFilterPop();
+        applyColFilters(cols);
+        document.querySelector('[data-col-filter="' + (opener && opener.dataset.colFilter) + '"]')?.focus();
+        return;
+    }
+    if (event.target.closest("[data-cf-clear]")) {
+        const cols = Object.assign({}, colFilters());
+        colPopState.facets.forEach(function (k) { delete cols[k]; });
+        if (/^col:/.test(recordsView.sort) && COL_FACETS[recordsView.sort.split(":")[1]].col === colPopState.col) recordsView.sort = RECORDS_VIEW_DEFAULT.sort;
+        closeColFilterPop();
+        applyColFilters(cols);
+    }
+});
+
+document.addEventListener("change", function (event) {
+    const pop = document.getElementById("colFilterPop");
+    if (!pop || !pop.contains(event.target)) return;
+    const box = event.target.closest(".cf-facet");
+    if (event.target.matches("[data-cf-all]")) {
+        box.querySelectorAll(".cf-opt:not(.cf-all):not([hidden]) [data-cf-val]").forEach(function (c) { c.checked = event.target.checked; });
+    } else if (event.target.matches("[data-cf-val]")) {
+        const all = box.querySelector("[data-cf-all]");
+        if (all) all.checked = Array.prototype.every.call(box.querySelectorAll("[data-cf-val]"), function (c) { return c.checked; });
+    }
+});
+
+document.addEventListener("input", function (event) {
+    if (!event.target.matches("#colFilterPop .cf-search")) return;
+    const q = arabicFold(event.target.value);
+    event.target.closest(".cf-facet").querySelectorAll(".cf-opt:not(.cf-all)").forEach(function (l) { l.hidden = !!q && l.dataset.fold.indexOf(q) === -1; });
+});
+
+document.addEventListener("keydown", function (event) {
+    const pop = document.getElementById("colFilterPop");
+    if (!pop) return;
+    if (event.key === "Escape") { const o = pop._opener; closeColFilterPop(); o?.focus(); }
+    if (event.key === "Enter" && pop.contains(event.target) && event.target.matches("input:not([type=checkbox])")) {
+        event.preventDefault();
+        pop.querySelector("[data-cf-apply]").click();
+    }
+});
+
+window.addEventListener("resize", closeColFilterPop);
+
+/* أزرار الأسهم في رؤوس الأعمدة، وشريط الفلاتر النشطة */
+function syncColFilterUI() {
+    const active = activeColFilterKeys();
+    document.querySelectorAll("[data-col-filter]").forEach(function (b) {
+        const col = b.dataset.colFilter;
+        const on = active.some(function (k) { return COL_FACETS[k].col === col; });
+        const sorted = /^col:/.test(recordsView.sort) && COL_FACETS[recordsView.sort.split(":")[1]] && COL_FACETS[recordsView.sort.split(":")[1]].col === col;
+        b.classList.toggle("is-active", on);
+        b.classList.toggle("is-sorted", sorted);
+        b.innerHTML = '<i class="ti ' + (on ? "ti-filter-filled" : sorted ? (recordsView.sort.slice(-3) === "asc" ? "ti-sort-ascending" : "ti-sort-descending") : "ti-chevron-down") + '" aria-hidden="true"></i>';
+        b.setAttribute("aria-label", "تصفية وترتيب «" + COL_TITLES[col] + "»" + (on ? " (مفلتر)" : ""));
+    });
+    const bar = document.getElementById("colFilterChips");
+    if (!bar) return;
+    const cols = colFilters();
+    bar.hidden = !active.length;
+    bar.innerHTML = active.length ? '<span class="cf-chips-label"><i class="ti ti-filter" aria-hidden="true"></i> فلاتر الأعمدة:</span>' + active.map(function (k) {
+        const def = COL_FACETS[k], f = cols[k];
+        let text;
+        if (def.kind === "values") text = f.vals.length <= 2 ? f.vals.map(function (v) { return v || def.empty || "(فارغ)"; }).join("، ") : f.vals.length + " قيم";
+        else {
+            const show = function (v) { return def.kind === "date" ? dayDMY(v) : Number(v).toLocaleString(NUMBER_LOCALE); };
+            text = (f.from !== "" ? "من " + show(f.from) : "") + (f.from !== "" && f.to !== "" ? " " : "") + (f.to !== "" ? "إلى " + show(f.to) : "");
+        }
+        return '<button type="button" class="cf-chip" data-cf-remove="' + k + '" aria-label="إزالة فلتر ' + escapeHTML(def.label) + '">' + escapeHTML(def.label) + ": " + escapeHTML(text) + ' <i class="ti ti-x" aria-hidden="true"></i></button>';
+    }).join("") + '<button type="button" class="act-btn" data-cf-remove-all><i class="ti ti-filter-off" aria-hidden="true"></i> مسح فلاتر الأعمدة</button>' : "";
+}
+
+document.getElementById("colFilterChips")?.addEventListener("click", function (event) {
+    const one = event.target.closest("[data-cf-remove]");
+    if (one) { const cols = Object.assign({}, colFilters()); delete cols[one.dataset.cfRemove]; applyColFilters(cols); return; }
+    if (event.target.closest("[data-cf-remove-all]")) applyColFilters({});
+});
+
+window.openColFilterPop = openColFilterPop;
 
 function renderRecords() {
 
@@ -6517,6 +6896,7 @@ function renderRecords() {
             : "";
     }
     document.getElementById("rfReset")?.toggleAttribute("hidden", !filtered && recordsView.sort === RECORDS_VIEW_DEFAULT.sort);
+    syncColFilterUI();
 
     if (records.length && !visible.length) {
         tbody.innerHTML =
@@ -6563,7 +6943,7 @@ function renderRecords() {
                 '<td class="num">' + (sum.agencyCount ? '<span class="agency-count">' + sum.agencyCount + "</span>" : "—") + "</td>" +
                 '<td class="num">—</td><td class="num">—</td>' +
                 '<td class="num">' + (sum.amountDue ? money(sum.amountDue) + '<small class="deduction-note">حسب المصدر</small>' : "—") + paymentControlHTML(record, canEdit) + "</td>" +
-                '<td class="date-cell">' + formatDay(getRecordDay(record)) + "</td>" +
+                '<td class="date-cell">' + (record.recordDate ? formatDay(getRecordDay(record)) : "—") + savedNoteHTML(record) + "</td>" +
                 '<td><div class="action-group">' +
                     '<button type="button" class="act-btn act-primary" onclick="showRecoveredDoc(\'' + record.id + '\')"><i class="ti ti-eye" aria-hidden="true"></i> عرض</button>' +
                     (canEdit ? '<button type="button" class="act-btn act-edit" onclick="openRecoveredForm(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
@@ -6582,7 +6962,7 @@ function renderRecords() {
             '<td class="num">' + money(getRecordBaseTotal(record)) + "</td>" +
             '<td class="num">' + money(getRecordGrandTotal(record)) + "</td>" +
             '<td class="num money-cell">' + money(getRecordNetDue(record)) + (getRecordDeduction(record).amount > 0 ? '<small class="deduction-note" title="' + escapeHTML(getRecordDeduction(record).reason) + '">بعد حسم ' + money(getRecordDeduction(record).amount) + "</small>" : "") + paymentControlHTML(record, canEdit) + "</td>" +
-            '<td class="date-cell">' + date + "</td>" +
+            '<td class="date-cell">' + date + savedNoteHTML(record) + "</td>" +
             /* الإجراءات الأكثر استخداماً ظاهرة، والباقي في قائمة ⋮ */
             '<td><div class="action-group">' +
                 '<button type="button" class="act-btn act-primary" onclick="showFinalRecordReport(\'' + record.id + '\', \'summary\')"><i class="ti ti-file-text" aria-hidden="true"></i> التقرير</button>' +
@@ -6629,6 +7009,94 @@ function addRecordHistory(record, action, detail) {
 
 function isRecordPaid(record) {
     return !!(record && record.payment && record.payment.status === "paid");
+}
+
+/* بيانات القبض (24/11/2026، إضافية): payment.day = تاريخ القبض «YYYY-MM-DD» كما في الإيصال،
+   payment.receipt = رقم إيصال القبض. السجلات القديمة بلا day: تاريخ القبض = يوم payment.at. */
+function paymentDay(record) {
+    if (!isRecordPaid(record)) return "";
+    const p = record.payment;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(p.day || "")) return p.day;
+    const d = new Date(p.at);
+    return isNaN(d.getTime()) ? "" : toDayString(d);
+}
+
+function paymentReceipt(record) {
+    return isRecordPaid(record) ? String(record.payment.receipt || "").trim() : "";
+}
+
+/* «17/09/2026» أو «2026-09-17» (بأرقام عربية أو غربية) إلى «YYYY-MM-DD»؛ "" إن لم يكن تاريخاً صحيحاً */
+function parsePaymentDayInput(text) {
+    const t = normalizeDigits(String(text || "")).replace(/[\u200e\u200f\u061c\s]/g, "");
+    let y, m, d, mm;
+    if ((mm = t.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/))) { y = +mm[1]; m = +mm[2]; d = +mm[3]; }
+    else if ((mm = t.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/))) { d = +mm[1]; m = +mm[2]; y = +mm[3]; }
+    else return "";
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return "";
+    return toDayString(dt);
+}
+
+/* «YYYY-MM-DD» ← «DD/MM/YYYY» (نص ثابت بلا علامات اتجاه، كما في الإيصال) */
+function dayDMY(day) {
+    const p = String(day || "").split("-");
+    return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : "";
+}
+
+function paymentText(record) {
+    if (!isRecordPaid(record)) return "غير مقبوض";
+    const day = paymentDay(record), receipt = paymentReceipt(record);
+    return "مقبوض" + (day ? " بتاريخ " + dayDMY(day) : "") + (receipt ? " — إيصال " + receipt : " — بلا رقم إيصال");
+}
+
+/* نافذة رقم الإيصال وتاريخ القبض؛ تُرجع { receipt, day } أو null عند الإلغاء */
+function askPaymentDetails(record, title) {
+    const current = isRecordPaid(record) ? record.payment : {};
+    const ask = function (receipt, dayText, warn) {
+        return appChoose({
+            title: title,
+            message: (warn ? warn + " " : "") + "السجل " + record.recordNumber + " — " + (record.representativeName || "") + " (" + (record.officeName || "") + "). رقم الإيصال اختياري، ويمكن إضافته لاحقاً من قائمة ⋮.",
+            fields: [
+                { id: "receipt", label: "رقم إيصال القبض", value: receipt, numeric: true },
+                { id: "day", label: "تاريخ القبض (يوم/شهر/سنة)", value: dayText, numeric: true }
+            ],
+            choices: [{ value: "save", label: "حفظ", kind: "primary" }]
+        }).then(function (res) {
+            if (!res || res.choice !== "save") return null;
+            const dayInput = String(res.values.day || "").trim();
+            const day = dayInput ? parsePaymentDayInput(dayInput) : todayDay();
+            if (!day) return ask(res.values.receipt, dayInput, "التاريخ غير صحيح، اكتبه مثل 22/09/2026.");
+            return { receipt: normalizeDigits(String(res.values.receipt || "")).trim(), day: day };
+        });
+    };
+    return ask(current.receipt || "", dayDMY(paymentDay(record) || todayDay()), "");
+}
+
+/* تعديل رقم الإيصال وتاريخ القبض لسجل مقبوض (من قائمة ⋮) */
+function editRecordPayment(id) {
+    const index = records.findIndex(function (r) { return r.id === id; });
+    if (index === -1 || !isRecordPaid(records[index])) return;
+    if (!currentUser || currentUser.role === "viewer") { notify("تعديل بيانات القبض غير متاح للمشاهد.", "error"); return; }
+    askPaymentDetails(records[index], "بيانات القبض").then(function (details) {
+        if (!details) return;
+        const old = records[index];
+        if ((old.payment.receipt || "") === details.receipt && paymentDay(old) === details.day) return;
+        const updated = JSON.parse(JSON.stringify(old));
+        updated.payment.day = details.day;
+        if (details.receipt) updated.payment.receipt = details.receipt; else delete updated.payment.receipt;
+        updated.updatedAt = new Date().toISOString();
+        addRecordHistory(updated, "paid", "تعديل بيانات القبض: " + paymentText(old) + " ← " + paymentText(updated));
+        const before = records.slice();
+        records[index] = updated;
+        persistRecords().then(function () {
+            renderRecords();
+            notify("حُفظت بيانات القبض للسجل " + escapeHTML(updated.recordNumber) + " ✓", "success", 3000);
+        }).catch(function (error) {
+            records = before;
+            renderRecords();
+            notify("<strong>لم تُحفظ بيانات القبض</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        });
+    });
 }
 
 function formatDateTime(iso) {
@@ -6684,14 +7152,17 @@ function setRecordPaid(id, paid, control) {
     }
     const old = records[index];
     if (isRecordPaid(old) === !!paid) return;
-    const apply = function () {
+    const apply = function (details) {
         const updated = JSON.parse(JSON.stringify(old));
         const now = new Date().toISOString();
-        if (paid) updated.payment = { status: "paid", at: now, by: currentUser.username };
+        if (paid) {
+            updated.payment = { status: "paid", at: now, by: currentUser.username, day: details.day };
+            if (details.receipt) updated.payment.receipt = details.receipt;
+        }
         else delete updated.payment;
         updated.updatedAt = now;
         addRecordHistory(updated, paid ? "paid" : "unpaid",
-            paid ? "صار مقبوضاً بتاريخ " + formatDateTime(now) : "أُعيد إلى «غير مقبوض» (كان مقبوضاً منذ " + formatDateTime(old.payment && old.payment.at) + ")");
+            paid ? "صار مقبوضاً بتاريخ " + dayDMY(details.day) + (details.receipt ? " — إيصال " + details.receipt : " — بلا رقم إيصال") : "أُعيد إلى «غير مقبوض» (كان " + paymentText(old) + ")");
         const before = records.slice();
         records[index] = updated;
         return persistRecords().then(function () {
@@ -6704,10 +7175,16 @@ function setRecordPaid(id, paid, control) {
             notify("<strong>لم تُحفظ حالة القبض</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
         });
     };
-    if (paid) { apply(); return; }
+    if (paid) {
+        askPaymentDetails(old, "تحديد السجل «مقبوضاً»").then(function (details) {
+            if (details) apply(details);
+            else if (control) control.value = "unpaid";
+        });
+        return;
+    }
     appConfirm({
         title: "إرجاع السجل إلى «غير مقبوض»",
-        message: "السجل " + old.recordNumber + " مسجّل مقبوضاً بتاريخ " + formatDateTime(old.payment && old.payment.at) + ". هل تريد إرجاعه إلى غير مقبوض؟ (يُكتب ذلك في سجل التعديلات)",
+        message: "السجل " + old.recordNumber + " " + paymentText(old) + ". هل تريد إرجاعه إلى غير مقبوض؟ (يُكتب ذلك في سجل التعديلات)",
         confirmText: "إرجاع إلى غير مقبوض",
         cancelText: "إلغاء"
     }).then(function (ok) {
@@ -6718,12 +7195,14 @@ function setRecordPaid(id, paid, control) {
 
 function paymentControlHTML(record, canEdit) {
     const paid = isRecordPaid(record);
-    const title = paid ? "مقبوض بتاريخ " + formatDateTime(record.payment.at) + (record.payment.by ? " — " + record.payment.by : "") : "غير مقبوض";
-    if (!canEdit) return '<span class="pay-badge ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '">' + (paid ? "مقبوض" : "غير مقبوض") + "</span>";
+    const title = paymentText(record) + (paid && record.payment.by ? " — " + record.payment.by : "");
+    const receipt = paymentReceipt(record);
+    const note = paid ? '<small class="pay-receipt">' + (receipt ? "إيصال " + escapeHTML(receipt) : "بلا إيصال") + "</small>" : "";
+    if (!canEdit) return '<span class="pay-badge ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '">' + (paid ? "مقبوض" : "غير مقبوض") + "</span>" + note;
     return '<select class="pay-select ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '" aria-label="حالة القبض للسجل ' + escapeHTML(record.recordNumber) + '"' +
         " onchange=\"setRecordPaid('" + escapeHTML(record.id) + "', this.value === 'paid', this)\">" +
         '<option value="unpaid"' + (paid ? "" : " selected") + ">غير مقبوض</option>" +
-        '<option value="paid"' + (paid ? " selected" : "") + ">مقبوض</option></select>";
+        '<option value="paid"' + (paid ? " selected" : "") + ">مقبوض</option></select>" + note;
 }
 
 /* نافذة سجل التعديلات */
@@ -6742,13 +7221,14 @@ function showRecordHistory(id) {
     document.getElementById("modalContent").innerHTML =
         '<div class="report-actions no-print"><button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button></div>' +
         '<div class="history-view"><h2>سجل التعديلات — السجل ' + escapeHTML(record.recordNumber) + "</h2>" +
-        '<p class="history-sub">' + escapeHTML(record.representativeName || "") + " — " + escapeHTML(record.officeName || "") + " — الحالة: <b>" + (isRecordPaid(record) ? "مقبوض منذ " + escapeHTML(formatDateTime(record.payment.at)) : "غير مقبوض") + "</b></p>" +
+        '<p class="history-sub">' + escapeHTML(record.representativeName || "") + " — " + escapeHTML(record.officeName || "") + " — الحالة: <b>" + escapeHTML(paymentText(record)) + "</b></p>" +
         '<ol class="history-list">' + rows + (list.length && list[list.length - 1].action === "create" ? "" : older) + "</ol></div>";
     document.getElementById("recordModal").classList.remove("hidden");
     requestAnimationFrame(function () { applyExpandables(document.getElementById("modalContent")); });
 }
 
 window.setRecordPaid = setRecordPaid;
+window.editRecordPayment = editRecordPayment;
 window.showRecordHistory = showRecordHistory;
 
 /* =========================================================
@@ -7197,9 +7677,11 @@ function recordsMatchingData() {
     records.forEach(function (r) {
         const n = identityPart(r.recordNumber);
         if (!/^\d+$/.test(n)) return;
-        const rep = identityPart(r.representativeName) || "—";
-        const office = identityPart(r.officeName) || "—";
-        const key = rep + "\u0001" + office;
+        /* المفتاح موحّد الكتابة، والعرض بالاسم كما كُتب */
+        const shown = function (t) { return normalizeDigits(String(t == null ? "" : t)).replace(/\s+/g, " ").trim(); };
+        const rep = shown(r.representativeName) || "—";
+        const office = shown(r.officeName) || "—";
+        const key = identityPart(r.representativeName) + "\u0001" + identityPart(r.officeName);
         (groups[key] = groups[key] || { rep: rep, office: office, nums: new Set() }).nums.add(Number(n));
     });
     const sequences = [];
@@ -7304,7 +7786,9 @@ const CR_COLUMNS = {
         { key: "repType", label: "نوع المندوب", get: function (r) { return r.representativeType === "external" ? "خارجي" : "داخلي"; } },
         { key: "source", label: "المصدر", get: function (r) { return recoveredSourceText(r); } },
         { key: "paid", label: "حالة القبض", get: function (r) { return isRecordPaid(r) ? "مقبوض" : "غير مقبوض"; } },
-        { key: "paidAt", label: "تاريخ القبض", get: function (r) { return isRecordPaid(r) ? formatDateTime(r.payment.at) : ""; } },
+        { key: "paidAt", label: "تاريخ القبض", get: function (r) { return isRecordPaid(r) ? formatDay(paymentDay(r)) : ""; } },
+        { key: "paidReceipt", label: "رقم إيصال القبض", get: function (r) { return paymentReceipt(r); } },
+        { key: "savedAt", label: "تاريخ التدقيق (الحفظ)", get: function (r) { const d = recordSavedDay(r); return d ? formatDay(d) : ""; } },
         { key: "agencies", label: "عدد الوكالات", type: "num", get: function (r, st) { return isRecoveredRecord(r) ? recoveredSummary(r).agencyCount : st.agencies.length; } },
         { key: "active", label: "الفعالة", type: "num", get: function (r, st) { return st.active.length - st.missingAgenciesCount; } },
         { key: "lost", label: "المفقودة", type: "num", get: function (r, st) { return st.missingAgenciesCount; } },
@@ -8097,6 +8581,7 @@ function openRecoveredMenu(button) {
         items.push({ icon: "ti-file-download", text: "تنزيل قالب الاستيراد (CSV)", run: function () { downloadRecoveredTemplate(); } });
     }
     items.push({ icon: "ti-list-check", text: "مطابقة السجلات (من دُقّق ومن لا)", run: function () { showRecordsMatching(); } });
+    items.push({ icon: "ti-file-spreadsheet", text: "تنزيل جدول التدقيق (Excel)", run: function () { exportAuditTable(false); } });
     openActionMenu(button, items);
 }
 
@@ -8124,6 +8609,9 @@ function openRecordMenu(button, id) {
         items.push({ icon: "ti-edit", text: "تعديل السجل", run: function () { editRecord(id); } });
     }
 
+    if (canEdit && isRecordPaid(records.find(function (r) { return r.id === id; }))) {
+        items.push({ icon: "ti-receipt", text: "بيانات القبض (الإيصال والتاريخ)", run: function () { editRecordPayment(id); } });
+    }
     items.push({ icon: "ti-history", text: "سجل التعديلات", run: function () { showRecordHistory(id); } });
 
     if (canDelete) {
@@ -8170,7 +8658,8 @@ function openRecordMenu(button, id) {
 
 document.addEventListener("click", function (event) {
     const menu = document.getElementById("recordMenu");
-    if (menu && !menu.contains(event.target) && !event.target.closest(".act-more")) {
+    /* زر الفتح نفسه لا يُغلق قائمته (كان زر «استيراد ومطابقة» يفتحها ثم تُغلق فوراً، 24/11/2026) */
+    if (menu && !menu.contains(event.target) && !event.target.closest(".act-more") && !(menu._opener && menu._opener.contains(event.target))) {
         closeRecordMenu();
     }
 });
@@ -9253,7 +9742,8 @@ function recoveryPageHTML(record, stats, mode, forPrint) {
     html += "<p>وبذلك يُعدّ النقص المذكور مُستدرَكاً ومُسدّداً أصولاً، ولا تجوز المطالبة به مجدداً. " +
         "وقد حُرّر هذا البيان للعلم والاعتماد عند أي تدقيق لاحق.</p></div>";
 
-    html += recordDocSignatures();
+    /* هذا آخر التقرير عند طباعته: التوقيع هنا فقط */
+    if (included) html += recordDocSignatures();
     html += "</section>";
     return html;
 }
@@ -9526,10 +10016,12 @@ function buildFinalRecordReport(record, mode, forPrint) {
     html += '<section class="doc-section">' + secTitle("حصص لجنتي الإسعاف والتعاون") +
         '<div class="table-wrapper">' + committeesByTypeTableHTML(stats.committees) + "</div></section>";
 
-    html += recordDocSignatures();
+    /* التوقيع مرة واحدة في آخر التقرير (24/11/2026، بطلب حسين): إن طُبع «بيان استدراك النقص» فالتوقيع في آخره فقط */
+    const recoveryHTML = recoveryPageHTML(record, stats, mode, forPrint);
+    if (!(recoveryHTML && reportPrefs().recovery)) html += recordDocSignatures();
 
     /* صفحة مستقلة بعد الجداول: بيان استدراك النقص */
-    html += recoveryPageHTML(record, stats, mode, forPrint);
+    html += recoveryHTML;
 
     html += "</div>";
 
@@ -14761,24 +15253,68 @@ renderBulkPrice();
 لجنة التدقيق (أسماء التوقيعات) في صفحة الأسعار
 ========================================================= */
 
+/* صفوف التوقيعات تُبنى من القائمة: لكل صف صفة واسم وأزرار ↑ ↓ حذف؛ وزر «إضافة توقيع» */
 function renderAuditCommitteeForm(source) {
     const c = source || auditCommittee;
-    const set = function (id, v) { const el = document.getElementById(id); if (el) el.value = v || ""; };
-    set("acHeading", c.heading);
-    auditSigners(c).forEach(function (x, i) { set("acTitle" + i, x.title); set("acName" + i, x.name); });
+    const heading = document.getElementById("acHeading");
+    if (heading) heading.value = c.heading || "";
+    const box = document.getElementById("auditSignersForm");
+    if (!box) return;
+    const list = auditSigners(c);
+    box.innerHTML = list.map(function (x, i) {
+        return '<div class="sign-row" data-sign-row="' + i + '"><b>' + (i + 1) + "</b>" +
+            '<label class="input-group"><span>الصفة</span><input type="text" id="acTitle' + i + '" value="' + escapeHTML(x.title) + '" autocomplete="off"></label>' +
+            '<label class="input-group"><span>الاسم</span><input type="text" id="acName' + i + '" value="' + escapeHTML(x.name) + '" autocomplete="off"></label>' +
+            '<span class="sign-row-actions">' +
+                '<button type="button" class="icon-btn" data-sign-move="-1" aria-label="نقل التوقيع ' + (i + 1) + ' للأعلى"' + (i === 0 ? " disabled" : "") + '><i class="ti ti-arrow-up" aria-hidden="true"></i></button>' +
+                '<button type="button" class="icon-btn" data-sign-move="1" aria-label="نقل التوقيع ' + (i + 1) + ' للأسفل"' + (i === list.length - 1 ? " disabled" : "") + '><i class="ti ti-arrow-down" aria-hidden="true"></i></button>' +
+                '<button type="button" class="icon-btn act-danger" data-sign-delete aria-label="حذف التوقيع ' + (i + 1) + '"><i class="ti ti-trash" aria-hidden="true"></i></button>' +
+            "</span></div>";
+    }).join("") + (list.length ? "" : '<p class="field-hint">لا توجد توقيعات — لن يُطبع قسم التوقيعات.</p>');
+    const add = document.getElementById("addAuditSignerBtn");
+    if (add) add.disabled = list.length >= AUDIT_SIGNERS_MAX;
 }
 
 function readAuditCommitteeForm() {
     const val = function (id) { return (document.getElementById(id)?.value || "").trim(); };
-    const list = [0, 1, 2, 3, 4].map(function (i) { return { title: val("acTitle" + i), name: val("acName" + i) }; });
-    return normalizeAuditCommittee({
-        heading: val("acHeading"),
-        chair: list[0].name,
-        chairTitle: list[0].title,
-        members: list.slice(1).map(function (x) { return x.name; }),
-        memberTitles: list.slice(1).map(function (x) { return x.title; })
-    });
+    const rows = document.querySelectorAll("#auditSignersForm [data-sign-row]");
+    const signers = Array.prototype.map.call(rows, function (row, i) { return { title: val("acTitle" + i), name: val("acName" + i) }; });
+    return normalizeAuditCommittee({ heading: val("acHeading"), signers: signers });
 }
+
+document.getElementById("auditCommitteeCard")?.addEventListener("click", function (event) {
+    const move = event.target.closest("[data-sign-move]");
+    const del = event.target.closest("[data-sign-delete]");
+    const add = event.target.closest("#addAuditSignerBtn");
+    if (!move && !del && !add) return;
+    const c = readAuditCommitteeForm();
+    const list = c.signers;
+    if (add) {
+        if (list.length >= AUDIT_SIGNERS_MAX) return;
+        list.push({ title: list.length ? AUDIT_MEMBER_TITLE : AUDIT_CHAIR_TITLE, name: "" });
+        renderAuditCommitteeForm(normalizeAuditCommittee({ heading: c.heading, signers: list }));
+        document.getElementById("acName" + (list.length - 1))?.focus();
+        return;
+    }
+    const i = Number(event.target.closest("[data-sign-row]").dataset.signRow);
+    if (move) {
+        const j = i + Number(move.dataset.signMove);
+        if (j < 0 || j >= list.length) return;
+        const t = list[i]; list[i] = list[j]; list[j] = t;
+        renderAuditCommitteeForm(normalizeAuditCommittee({ heading: c.heading, signers: list }));
+        document.querySelector('#auditSignersForm [data-sign-row="' + j + '"] [data-sign-move="' + move.dataset.signMove + '"]')?.focus();
+        return;
+    }
+    const x = list[i];
+    const remove = function () {
+        list.splice(i, 1);
+        renderAuditCommitteeForm(normalizeAuditCommittee({ heading: c.heading, signers: list }));
+        notify("حُذف التوقيع من القائمة — اضغط «حفظ التوقيعات» لاعتماده.", "info");
+    };
+    if (!x.title && !x.name) { remove(); return; }
+    appConfirm({ title: "حذف توقيع", message: "حذف «" + (x.title || "") + (x.name ? " — " + x.name : "") + "» من توقيعات التقارير؟", confirmText: "حذف", cancelText: "إلغاء", danger: true })
+        .then(function (ok) { if (ok) remove(); });
+});
 
 document.getElementById("saveAuditCommitteeBtn")?.addEventListener("click", function () {
     if (!currentUser || currentUser.role !== "manager") {
@@ -14799,10 +15335,8 @@ document.getElementById("saveAuditCommitteeBtn")?.addEventListener("click", func
 /* الصفات والعنوان الافتراضية في النموذج (الأسماء تبقى)؛ لا تُحفظ إلا بزر الحفظ */
 document.getElementById("resetAuditTitlesBtn")?.addEventListener("click", function () {
     const c = readAuditCommitteeForm();
-    c.heading = AUDIT_SIGN_HEADING;
-    c.chairTitle = AUDIT_CHAIR_TITLE;
-    c.memberTitles = c.memberTitles.map(function () { return AUDIT_MEMBER_TITLE; });
-    renderAuditCommitteeForm(c);
+    const signers = c.signers.map(function (x, i) { return { title: i === 0 ? AUDIT_CHAIR_TITLE : AUDIT_MEMBER_TITLE, name: x.name }; });
+    renderAuditCommitteeForm(normalizeAuditCommittee({ heading: AUDIT_SIGN_HEADING, signers: signers }));
     notify("أُعيدت الصفات الافتراضية — اضغط «حفظ التوقيعات» لاعتمادها.", "info");
 });
 
@@ -18769,6 +19303,221 @@ function exportAllRecordsToExcel() {
 }
 
 window.exportAllRecordsToExcel = exportAllRecordsToExcel;
+
+/* =========================================================
+ملف «جدول التدقيق» (24/11/2026، بطلب حسين)
+نسخة Excel من قائمة السجلات كلها بشكل جدول التدقيق اليدوي: كل السجلات بكل مصادرها
+(تدقيقنا، المستردة من موقع آخر، اليدوية) مع المطلوب والمدقق وحالة القبض وتاريخه ورقم الإيصال
+والملاحظات، وورقة «انتبه» بما يحتاج مراجعة. يُبنى من بيانات الجهاز لحظة التنزيل.
+طريقتان، كلٌّ منهما يُوقف من «الإدارة ← تخصيص الواجهة» (تفضيل جهاز audit_ui_audit_table):
+  button: زر «جدول التدقيق» في صفحة السجلات (الافتراضي ظاهر؛ يبقى أيضاً في قائمة «استيراد ومطابقة»)
+  daily:  تنزيل تلقائي مرة واحدة في اليوم عند أول حفظ للسجلات في ذلك اليوم (الافتراضي مفعّل)
+  lastDay: آخر يوم نُزّل فيه تلقائياً
+========================================================= */
+
+const AUDIT_TABLE_KEY = "audit_ui_audit_table";
+
+function auditTablePrefs() {
+    let p = {};
+    try { p = JSON.parse(readUiPref(AUDIT_TABLE_KEY, "{}")) || {}; } catch (e) { p = {}; }
+    return { button: p.button !== false, daily: p.daily !== false, lastDay: String(p.lastDay || "") };
+}
+
+function saveAuditTablePrefs(patch) {
+    writeUiPref(AUDIT_TABLE_KEY, JSON.stringify(Object.assign(auditTablePrefs(), patch)));
+    applyAuditTableButton();
+}
+
+function applyAuditTableButton() {
+    const b = document.getElementById("auditTableBtn");
+    if (b) b.hidden = !auditTablePrefs().button;
+}
+
+function auditTableSourceText(record) {
+    if (!isRecoveredRecord(record)) return "مدقق في هذا الموقع";
+    const kind = record.source.kind === "site" ? "مستورد من موقع تدقيق آخر" : "تدقيق يدوي";
+    const name = String(record.source.name || "").trim();
+    return kind + (name ? " (" + name + ")" : "");
+}
+
+/* صف واحد لكل سجل بالقيم الخام (أرقام كأرقام) */
+function auditTableRow(record) {
+    const recovered = isRecoveredRecord(record);
+    const sum = recovered ? recoveredSummary(record) : null;
+    const day = recovered ? (/^\d{4}-\d{2}-\d{2}$/.test(record.recordDate || "") ? record.recordDate : "") : (record.recordDate ? getRecordDay(record) : "");
+    let due = 0;
+    try { due = recovered ? sum.amountDue : getRecordNetDue(record); } catch (e) { due = 0; }
+    return {
+        record: record,
+        number: String(record.recordNumber == null ? "" : record.recordNumber),
+        rep: String(record.representativeName || "").trim(),
+        office: String(record.officeName || "").trim(),
+        day: day,
+        source: auditTableSourceText(record),
+        agencies: recovered ? (sum.agencyCount || "") : (record.agencies || []).length,
+        due: due,
+        auditors: getRecordAuditors(record).join(" + "),
+        paid: isRecordPaid(record),
+        paidDay: paymentDay(record),
+        receipt: paymentReceipt(record),
+        note: String(getRecordNote(record) || "").replace(/\s+/g, " ").trim(),
+        savedDay: recordSavedDay(record),
+        flags: []
+    };
+}
+
+/* يبني الصفوف وبنود «انتبه» من السجلات الحالية */
+function collectAuditTable() {
+    const rows = records.map(auditTableRow);
+    const num = function (n) { const v = parseFloat(normalizeDigits(n)); return isNaN(v) ? Infinity : v; };
+    rows.sort(function (a, b) {
+        return arabicFold(a.rep).localeCompare(arabicFold(b.rep), "ar") || arabicFold(a.office).localeCompare(arabicFold(b.office), "ar") || num(a.number) - num(b.number) || a.number.localeCompare(b.number);
+    });
+    const attention = [];
+    const add = function (level, row, issue, action) {
+        attention.push({ level: level, what: row ? row.number + " — " + row.rep + " (" + row.office + ")" : "", issue: issue, action: action });
+        if (row) row.flags.push(issue.split("،")[0].split(" (")[0]);
+    };
+
+    /* المكرر: نفس الرقم والمندوب والمكتب (بعد توحيد الكتابة) */
+    const byKey = {};
+    rows.forEach(function (r) { const k = recordIdentityKey(r.record); (byKey[k] = byKey[k] || []).push(r); });
+    Object.keys(byKey).forEach(function (k) {
+        if (byKey[k].length < 2) return;
+        byKey[k].forEach(function (r) { add("عالية", r, "سجل مكرر (" + byKey[k].length + " مرات بنفس الرقم والمندوب والمكتب)", "احذف المكرر أو صحّح رقمه بعد المقارنة"); });
+    });
+
+    rows.forEach(function (r) {
+        if (r.paid && !r.receipt) add("متوسطة", r, "مقبوض بلا رقم إيصال", "أضف رقم الإيصال من قائمة ⋮ ← بيانات القبض");
+        if (!r.paid) r.flags.push("غير مقبوض");
+        if (!r.due) add("متوسطة", r, "المطلوب من المندوب صفر أو غير مسجّل", "راجع السجل");
+        if (isRecoveredRecord(r.record) && (!r.day || !r.agencies)) add("منخفضة", r, "سجل مسترد بلا " + (!r.day && !r.agencies ? "تاريخ ولا عدد وكالات" : !r.day ? "تاريخ" : "عدد وكالات"), "أكمله من المصدر إن توفر");
+        if (!isRecoveredRecord(r.record) && !r.day) add("منخفضة", r, "سجل بلا تاريخ", "أضف تاريخ السجل (يؤثر على الأسعار وحصص اللجان)");
+        if (!isRecoveredRecord(r.record) && !r.auditors) add("منخفضة", r, "سجل بلا مدقق", "أضف اسم المدقق عند تعديل السجل");
+        if (r.note) r.flags.push("فيه ملاحظة تدقيق");
+    });
+
+    /* الاسم نفسه بأكثر من كتابة (أحمد / احمد…) */
+    const variants = function (field, label) {
+        const groups = {};
+        rows.forEach(function (r) { if (!r[field]) return; const k = arabicFold(r[field]); (groups[k] = groups[k] || {})[r[field]] = (groups[k][r[field]] || 0) + 1; });
+        Object.keys(groups).forEach(function (k) {
+            const names = Object.keys(groups[k]);
+            if (names.length < 2) return;
+            add("منخفضة", null, label + " بأكثر من كتابة: " + names.map(function (n) { return "«" + n + "» (" + groups[k][n] + ")"; }).join("، "), "وحّد الكتابة حتى لا تتجزأ التقارير والفلاتر");
+        });
+    };
+    variants("rep", "اسم المندوب");
+    variants("office", "اسم المكتب");
+
+    const order = { "عالية": 0, "متوسطة": 1, "منخفضة": 2 };
+    attention.sort(function (a, b) { return order[a.level] - order[b.level]; });
+    return { rows: rows, attention: attention };
+}
+
+function exportAuditTable(auto) {
+    if (typeof XLSX === "undefined") {
+        if (!auto) notify("تعذر تحميل مكتبة الإكسل. تأكد من الاتصال بالإنترنت ثم حدّث الصفحة.", "error");
+        return false;
+    }
+    if (recordsLoadFailed) {
+        if (!auto) notify("تعذرت قراءة السجلات، لذلك لا يُبنى الملف.", "error");
+        return false;
+    }
+    const data = collectAuditTable();
+    const rows = data.rows;
+    const today = todayDay();
+    const subtitle = "كل السجلات حتى " + formatDay(today) + " — " + rows.length + " سجل" + (auto ? " (تنزيل يومي تلقائي)" : "");
+    const wb = xlWorkbook();
+
+    const paidRows = rows.filter(function (r) { return r.paid; });
+    const unpaidRows = rows.filter(function (r) { return !r.paid; });
+    const sumDue = function (list) { return list.reduce(function (s, r) { return s + (r.due || 0); }, 0); };
+    const bySource = function (kind) { return rows.filter(function (r) { return kind === "own" ? !isRecoveredRecord(r.record) : isRecoveredRecord(r.record) && r.record.source.kind === kind; }); };
+    XLSX.utils.book_append_sheet(wb, buildStyledSummarySheet("جدول التدقيق", subtitle, [
+        { label: "كل السجلات", value: rows.length },
+        { label: "المطلوب من المندوبين (الكل)", value: sumDue(rows), money: true },
+        { gap: true },
+        { label: "مدققة في هذا الموقع", value: bySource("own").length },
+        { label: "مستوردة من موقع تدقيق آخر", value: bySource("site").length },
+        { label: "تدقيق يدوي", value: bySource("manual").length },
+        { gap: true },
+        { label: "مقبوض — عدد", value: paidRows.length },
+        { label: "مقبوض — المبلغ", value: sumDue(paidRows), money: true },
+        { label: "غير مقبوض — عدد", value: unpaidRows.length },
+        { label: "غير مقبوض — المبلغ", value: sumDue(unpaidRows), money: true, due: true },
+        { gap: true },
+        { label: "بنود «انتبه»", value: data.attention.length },
+        { label: "منها عالية الأهمية", value: data.attention.filter(function (a) { return a.level === "عالية"; }).length },
+        { label: "وقت التنزيل", value: formatDateTime(new Date().toISOString()) }
+    ]), "الملخص");
+
+    const headers = ["ت", "رقم السجل", "المندوب", "المكتب", "تاريخ السجل", "تاريخ التدقيق (الحفظ)", "المصدر", "عدد الوكالات", "المطلوب من المندوب", "المدقق", "حالة القبض", "تاريخ القبض", "رقم الإيصال", "ملاحظة السجل", "انتبه"];
+    const tableRows = function (list) {
+        return list.map(function (r, i) {
+            return [i + 1, r.number, r.rep, r.office, r.day ? formatDay(r.day) : "", r.savedDay ? formatDay(r.savedDay) : "", r.source, r.agencies === "" ? "" : r.agencies, r.due || 0, r.auditors, r.paid ? "مقبوض" : "غير مقبوض", r.paidDay ? formatDay(r.paidDay) : "", r.receipt, r.note, r.flags.filter(function (f, j, a) { return a.indexOf(f) === j; }).join("، ")];
+        });
+    };
+    const widths = [5, 10, 20, 15, 12, 13, 26, 10, 16, 14, 11, 12, 12, 40, 34];
+    XLSX.utils.book_append_sheet(wb, buildStyledTableSheet({
+        title: "جدول التدقيق", subtitle: subtitle, headers: headers, rows: tableRows(rows), moneyCols: [8], widths: widths,
+        totalRow: ["", "الإجمالي", "", "", "", "", "", "", sumDue(rows), "", "", "", "", "", ""]
+    }), "السجلات");
+    XLSX.utils.book_append_sheet(wb, buildStyledTableSheet({
+        title: "غير المقبوض", subtitle: unpaidRows.length + " سجل", headers: headers, rows: tableRows(unpaidRows), moneyCols: [8], widths: widths,
+        totalRow: ["", "الإجمالي", "", "", "", "", "", "", sumDue(unpaidRows), "", "", "", "", "", ""]
+    }), "غير المقبوض");
+    XLSX.utils.book_append_sheet(wb, buildStyledTableSheet({
+        title: "انتبه", subtitle: data.attention.length + " بند — مرتبة حسب الأهمية", headers: ["م", "الأهمية", "السجل", "المشكلة", "ماذا تفعل"],
+        rows: data.attention.map(function (a, i) { return [i + 1, a.level, a.what, a.issue, a.action]; }), widths: [5, 10, 30, 60, 40]
+    }), "انتبه");
+
+    XLSX.writeFile(wb, "جدول التدقيق " + today + ".xlsx");
+    return true;
+}
+
+/* بعد كل حفظ للسجلات: أول حفظ في اليوم يُنزّل الملف (مرة واحدة يومياً) */
+function maybeDailyAuditTable() {
+    const p = auditTablePrefs();
+    const today = todayDay();
+    if (!p.daily || p.lastDay === today || !currentUser || !records.length || typeof XLSX === "undefined") return;
+    saveAuditTablePrefs({ lastDay: today });
+    setTimeout(function () {
+        if (exportAuditTable(true)) notify("<strong>تنزّل جدول التدقيق اليومي</strong><span>أول تغيير اليوم. يمكن إيقاف التنزيل اليومي من الإدارة ← تخصيص الواجهة.</span>", "success", 6000, true);
+    }, 1200);
+}
+
+function syncAuditTablePrefs() {
+    const p = auditTablePrefs();
+    const b = document.getElementById("prefAuditTableButton");
+    if (b) b.checked = p.button;
+    const d = document.getElementById("prefAuditTableDaily");
+    if (d) d.checked = p.daily;
+    const last = document.getElementById("prefAuditTableLast");
+    if (last) last.textContent = p.lastDay ? "آخر تنزيل تلقائي: " + formatDay(p.lastDay) : "لم يُنزَّل تلقائياً بعد";
+}
+
+document.getElementById("auditTableCard")?.addEventListener("change", function (event) {
+    const t = event.target;
+    if (t.id === "prefAuditTableButton") saveAuditTablePrefs({ button: t.checked });
+    if (t.id === "prefAuditTableDaily") saveAuditTablePrefs({ daily: t.checked });
+    syncAuditTablePrefs();
+    notify("محفوظ ✓", "success", 1500);
+});
+
+onReady(function () { applyAuditTableButton(); syncAuditTablePrefs(); });
+
+/* «ما الجديد» مرة واحدة بعد كل تحديث (لمن استعمل الموقع من قبل) */
+onReady(function () {
+    document.querySelectorAll("[data-app-version]").forEach(function (el) { el.textContent = APP_VERSION; });
+    const seen = readUiPref(APP_VERSION_SEEN_KEY, "");
+    writeUiPref(APP_VERSION_SEEN_KEY, APP_VERSION);
+    if (!seen || seen === APP_VERSION || !currentUser) return;
+    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>فلاتر الأعمدة مثل Excel في جدول السجلات (سهم برأس كل عمود)، تاريخ التدقيق تحت تاريخ كل سجل، والتوقيعات تُضاف وتُحذف وتُرتّب وتُطبع مرة واحدة في آخر التقرير. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
+});
+
+window.exportAuditTable = exportAuditTable;
+window.collectAuditTable = collectAuditTable;
 
 
 
