@@ -430,6 +430,10 @@
                         </button>
                     </span>
 
+                    <button type="button" class="secondary-btn" id="auditTableBtn" onclick="exportAuditTable(false)" title="ملف Excel بكل السجلات ومصدرها والمطلوب وحالة القبض والإيصال والملاحظات، وورقة «انتبه» بما يحتاج مراجعة">
+                        <i class="ti ti-file-spreadsheet"></i> <span>جدول التدقيق</span>
+                    </button>
+
                     <button type="button" class="secondary-btn" id="customReportBtn" onclick="openCustomReport()" title="طباعة أو حفظ عدة سجلات مرة واحدة بالأعمدة التي تختارها (PDF، Excel، CSV)">
                         <i class="ti ti-table-options"></i> <span>تقرير مخصّص</span>
                     </button>
@@ -1528,9 +1532,10 @@
                 </div>
 
                 <div class="devlog-stats">
-                    <div><b>9</b><span>مراحل</span></div>
+                    <div><b>17</b><span>مراحل</span></div>
                     <div><b>30 أيلول</b><span>مستودع Work_1</span></div>
-                    <div><b>21 تشرين الأول</b><span>آخر تحديث</span></div>
+                    <div><b>24 تشرين الثاني</b><span>آخر تحديث</span></div>
+                    <div><b data-app-version></b><span>الإصدار</span></div>
                     <div><b>0</b><span>بيانات مفقودة</span></div>
                 </div>
 
@@ -1772,6 +1777,21 @@
                                 <li>عشرة قوالب جاهزة مثبتة للتقارير المخصّصة (المطلوب، ملخص السجلات، حسب المندوب، كشف القبض، حصص اللجان، النقص وإيصالاته، بدل الانتقال، القائمة الكاملة، الملخص المالي، تفاصيل الوكالات)، مع بقاء القوالب الخاصة قابلة للحفظ والتعديل.</li>
                                 <li>«تخصيص الواجهة» في الإدارة لكل مستخدم: الوضع، حجم الخط، كثافة الجداول، الصفحة عند الفتح، والإعداد الافتراضي للتقارير.</li>
                                 <li>النص لا يُقصّ بـ«…» أبداً؛ الطويل يُطوى بـ«عرض المزيد»، والمراحل القديمة هنا تحت «عرض المراحل السابقة».</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-file-spreadsheet"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">24 تشرين الثاني 2026 · الإصدار <span data-app-version></span></p>
+                            <h3>جدول التدقيق، وإيصال القبض، وإدخال سجلات الموقع الأصلي</h3>
+                            <ul class="devlog-list">
+                                <li>إدخال سجلات الموقع الأصلي (12 سجلاً) وجدول التدقيق اليدوي (8 سجلات يدوية، وحالة القبض لـ57 سجلاً) بعد مطابقتها سجلاً سجلاً.</li>
+                                <li>ملف Excel «جدول التدقيق»: كل السجلات بمصدرها والمطلوب والمدقق وحالة القبض وتاريخه ورقم الإيصال والملاحظات، مع ورقتي «غير المقبوض» و«انتبه» (المكرر، المقبوض بلا إيصال، الأسماء بأكثر من كتابة…). يُنزَّل بزر في صفحة السجلات وتلقائياً مرة يومياً، ويمكن إيقاف أي منهما من «تخصيص الواجهة».</li>
+                                <li>عند تحديد السجل «مقبوضاً» يُسأل عن رقم الإيصال وتاريخ القبض، ويظهر الإيصال تحت الحالة في جدول السجلات، ويُعدَّل من قائمة ⋮ «بيانات القبض».</li>
+                                <li>البحث يوحّد الهمزات والتاء المربوطة (أحمد = احمد، إبراهيم = ابراهيم)، وكذلك كشف السجل المكرر في الاستيراد والمطابقة، والبحث برقم إيصال القبض.</li>
+                                <li>إصلاح: قائمة «استيراد ومطابقة» كانت تُغلق فور فتحها.</li>
                             </ul>
                         </div>
                     </li>
@@ -2169,6 +2189,28 @@
                             <span class="pref-text"><b>مع توقيعات لجنة التدقيق</b><small>في التقرير المختصر والمفصل</small></span>
                             <span class="reveal-toggle compact"><input type="checkbox" id="prefSignatures"><span class="reveal-switch" aria-hidden="true"></span></span>
                         </label>
+                    </div>
+
+                </div>
+
+                <div class="content-card" id="auditTableCard">
+
+                    <h3><i class="ti ti-file-spreadsheet"></i> ملف «جدول التدقيق» (Excel)</h3>
+                    <p class="field-hint">كل السجلات بكل مصادرها مع المطلوب والمدقق وحالة القبض وتاريخه ورقم الإيصال والملاحظات، وورقة «غير المقبوض» وورقة «انتبه». يُبنى من بيانات هذا الجهاز لحظة التنزيل.</p>
+
+                    <div class="pref-list">
+                        <label class="pref-row pref-switch-row">
+                            <span class="pref-text"><b>زر «جدول التدقيق» في صفحة السجلات</b><small>عند إيقافه يبقى التنزيل متاحاً من قائمة «استيراد ومطابقة»</small></span>
+                            <span class="reveal-toggle compact"><input type="checkbox" id="prefAuditTableButton"><span class="reveal-switch" aria-hidden="true"></span></span>
+                        </label>
+                        <label class="pref-row pref-switch-row">
+                            <span class="pref-text"><b>تنزيل تلقائي مرة يومياً</b><small id="prefAuditTableLast">عند أول حفظ أو تعديل للسجلات في اليوم</small></span>
+                            <span class="reveal-toggle compact"><input type="checkbox" id="prefAuditTableDaily"><span class="reveal-switch" aria-hidden="true"></span></span>
+                        </label>
+                        <div class="pref-row">
+                            <div class="pref-text"><b>تنزيل الآن</b><small>نسخة محدثة بكل السجلات الحالية</small></div>
+                            <button type="button" class="secondary-btn" onclick="exportAuditTable(false)"><i class="ti ti-download"></i> تنزيل جدول التدقيق</button>
+                        </div>
                     </div>
 
                 </div>
