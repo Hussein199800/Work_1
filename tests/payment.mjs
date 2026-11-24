@@ -98,6 +98,10 @@ const sel = 'select.pay-select[aria-label="حالة القبض للسجل 40"]';
 check("القائمة المنسدلة تظهر «غير مقبوض» افتراضياً", (await page.inputValue(sel)) === "unpaid");
 const dashBefore = await ev(function () { return document.getElementById("dashUnpaid").textContent; });
 await page.selectOption(sel, "paid");
+/* 24/11/2026: «مقبوض» يسأل عن رقم الإيصال وتاريخ القبض */
+await page.waitForSelector("dialog[open] [data-field=receipt]");
+await page.fill("dialog[open] [data-field=receipt]", "12151");
+await dialogClick("حفظ");
 await page.waitForTimeout(800);
 const paidState = await ev(function (id) { const r = records.find(function (x) { return x.id === id; }); return { p: r.payment, h: r.history[r.history.length - 1] }; }, rid);
 check("«مقبوض» يُحفظ بالتاريخ ومن غيّره", paidState.p && paidState.p.status === "paid" && paidState.p.by === "admin" && !!paidState.p.at, JSON.stringify(paidState.p));

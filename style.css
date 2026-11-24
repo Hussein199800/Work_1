@@ -8147,6 +8147,15 @@ tr.is-recovered.is-selected td {
 
 .pay-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* رقم إيصال القبض تحت الحالة (24/11/2026) */
+.pay-receipt {
+    display: block;
+    margin: 3px 0 0 auto;
+    width: fit-content;
+    font-size: var(--fs-xs);
+    color: var(--text-muted, #6b6b6b);
+}
+
 .dash-unpaid {
     display: inline-flex;
     align-items: center;

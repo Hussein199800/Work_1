@@ -80,6 +80,10 @@ function isTransportEligible(type) {
 /* كل الأرقام والتواريخ بالأرقام الغربية (0-9) */
 const NUMBER_LOCALE = "ar-SY-u-nu-latn";
 
+/* رقم الإصدار (24/11/2026): يزداد مع كل نشر على main؛ يظهر في «حول الموقع» ونافذة «ما الجديد» */
+const APP_VERSION = "2026.11.24.2";
+const APP_VERSION_SEEN_KEY = "audit_ui_seen_version";
+
 /* =========================================================
 الإضافات
 ========================================================= */
@@ -640,6 +644,8 @@ function moveRecordsToIDBNow() {
 function persistRecords() {
     return persistRecordsNow().then(function (value) {
         try { markDataChanged(); } catch (e) {}
+        /* ملف «جدول التدقيق» اليومي: أول حفظ في اليوم (إن كان مفعّلاً) */
+        try { maybeDailyAuditTable(); } catch (e) {}
         /* رفع التغيير إلى Firebase (إن كانت المزامنة مفعّلة على هذا الجهاز) */
         try { fbScheduleSync(); } catch (e) {}
         return value;
@@ -1348,8 +1354,20 @@ function normalizeDigits(text) {
 
 /* هوية السجل (24/11/2026): رقم السجل ليس فريداً؛ نفس الرقم مسموح لمندوب أو مكتب آخر.
    التكرار الحقيقي = نفس الرقم + نفس المندوب + نفس المكتب (بعد تنظيف المسافات والأرقام). */
+/* توحيد الكتابة العربية للمقارنة والبحث (24/11/2026): الأرقام، التشكيل والتطويل، الهمزات (أ إ آ ← ا)،
+   التاء المربوطة (ة ← ه)، الألف المقصورة (ى ← ي)، المسافات. للمقارنة فقط — النص المحفوظ لا يتغير. */
+function arabicFold(text) {
+    return normalizeDigits(String(text == null ? "" : text))
+        .replace(/[\u064B-\u0652\u0640]/g, "")
+        .replace(/[أإآٱ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .replace(/ى/g, "ي")
+        .replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/* «أحمد باكير» و«احمد باكير» نفس المندوب، و«أسعد إبراهيم» و«أسعد ابراهيم» كذلك */
 function identityPart(text) {
-    return normalizeDigits(String(text == null ? "" : text)).replace(/\s+/g, " ").trim();
+    return arabicFold(text);
 }
 
 function recordIdentityKey(record) {
@@ -1936,6 +1954,7 @@ function syncPersonalize() {
     if (rec) rec.checked = rp.recovery;
     const sig = document.getElementById("prefSignatures");
     if (sig) sig.checked = rp.signatures;
+    try { syncAuditTablePrefs(); } catch (e) {}
     syncUiFontScaleLabel();
 }
 
@@ -6367,7 +6386,7 @@ function compareRecordNumbers(a, b) {
 function getVisibleRecords() {
 
     const view = recordsView;
-    const q = normalizeDigits(document.getElementById("recordSearch")?.value || "").trim().toLowerCase();
+    const q = arabicFold(document.getElementById("recordSearch")?.value || "");
     const range = recordsPeriodRange(view);
 
     const list = records.filter(function (record) {
@@ -6386,7 +6405,7 @@ function getVisibleRecords() {
         if (view.paid === "paid" && !isRecordPaid(record)) return false;
         if (view.paid === "unpaid" && isRecordPaid(record)) return false;
         if (q) {
-            const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, getRecordAuditors(record).join(" "), formatDay(getRecordDay(record))].join(" ")).toLowerCase();
+            const hay = arabicFold([record.recordNumber, record.officeName, record.representativeName, getRecordAuditors(record).join(" "), formatDay(getRecordDay(record)), paymentReceipt(record)].join(" "));
             if (hay.indexOf(q) === -1) return false;
         }
         return true;
@@ -6631,6 +6650,94 @@ function isRecordPaid(record) {
     return !!(record && record.payment && record.payment.status === "paid");
 }
 
+/* بيانات القبض (24/11/2026، إضافية): payment.day = تاريخ القبض «YYYY-MM-DD» كما في الإيصال،
+   payment.receipt = رقم إيصال القبض. السجلات القديمة بلا day: تاريخ القبض = يوم payment.at. */
+function paymentDay(record) {
+    if (!isRecordPaid(record)) return "";
+    const p = record.payment;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(p.day || "")) return p.day;
+    const d = new Date(p.at);
+    return isNaN(d.getTime()) ? "" : toDayString(d);
+}
+
+function paymentReceipt(record) {
+    return isRecordPaid(record) ? String(record.payment.receipt || "").trim() : "";
+}
+
+/* «17/09/2026» أو «2026-09-17» (بأرقام عربية أو غربية) إلى «YYYY-MM-DD»؛ "" إن لم يكن تاريخاً صحيحاً */
+function parsePaymentDayInput(text) {
+    const t = normalizeDigits(String(text || "")).replace(/[\u200e\u200f\u061c\s]/g, "");
+    let y, m, d, mm;
+    if ((mm = t.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/))) { y = +mm[1]; m = +mm[2]; d = +mm[3]; }
+    else if ((mm = t.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/))) { d = +mm[1]; m = +mm[2]; y = +mm[3]; }
+    else return "";
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return "";
+    return toDayString(dt);
+}
+
+/* «YYYY-MM-DD» ← «DD/MM/YYYY» (نص ثابت بلا علامات اتجاه، كما في الإيصال) */
+function dayDMY(day) {
+    const p = String(day || "").split("-");
+    return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : "";
+}
+
+function paymentText(record) {
+    if (!isRecordPaid(record)) return "غير مقبوض";
+    const day = paymentDay(record), receipt = paymentReceipt(record);
+    return "مقبوض" + (day ? " بتاريخ " + dayDMY(day) : "") + (receipt ? " — إيصال " + receipt : " — بلا رقم إيصال");
+}
+
+/* نافذة رقم الإيصال وتاريخ القبض؛ تُرجع { receipt, day } أو null عند الإلغاء */
+function askPaymentDetails(record, title) {
+    const current = isRecordPaid(record) ? record.payment : {};
+    const ask = function (receipt, dayText, warn) {
+        return appChoose({
+            title: title,
+            message: (warn ? warn + " " : "") + "السجل " + record.recordNumber + " — " + (record.representativeName || "") + " (" + (record.officeName || "") + "). رقم الإيصال اختياري، ويمكن إضافته لاحقاً من قائمة ⋮.",
+            fields: [
+                { id: "receipt", label: "رقم إيصال القبض", value: receipt, numeric: true },
+                { id: "day", label: "تاريخ القبض (يوم/شهر/سنة)", value: dayText, numeric: true }
+            ],
+            choices: [{ value: "save", label: "حفظ", kind: "primary" }]
+        }).then(function (res) {
+            if (!res || res.choice !== "save") return null;
+            const dayInput = String(res.values.day || "").trim();
+            const day = dayInput ? parsePaymentDayInput(dayInput) : todayDay();
+            if (!day) return ask(res.values.receipt, dayInput, "التاريخ غير صحيح، اكتبه مثل 22/09/2026.");
+            return { receipt: normalizeDigits(String(res.values.receipt || "")).trim(), day: day };
+        });
+    };
+    return ask(current.receipt || "", dayDMY(paymentDay(record) || todayDay()), "");
+}
+
+/* تعديل رقم الإيصال وتاريخ القبض لسجل مقبوض (من قائمة ⋮) */
+function editRecordPayment(id) {
+    const index = records.findIndex(function (r) { return r.id === id; });
+    if (index === -1 || !isRecordPaid(records[index])) return;
+    if (!currentUser || currentUser.role === "viewer") { notify("تعديل بيانات القبض غير متاح للمشاهد.", "error"); return; }
+    askPaymentDetails(records[index], "بيانات القبض").then(function (details) {
+        if (!details) return;
+        const old = records[index];
+        if ((old.payment.receipt || "") === details.receipt && paymentDay(old) === details.day) return;
+        const updated = JSON.parse(JSON.stringify(old));
+        updated.payment.day = details.day;
+        if (details.receipt) updated.payment.receipt = details.receipt; else delete updated.payment.receipt;
+        updated.updatedAt = new Date().toISOString();
+        addRecordHistory(updated, "paid", "تعديل بيانات القبض: " + paymentText(old) + " ← " + paymentText(updated));
+        const before = records.slice();
+        records[index] = updated;
+        persistRecords().then(function () {
+            renderRecords();
+            notify("حُفظت بيانات القبض للسجل " + escapeHTML(updated.recordNumber) + " ✓", "success", 3000);
+        }).catch(function (error) {
+            records = before;
+            renderRecords();
+            notify("<strong>لم تُحفظ بيانات القبض</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        });
+    });
+}
+
 function formatDateTime(iso) {
     const d = new Date(iso);
     if (isNaN(d.getTime())) return "";
@@ -6684,14 +6791,17 @@ function setRecordPaid(id, paid, control) {
     }
     const old = records[index];
     if (isRecordPaid(old) === !!paid) return;
-    const apply = function () {
+    const apply = function (details) {
         const updated = JSON.parse(JSON.stringify(old));
         const now = new Date().toISOString();
-        if (paid) updated.payment = { status: "paid", at: now, by: currentUser.username };
+        if (paid) {
+            updated.payment = { status: "paid", at: now, by: currentUser.username, day: details.day };
+            if (details.receipt) updated.payment.receipt = details.receipt;
+        }
         else delete updated.payment;
         updated.updatedAt = now;
         addRecordHistory(updated, paid ? "paid" : "unpaid",
-            paid ? "صار مقبوضاً بتاريخ " + formatDateTime(now) : "أُعيد إلى «غير مقبوض» (كان مقبوضاً منذ " + formatDateTime(old.payment && old.payment.at) + ")");
+            paid ? "صار مقبوضاً بتاريخ " + dayDMY(details.day) + (details.receipt ? " — إيصال " + details.receipt : " — بلا رقم إيصال") : "أُعيد إلى «غير مقبوض» (كان " + paymentText(old) + ")");
         const before = records.slice();
         records[index] = updated;
         return persistRecords().then(function () {
@@ -6704,10 +6814,16 @@ function setRecordPaid(id, paid, control) {
             notify("<strong>لم تُحفظ حالة القبض</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
         });
     };
-    if (paid) { apply(); return; }
+    if (paid) {
+        askPaymentDetails(old, "تحديد السجل «مقبوضاً»").then(function (details) {
+            if (details) apply(details);
+            else if (control) control.value = "unpaid";
+        });
+        return;
+    }
     appConfirm({
         title: "إرجاع السجل إلى «غير مقبوض»",
-        message: "السجل " + old.recordNumber + " مسجّل مقبوضاً بتاريخ " + formatDateTime(old.payment && old.payment.at) + ". هل تريد إرجاعه إلى غير مقبوض؟ (يُكتب ذلك في سجل التعديلات)",
+        message: "السجل " + old.recordNumber + " " + paymentText(old) + ". هل تريد إرجاعه إلى غير مقبوض؟ (يُكتب ذلك في سجل التعديلات)",
         confirmText: "إرجاع إلى غير مقبوض",
         cancelText: "إلغاء"
     }).then(function (ok) {
@@ -6718,12 +6834,14 @@ function setRecordPaid(id, paid, control) {
 
 function paymentControlHTML(record, canEdit) {
     const paid = isRecordPaid(record);
-    const title = paid ? "مقبوض بتاريخ " + formatDateTime(record.payment.at) + (record.payment.by ? " — " + record.payment.by : "") : "غير مقبوض";
-    if (!canEdit) return '<span class="pay-badge ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '">' + (paid ? "مقبوض" : "غير مقبوض") + "</span>";
+    const title = paymentText(record) + (paid && record.payment.by ? " — " + record.payment.by : "");
+    const receipt = paymentReceipt(record);
+    const note = paid ? '<small class="pay-receipt">' + (receipt ? "إيصال " + escapeHTML(receipt) : "بلا إيصال") + "</small>" : "";
+    if (!canEdit) return '<span class="pay-badge ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '">' + (paid ? "مقبوض" : "غير مقبوض") + "</span>" + note;
     return '<select class="pay-select ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '" aria-label="حالة القبض للسجل ' + escapeHTML(record.recordNumber) + '"' +
         " onchange=\"setRecordPaid('" + escapeHTML(record.id) + "', this.value === 'paid', this)\">" +
         '<option value="unpaid"' + (paid ? "" : " selected") + ">غير مقبوض</option>" +
-        '<option value="paid"' + (paid ? " selected" : "") + ">مقبوض</option></select>";
+        '<option value="paid"' + (paid ? " selected" : "") + ">مقبوض</option></select>" + note;
 }
 
 /* نافذة سجل التعديلات */
@@ -6742,13 +6860,14 @@ function showRecordHistory(id) {
     document.getElementById("modalContent").innerHTML =
         '<div class="report-actions no-print"><button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button></div>' +
         '<div class="history-view"><h2>سجل التعديلات — السجل ' + escapeHTML(record.recordNumber) + "</h2>" +
-        '<p class="history-sub">' + escapeHTML(record.representativeName || "") + " — " + escapeHTML(record.officeName || "") + " — الحالة: <b>" + (isRecordPaid(record) ? "مقبوض منذ " + escapeHTML(formatDateTime(record.payment.at)) : "غير مقبوض") + "</b></p>" +
+        '<p class="history-sub">' + escapeHTML(record.representativeName || "") + " — " + escapeHTML(record.officeName || "") + " — الحالة: <b>" + escapeHTML(paymentText(record)) + "</b></p>" +
         '<ol class="history-list">' + rows + (list.length && list[list.length - 1].action === "create" ? "" : older) + "</ol></div>";
     document.getElementById("recordModal").classList.remove("hidden");
     requestAnimationFrame(function () { applyExpandables(document.getElementById("modalContent")); });
 }
 
 window.setRecordPaid = setRecordPaid;
+window.editRecordPayment = editRecordPayment;
 window.showRecordHistory = showRecordHistory;
 
 /* =========================================================
@@ -7197,9 +7316,11 @@ function recordsMatchingData() {
     records.forEach(function (r) {
         const n = identityPart(r.recordNumber);
         if (!/^\d+$/.test(n)) return;
-        const rep = identityPart(r.representativeName) || "—";
-        const office = identityPart(r.officeName) || "—";
-        const key = rep + "\u0001" + office;
+        /* المفتاح موحّد الكتابة، والعرض بالاسم كما كُتب */
+        const shown = function (t) { return normalizeDigits(String(t == null ? "" : t)).replace(/\s+/g, " ").trim(); };
+        const rep = shown(r.representativeName) || "—";
+        const office = shown(r.officeName) || "—";
+        const key = identityPart(r.representativeName) + "\u0001" + identityPart(r.officeName);
         (groups[key] = groups[key] || { rep: rep, office: office, nums: new Set() }).nums.add(Number(n));
     });
     const sequences = [];
@@ -7304,7 +7425,8 @@ const CR_COLUMNS = {
         { key: "repType", label: "نوع المندوب", get: function (r) { return r.representativeType === "external" ? "خارجي" : "داخلي"; } },
         { key: "source", label: "المصدر", get: function (r) { return recoveredSourceText(r); } },
         { key: "paid", label: "حالة القبض", get: function (r) { return isRecordPaid(r) ? "مقبوض" : "غير مقبوض"; } },
-        { key: "paidAt", label: "تاريخ القبض", get: function (r) { return isRecordPaid(r) ? formatDateTime(r.payment.at) : ""; } },
+        { key: "paidAt", label: "تاريخ القبض", get: function (r) { return isRecordPaid(r) ? formatDay(paymentDay(r)) : ""; } },
+        { key: "paidReceipt", label: "رقم إيصال القبض", get: function (r) { return paymentReceipt(r); } },
         { key: "agencies", label: "عدد الوكالات", type: "num", get: function (r, st) { return isRecoveredRecord(r) ? recoveredSummary(r).agencyCount : st.agencies.length; } },
         { key: "active", label: "الفعالة", type: "num", get: function (r, st) { return st.active.length - st.missingAgenciesCount; } },
         { key: "lost", label: "المفقودة", type: "num", get: function (r, st) { return st.missingAgenciesCount; } },
@@ -8097,6 +8219,7 @@ function openRecoveredMenu(button) {
         items.push({ icon: "ti-file-download", text: "تنزيل قالب الاستيراد (CSV)", run: function () { downloadRecoveredTemplate(); } });
     }
     items.push({ icon: "ti-list-check", text: "مطابقة السجلات (من دُقّق ومن لا)", run: function () { showRecordsMatching(); } });
+    items.push({ icon: "ti-file-spreadsheet", text: "تنزيل جدول التدقيق (Excel)", run: function () { exportAuditTable(false); } });
     openActionMenu(button, items);
 }
 
@@ -8124,6 +8247,9 @@ function openRecordMenu(button, id) {
         items.push({ icon: "ti-edit", text: "تعديل السجل", run: function () { editRecord(id); } });
     }
 
+    if (canEdit && isRecordPaid(records.find(function (r) { return r.id === id; }))) {
+        items.push({ icon: "ti-receipt", text: "بيانات القبض (الإيصال والتاريخ)", run: function () { editRecordPayment(id); } });
+    }
     items.push({ icon: "ti-history", text: "سجل التعديلات", run: function () { showRecordHistory(id); } });
 
     if (canDelete) {
@@ -8170,7 +8296,8 @@ function openRecordMenu(button, id) {
 
 document.addEventListener("click", function (event) {
     const menu = document.getElementById("recordMenu");
-    if (menu && !menu.contains(event.target) && !event.target.closest(".act-more")) {
+    /* زر الفتح نفسه لا يُغلق قائمته (كان زر «استيراد ومطابقة» يفتحها ثم تُغلق فوراً، 24/11/2026) */
+    if (menu && !menu.contains(event.target) && !event.target.closest(".act-more") && !(menu._opener && menu._opener.contains(event.target))) {
         closeRecordMenu();
     }
 });
@@ -18769,6 +18896,220 @@ function exportAllRecordsToExcel() {
 }
 
 window.exportAllRecordsToExcel = exportAllRecordsToExcel;
+
+/* =========================================================
+ملف «جدول التدقيق» (24/11/2026، بطلب حسين)
+نسخة Excel من قائمة السجلات كلها بشكل جدول التدقيق اليدوي: كل السجلات بكل مصادرها
+(تدقيقنا، المستردة من موقع آخر، اليدوية) مع المطلوب والمدقق وحالة القبض وتاريخه ورقم الإيصال
+والملاحظات، وورقة «انتبه» بما يحتاج مراجعة. يُبنى من بيانات الجهاز لحظة التنزيل.
+طريقتان، كلٌّ منهما يُوقف من «الإدارة ← تخصيص الواجهة» (تفضيل جهاز audit_ui_audit_table):
+  button: زر «جدول التدقيق» في صفحة السجلات (الافتراضي ظاهر؛ يبقى أيضاً في قائمة «استيراد ومطابقة»)
+  daily:  تنزيل تلقائي مرة واحدة في اليوم عند أول حفظ للسجلات في ذلك اليوم (الافتراضي مفعّل)
+  lastDay: آخر يوم نُزّل فيه تلقائياً
+========================================================= */
+
+const AUDIT_TABLE_KEY = "audit_ui_audit_table";
+
+function auditTablePrefs() {
+    let p = {};
+    try { p = JSON.parse(readUiPref(AUDIT_TABLE_KEY, "{}")) || {}; } catch (e) { p = {}; }
+    return { button: p.button !== false, daily: p.daily !== false, lastDay: String(p.lastDay || "") };
+}
+
+function saveAuditTablePrefs(patch) {
+    writeUiPref(AUDIT_TABLE_KEY, JSON.stringify(Object.assign(auditTablePrefs(), patch)));
+    applyAuditTableButton();
+}
+
+function applyAuditTableButton() {
+    const b = document.getElementById("auditTableBtn");
+    if (b) b.hidden = !auditTablePrefs().button;
+}
+
+function auditTableSourceText(record) {
+    if (!isRecoveredRecord(record)) return "مدقق في هذا الموقع";
+    const kind = record.source.kind === "site" ? "مستورد من موقع تدقيق آخر" : "تدقيق يدوي";
+    const name = String(record.source.name || "").trim();
+    return kind + (name ? " (" + name + ")" : "");
+}
+
+/* صف واحد لكل سجل بالقيم الخام (أرقام كأرقام) */
+function auditTableRow(record) {
+    const recovered = isRecoveredRecord(record);
+    const sum = recovered ? recoveredSummary(record) : null;
+    const day = recovered ? (/^\d{4}-\d{2}-\d{2}$/.test(record.recordDate || "") ? record.recordDate : "") : (record.recordDate ? getRecordDay(record) : "");
+    let due = 0;
+    try { due = recovered ? sum.amountDue : getRecordNetDue(record); } catch (e) { due = 0; }
+    return {
+        record: record,
+        number: String(record.recordNumber == null ? "" : record.recordNumber),
+        rep: String(record.representativeName || "").trim(),
+        office: String(record.officeName || "").trim(),
+        day: day,
+        source: auditTableSourceText(record),
+        agencies: recovered ? (sum.agencyCount || "") : (record.agencies || []).length,
+        due: due,
+        auditors: getRecordAuditors(record).join(" + "),
+        paid: isRecordPaid(record),
+        paidDay: paymentDay(record),
+        receipt: paymentReceipt(record),
+        note: String(getRecordNote(record) || "").replace(/\s+/g, " ").trim(),
+        flags: []
+    };
+}
+
+/* يبني الصفوف وبنود «انتبه» من السجلات الحالية */
+function collectAuditTable() {
+    const rows = records.map(auditTableRow);
+    const num = function (n) { const v = parseFloat(normalizeDigits(n)); return isNaN(v) ? Infinity : v; };
+    rows.sort(function (a, b) {
+        return arabicFold(a.rep).localeCompare(arabicFold(b.rep), "ar") || arabicFold(a.office).localeCompare(arabicFold(b.office), "ar") || num(a.number) - num(b.number) || a.number.localeCompare(b.number);
+    });
+    const attention = [];
+    const add = function (level, row, issue, action) {
+        attention.push({ level: level, what: row ? row.number + " — " + row.rep + " (" + row.office + ")" : "", issue: issue, action: action });
+        if (row) row.flags.push(issue.split("،")[0].split(" (")[0]);
+    };
+
+    /* المكرر: نفس الرقم والمندوب والمكتب (بعد توحيد الكتابة) */
+    const byKey = {};
+    rows.forEach(function (r) { const k = recordIdentityKey(r.record); (byKey[k] = byKey[k] || []).push(r); });
+    Object.keys(byKey).forEach(function (k) {
+        if (byKey[k].length < 2) return;
+        byKey[k].forEach(function (r) { add("عالية", r, "سجل مكرر (" + byKey[k].length + " مرات بنفس الرقم والمندوب والمكتب)", "احذف المكرر أو صحّح رقمه بعد المقارنة"); });
+    });
+
+    rows.forEach(function (r) {
+        if (r.paid && !r.receipt) add("متوسطة", r, "مقبوض بلا رقم إيصال", "أضف رقم الإيصال من قائمة ⋮ ← بيانات القبض");
+        if (!r.paid) r.flags.push("غير مقبوض");
+        if (!r.due) add("متوسطة", r, "المطلوب من المندوب صفر أو غير مسجّل", "راجع السجل");
+        if (isRecoveredRecord(r.record) && (!r.day || !r.agencies)) add("منخفضة", r, "سجل مسترد بلا " + (!r.day && !r.agencies ? "تاريخ ولا عدد وكالات" : !r.day ? "تاريخ" : "عدد وكالات"), "أكمله من المصدر إن توفر");
+        if (!isRecoveredRecord(r.record) && !r.day) add("منخفضة", r, "سجل بلا تاريخ", "أضف تاريخ السجل (يؤثر على الأسعار وحصص اللجان)");
+        if (!isRecoveredRecord(r.record) && !r.auditors) add("منخفضة", r, "سجل بلا مدقق", "أضف اسم المدقق عند تعديل السجل");
+        if (r.note) r.flags.push("فيه ملاحظة تدقيق");
+    });
+
+    /* الاسم نفسه بأكثر من كتابة (أحمد / احمد…) */
+    const variants = function (field, label) {
+        const groups = {};
+        rows.forEach(function (r) { if (!r[field]) return; const k = arabicFold(r[field]); (groups[k] = groups[k] || {})[r[field]] = (groups[k][r[field]] || 0) + 1; });
+        Object.keys(groups).forEach(function (k) {
+            const names = Object.keys(groups[k]);
+            if (names.length < 2) return;
+            add("منخفضة", null, label + " بأكثر من كتابة: " + names.map(function (n) { return "«" + n + "» (" + groups[k][n] + ")"; }).join("، "), "وحّد الكتابة حتى لا تتجزأ التقارير والفلاتر");
+        });
+    };
+    variants("rep", "اسم المندوب");
+    variants("office", "اسم المكتب");
+
+    const order = { "عالية": 0, "متوسطة": 1, "منخفضة": 2 };
+    attention.sort(function (a, b) { return order[a.level] - order[b.level]; });
+    return { rows: rows, attention: attention };
+}
+
+function exportAuditTable(auto) {
+    if (typeof XLSX === "undefined") {
+        if (!auto) notify("تعذر تحميل مكتبة الإكسل. تأكد من الاتصال بالإنترنت ثم حدّث الصفحة.", "error");
+        return false;
+    }
+    if (recordsLoadFailed) {
+        if (!auto) notify("تعذرت قراءة السجلات، لذلك لا يُبنى الملف.", "error");
+        return false;
+    }
+    const data = collectAuditTable();
+    const rows = data.rows;
+    const today = todayDay();
+    const subtitle = "كل السجلات حتى " + formatDay(today) + " — " + rows.length + " سجل" + (auto ? " (تنزيل يومي تلقائي)" : "");
+    const wb = xlWorkbook();
+
+    const paidRows = rows.filter(function (r) { return r.paid; });
+    const unpaidRows = rows.filter(function (r) { return !r.paid; });
+    const sumDue = function (list) { return list.reduce(function (s, r) { return s + (r.due || 0); }, 0); };
+    const bySource = function (kind) { return rows.filter(function (r) { return kind === "own" ? !isRecoveredRecord(r.record) : isRecoveredRecord(r.record) && r.record.source.kind === kind; }); };
+    XLSX.utils.book_append_sheet(wb, buildStyledSummarySheet("جدول التدقيق", subtitle, [
+        { label: "كل السجلات", value: rows.length },
+        { label: "المطلوب من المندوبين (الكل)", value: sumDue(rows), money: true },
+        { gap: true },
+        { label: "مدققة في هذا الموقع", value: bySource("own").length },
+        { label: "مستوردة من موقع تدقيق آخر", value: bySource("site").length },
+        { label: "تدقيق يدوي", value: bySource("manual").length },
+        { gap: true },
+        { label: "مقبوض — عدد", value: paidRows.length },
+        { label: "مقبوض — المبلغ", value: sumDue(paidRows), money: true },
+        { label: "غير مقبوض — عدد", value: unpaidRows.length },
+        { label: "غير مقبوض — المبلغ", value: sumDue(unpaidRows), money: true, due: true },
+        { gap: true },
+        { label: "بنود «انتبه»", value: data.attention.length },
+        { label: "منها عالية الأهمية", value: data.attention.filter(function (a) { return a.level === "عالية"; }).length },
+        { label: "وقت التنزيل", value: formatDateTime(new Date().toISOString()) }
+    ]), "الملخص");
+
+    const headers = ["ت", "رقم السجل", "المندوب", "المكتب", "تاريخ السجل", "المصدر", "عدد الوكالات", "المطلوب من المندوب", "المدقق", "حالة القبض", "تاريخ القبض", "رقم الإيصال", "ملاحظة السجل", "انتبه"];
+    const tableRows = function (list) {
+        return list.map(function (r, i) {
+            return [i + 1, r.number, r.rep, r.office, r.day ? formatDay(r.day) : "", r.source, r.agencies === "" ? "" : r.agencies, r.due || 0, r.auditors, r.paid ? "مقبوض" : "غير مقبوض", r.paidDay ? formatDay(r.paidDay) : "", r.receipt, r.note, r.flags.filter(function (f, j, a) { return a.indexOf(f) === j; }).join("، ")];
+        });
+    };
+    const widths = [5, 10, 20, 15, 12, 26, 10, 16, 14, 11, 12, 12, 40, 34];
+    XLSX.utils.book_append_sheet(wb, buildStyledTableSheet({
+        title: "جدول التدقيق", subtitle: subtitle, headers: headers, rows: tableRows(rows), moneyCols: [7], widths: widths,
+        totalRow: ["", "الإجمالي", "", "", "", "", "", sumDue(rows), "", "", "", "", "", ""]
+    }), "السجلات");
+    XLSX.utils.book_append_sheet(wb, buildStyledTableSheet({
+        title: "غير المقبوض", subtitle: unpaidRows.length + " سجل", headers: headers, rows: tableRows(unpaidRows), moneyCols: [7], widths: widths,
+        totalRow: ["", "الإجمالي", "", "", "", "", "", sumDue(unpaidRows), "", "", "", "", "", ""]
+    }), "غير المقبوض");
+    XLSX.utils.book_append_sheet(wb, buildStyledTableSheet({
+        title: "انتبه", subtitle: data.attention.length + " بند — مرتبة حسب الأهمية", headers: ["م", "الأهمية", "السجل", "المشكلة", "ماذا تفعل"],
+        rows: data.attention.map(function (a, i) { return [i + 1, a.level, a.what, a.issue, a.action]; }), widths: [5, 10, 30, 60, 40]
+    }), "انتبه");
+
+    XLSX.writeFile(wb, "جدول التدقيق " + today + ".xlsx");
+    return true;
+}
+
+/* بعد كل حفظ للسجلات: أول حفظ في اليوم يُنزّل الملف (مرة واحدة يومياً) */
+function maybeDailyAuditTable() {
+    const p = auditTablePrefs();
+    const today = todayDay();
+    if (!p.daily || p.lastDay === today || !currentUser || !records.length || typeof XLSX === "undefined") return;
+    saveAuditTablePrefs({ lastDay: today });
+    setTimeout(function () {
+        if (exportAuditTable(true)) notify("<strong>تنزّل جدول التدقيق اليومي</strong><span>أول تغيير اليوم. يمكن إيقاف التنزيل اليومي من الإدارة ← تخصيص الواجهة.</span>", "success", 6000, true);
+    }, 1200);
+}
+
+function syncAuditTablePrefs() {
+    const p = auditTablePrefs();
+    const b = document.getElementById("prefAuditTableButton");
+    if (b) b.checked = p.button;
+    const d = document.getElementById("prefAuditTableDaily");
+    if (d) d.checked = p.daily;
+    const last = document.getElementById("prefAuditTableLast");
+    if (last) last.textContent = p.lastDay ? "آخر تنزيل تلقائي: " + formatDay(p.lastDay) : "لم يُنزَّل تلقائياً بعد";
+}
+
+document.getElementById("auditTableCard")?.addEventListener("change", function (event) {
+    const t = event.target;
+    if (t.id === "prefAuditTableButton") saveAuditTablePrefs({ button: t.checked });
+    if (t.id === "prefAuditTableDaily") saveAuditTablePrefs({ daily: t.checked });
+    syncAuditTablePrefs();
+    notify("محفوظ ✓", "success", 1500);
+});
+
+onReady(function () { applyAuditTableButton(); syncAuditTablePrefs(); });
+
+/* «ما الجديد» مرة واحدة بعد كل تحديث (لمن استعمل الموقع من قبل) */
+onReady(function () {
+    document.querySelectorAll("[data-app-version]").forEach(function (el) { el.textContent = APP_VERSION; });
+    const seen = readUiPref(APP_VERSION_SEEN_KEY, "");
+    writeUiPref(APP_VERSION_SEEN_KEY, APP_VERSION);
+    if (!seen || seen === APP_VERSION || !currentUser) return;
+    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>ملف «جدول التدقيق» (زر في صفحة السجلات + تنزيل يومي)، رقم الإيصال وتاريخ القبض عند تحديد «مقبوض»، والبحث يوحّد الهمزات. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
+});
+
+window.exportAuditTable = exportAuditTable;
+window.collectAuditTable = collectAuditTable;
 
 
 
