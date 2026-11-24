@@ -8011,7 +8011,7 @@ tr.is-recovered.is-selected td {
 /* توقيعات التقارير: خمس خانات صفة + اسم */
 .audit-committee-form .sign-row {
     display: grid;
-    grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) auto;
     gap: 10px;
     align-items: end;
     margin-bottom: 8px;
@@ -8025,9 +8025,23 @@ tr.is-recovered.is-selected td {
 
 .sign-heading { max-width: 420px; margin-bottom: 12px; }
 
+/* أزرار الترتيب والحذف لكل توقيع (24/11/2026) */
+.sign-row-actions { display: inline-flex; gap: 6px; align-items: center; padding-bottom: 2px; }
+.sign-row-actions .icon-btn {
+    min-width: 44px; min-height: 44px;
+    display: inline-grid; place-items: center;
+    border: 1px solid var(--line-strong); border-radius: var(--r-md);
+    background: var(--field); color: var(--text-2); cursor: pointer; font: inherit;
+}
+.sign-row-actions .icon-btn.act-danger { color: var(--danger, #a3333d); }
+.sign-row-actions .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sign-row-actions .icon-btn:disabled { opacity: .35; cursor: default; }
+.add-signer-btn { margin: 0 0 16px; }
+
 @media (max-width: 640px) {
     .audit-committee-form .sign-row { grid-template-columns: 22px minmax(0, 1fr); }
-    .audit-committee-form .sign-row > label:last-child { grid-column: 2; }
+    .audit-committee-form .sign-row > label { grid-column: 2; }
+    .audit-committee-form .sign-row > .sign-row-actions { grid-column: 2; justify-content: flex-start; }
 }
 
 #auditCommitteeCard .audit-committee-form { display: block; }
@@ -8696,3 +8710,60 @@ tr.is-recovered.is-selected td {
 
 [data-density="compact"] .act-btn { height: 28px; }
 [data-density="compact"] .pay-select { min-height: 26px; margin-top: 3px; }
+
+/* ================= فلاتر الأعمدة مثل Excel + تاريخ التدقيق (24/11/2026) ================= */
+
+.th-filter { display: inline-flex; align-items: center; gap: 4px; }
+.col-filter-btn {
+    display: inline-grid; place-items: center;
+    width: 30px; height: 30px; min-width: 30px;
+    padding: 0; border-radius: var(--r-md);
+    border: 1px solid transparent; background: transparent;
+    color: var(--text-muted, var(--text-2)); cursor: pointer; font: inherit;
+}
+/* هدف لمس أكبر من الشكل */
+.col-filter-btn { position: relative; }
+.col-filter-btn::after { content: ""; position: absolute; inset: -7px; }
+.col-filter-btn:hover { background: var(--surface-2, var(--field)); color: var(--text); }
+.col-filter-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.col-filter-btn.is-active, .col-filter-btn.is-sorted { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.col-filter-pop {
+    position: fixed; z-index: 3000;
+    width: min(320px, calc(100vw - 16px));
+    max-height: min(70vh, 560px); overflow: auto;
+    padding: 12px; border-radius: var(--r-lg, 14px);
+    background: var(--surface, #fff); color: var(--text);
+    border: 1px solid var(--line-strong);
+    box-shadow: var(--sh-lift, 0 12px 32px rgba(0,0,0,.18));
+    display: grid; gap: 12px;
+}
+.cf-sort { display: flex; gap: 8px; flex-wrap: wrap; }
+.cf-sort .act-btn { min-height: 44px; }
+.cf-sort .act-btn.is-on { color: var(--accent); border-color: var(--accent); }
+.cf-facet { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 10px; }
+.cf-facet-title { margin: 0; font-weight: 700; font-size: var(--fs-sm); color: var(--heading, var(--text)); }
+.cf-search { min-height: 40px; }
+.cf-list { display: grid; gap: 2px; max-height: 220px; overflow: auto; }
+.cf-opt { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 2px 4px; border-radius: 8px; cursor: pointer; }
+.cf-opt:hover { background: var(--surface-2, var(--field)); }
+.cf-opt span { flex: 1; overflow-wrap: anywhere; }
+.cf-opt small { color: var(--text-muted, var(--text-2)); font-size: var(--fs-xs); }
+.cf-opt input { width: 18px; height: 18px; }
+.cf-range { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cf-range input { min-height: 40px; width: 100%; }
+.cf-actions { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; bottom: -12px; background: var(--surface, #fff); padding: 8px 0 4px; }
+.cf-actions button { flex: 1 1 auto; min-height: 44px; }
+
+.cf-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.cf-chips[hidden] { display: none; }
+.cf-chips-label { font-weight: 700; color: var(--text-2); font-size: var(--fs-sm); }
+.cf-chip {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 12px;
+    border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--surface, #fff)); color: var(--text);
+    font: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.cf-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.saved-note { display: block; margin-top: 3px; font-size: var(--fs-xs); color: var(--text-muted, var(--text-2)); white-space: normal; }

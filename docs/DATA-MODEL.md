@@ -17,7 +17,7 @@
 | `audit_committee_shares` | مبالغ الحصص الثابتة (للتوافق فقط) |
 | `audit_committee_rates` | نسب الحصص % من سعر الوكالة لكل نوع `{type:{ambulance, cooperation}}` |
 | `audit_council_share`, `audit_council_saved` | حصة المجلس |
-| `audit_audit_committee` | (23/11/2026) توقيعات التقارير (لجنة التدقيق فقط): `{chair, members:[4], chairTitle?, memberTitles?:[4], heading?}` — الصفات والعنوان إضافية، الغائب = الافتراضي. في النسخة الاحتياطية (`auditCommittee`) والمزامنة |
+| `audit_audit_committee` | (23/11/2026) توقيعات التقارير (لجنة التدقيق فقط): `{chair, members:[4], chairTitle?, memberTitles?:[4], heading?, signers?:[{title, name}]}` — الصفات والعنوان إضافية، الغائب = الافتراضي. `signers` (24/11/2026، إضافي، حتى 12) هي القائمة المعتمدة للإضافة والحذف والترتيب؛ الغائب = الرئيس + 4 أعضاء، والحقول القديمة تبقى متزامنة مع أول خمس خانات. في النسخة الاحتياطية (`auditCommittee`) والمزامنة |
 | `audit_fee_destinations` | (16/11/2026) جهة رسوم كل بند نقص: `{pleading, ambulance, aid, receipt}` = `"central"` (النقابة المركزية) أو `"branch"` (الفرع). الافتراضي: الطوابع للمركزية والإيصال للفرع. يدخل النسخة الاحتياطية (`feeDestinations`) ومزامنة Firebase |
 | `audit_record_draft` | مسودة السجل غير المحفوظ |
 | `currentUser`, `activeSection` | الجلسة والقسم المفتوح |

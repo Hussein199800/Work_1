@@ -149,7 +149,7 @@ check("المطابقة: المكرر 104 (نفس الرقم والمندوب و
 const seqOk = await ev(function () {
     const d = recordsMatchingData();
     return d.sequences.every(function (q) {
-        const have = new Set(records.filter(function (r) { return identityPart(r.representativeName) === q.rep && identityPart(r.officeName) === q.office; })
+        const have = new Set(records.filter(function (r) { return identityPart(r.representativeName) === identityPart(q.rep) && identityPart(r.officeName) === identityPart(q.office); })
             .map(function (r) { return Number(identityPart(r.recordNumber)); }));
         const miss = new Set();
         q.gaps.forEach(function (g) { for (let n = g[0]; n <= g[1]; n++) miss.add(n); });
