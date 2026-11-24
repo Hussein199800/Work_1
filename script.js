@@ -1899,7 +1899,8 @@ const ADMIN_TABS = [
     { id: "guideSection", icon: "ti-book-2", text: "شرح النظام" },
     { id: "printSettingsSection", icon: "ti-printer", text: "الطباعة والتخصيص", manager: true },
     { id: "usersSection", icon: "ti-users", text: "المستخدمون", manager: true },
-    { id: "backupSection", icon: "ti-database", text: "النسخ الاحتياطي", manager: true }
+    { id: "backupSection", icon: "ti-database", text: "النسخ الاحتياطي", manager: true },
+    { id: "devlogSection", icon: "ti-timeline-event", text: "حول الموقع" }
 ];
 const ADMIN_TAB_KEY = "audit_ui_admin_tab";
 
@@ -6380,6 +6381,11 @@ function isRecoveredRecord(record) {
     return !!(record && record.source && RECOVERED_SOURCES[record.source.kind]);
 }
 
+/* السجلات المدقّقة في هذا الموقع فقط (بلا المستردة): لكل إجمالي أو عدّ أو قائمة تصفية للتدقيق */
+function auditedRecords() {
+    return records.filter(function (r) { return !isRecoveredRecord(r); });
+}
+
 function recoveredSummary(record) {
     const s = (record && record.summary) || {};
     return { agencyCount: number(s.agencyCount), amountDue: number(s.amountDue) };
@@ -10150,7 +10156,7 @@ function buildGeneralReportDoc() {
         filterActive ? "تقرير مصفّى" : "التقرير العام",
         filterActive
             ? escapeHTML(reportFilterLabel(filter)) + " — " + todayArabic()
-            : "كل السجلات حتى تاريخ " + todayArabic() + " — " + records.length + " سجل"
+            : "كل السجلات حتى تاريخ " + todayArabic() + " — " + auditedRecords().length + " سجل"
     );
 
     html += '<div class="doc-summary-row">' +
@@ -10263,7 +10269,7 @@ function getCommitteeFilteredRecords() {
     const rep = document.getElementById("committeeRep")?.value || "";
     const recordId = document.getElementById("committeeRecord")?.value || "";
 
-    return records.filter(function (record) {
+    return auditedRecords().filter(function (record) {
         const day = getRecordDay(record);
         if (from && day < from) return false;
         if (to && day > to) return false;
@@ -10280,7 +10286,7 @@ function fillCommitteeFilterOptions() {
 
     if (repSelect) {
         const current = repSelect.value;
-        const names = Array.from(new Set(records.map(function (r) { return (r.representativeName || "").trim(); }).filter(Boolean))).sort();
+        const names = Array.from(new Set(auditedRecords().map(function (r) { return (r.representativeName || "").trim(); }).filter(Boolean))).sort();
         repSelect.innerHTML = '<option value="">كل المندوبين</option>' +
             names.map(function (n) { return '<option value="' + escapeHTML(n) + '">' + escapeHTML(n) + "</option>"; }).join("");
         repSelect.value = names.indexOf(current) !== -1 ? current : "";
@@ -10289,7 +10295,7 @@ function fillCommitteeFilterOptions() {
     if (recordSelect) {
         const current = recordSelect.value;
         recordSelect.innerHTML = '<option value="">كل السجلات</option>' +
-            records.map(function (r) {
+            auditedRecords().map(function (r) {
                 return '<option value="' + r.id + '">سجل ' + escapeHTML(r.recordNumber) + " — " + escapeHTML(r.officeName) + "</option>";
             }).join("");
         recordSelect.value = records.some(function (r) { return r.id === current; }) ? current : "";
@@ -11454,7 +11460,7 @@ function fillReportFilterOptions() {
 
     if (repsBox) {
         const checked = readCheckedValues("filterReps");
-        const names = Array.from(new Set(records.map(function (r) { return (r.representativeName || "").trim(); }).filter(Boolean)))
+        const names = Array.from(new Set(auditedRecords().map(function (r) { return (r.representativeName || "").trim(); }).filter(Boolean)))
             .sort(function (a, b) { return a.localeCompare(b, "ar"); });
         repsBox.innerHTML = names.length
             ? names.map(function (n) { return chipHTML(n, n, checked.indexOf(n) !== -1); }).join("")
@@ -15880,7 +15886,7 @@ function updateDashboard() {
 
     if (repsBox) {
         const map = {};
-        records.forEach(function (record) {
+        auditedRecords().forEach(function (record) {
             const name = (record.representativeName || "-").trim() || "-";
             if (!map[name]) map[name] = { name: name, total: 0, records: 0 };
             map[name].total += getRecordNetDue(record);
@@ -15904,7 +15910,7 @@ function updateDashboard() {
         return;
     }
 
-    const latest = records.slice().reverse().slice(0, 5);
+    const latest = auditedRecords().reverse().slice(0, 5);
 
     if (latest.length === 0) {
         container.innerHTML =
@@ -18188,11 +18194,13 @@ function exportAllRecordsToExcel() {
         return;
     }
 
-    const subtitle = "كل السجلات حتى " + todayArabic() + " — " + records.length + " سجل";
+    /* المستردة ملخّص بلا وكالات: لا تدخل في التقرير العام (لها «مطابقة السجلات» والتقرير المخصّص) */
+    const list = auditedRecords();
+    const subtitle = "كل السجلات حتى " + todayArabic() + " — " + list.length + " سجل";
 
     let tBase = 0, tTransport = 0, tShare = 0, tAdd = 0, tMissing = 0, tRep = 0, tDed = 0, tAg = 0, tActive = 0, tCancelled = 0, tLost = 0, tAmb = 0, tCoop = 0;
 
-    const rows = records.map(function (record) {
+    const rows = list.map(function (record) {
         const stats = getRecordFinalStats(record);
         const base = Object.keys(stats.byType).reduce(function (s, t) { return s + stats.byType[t].total; }, 0);
         const active = stats.active.length - stats.missingAgenciesCount;
@@ -18209,7 +18217,7 @@ function exportAllRecordsToExcel() {
     });
 
     const summary = buildStyledSummarySheet("نقابة المحامين — فرع إدلب | التقرير العام", subtitle, [
-        { label: "عدد السجلات", value: records.length },
+        { label: "عدد السجلات", value: list.length },
         { label: "عدد الوكالات", value: tAg },
         { label: "الوكالات الفعالة", value: tActive },
         { label: "الوكالات المفقودة", value: tLost },
@@ -18242,7 +18250,7 @@ function exportAllRecordsToExcel() {
 
     /* حسب المندوب */
     const map = {};
-    records.forEach(function (record) {
+    list.forEach(function (record) {
         const name = (record.representativeName || "-").trim() || "-";
         if (!map[name]) map[name] = { records: 0, agencies: 0, total: 0 };
         map[name].records += 1;
@@ -18260,7 +18268,7 @@ function exportAllRecordsToExcel() {
         headers: ["المندوب", "عدد السجلات", "عدد الوكالات", "المطلوب"],
         rows: repRows,
         moneyCols: [3],
-        totalRow: ["الإجمالي", records.length, tAg, tRep],
+        totalRow: ["الإجمالي", list.length, tAg, tRep - tDed],
         widths: [28, 14, 14, 20]
     });
 

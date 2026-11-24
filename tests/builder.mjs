@@ -247,7 +247,7 @@ const viewerTabs = await ev(function () {
     currentUser = saved; applyPermissions();
     return res;
 });
-check("المشاهد يرى الحاسبة وشرح النظام فقط داخل الإدارة", viewerTabs.sec === "calculatorSection" && viewerTabs.visible === 2, JSON.stringify(viewerTabs));
+check("المشاهد يرى الحاسبة وشرح النظام وحول الموقع فقط داخل الإدارة", viewerTabs.sec === "calculatorSection" && viewerTabs.visible === 3, JSON.stringify(viewerTabs));
 
 check("لا أخطاء JavaScript", errors.length === 0, errors.join(" | "));
 

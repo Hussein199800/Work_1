@@ -173,6 +173,27 @@ check("التقرير المخصّص: المصدر وعدد الوكالات و�
 /* 6) النسخة الاحتياطية تقبل السجلات المستردة */
 check("النسخة الاحتياطية بالسجلات المستردة صالحة للاستعادة", await ev(function () { return backupDataProblem(JSON.parse(buildBackupJSON())) === ""; }));
 
+/* 24/11/2026: المستردة لا تدخل في قوائم وأعداد التدقيق */
+const leak = await ev(function () {
+    const recRep = records.filter(isRecoveredRecord).map(function (r) { return String(r.representativeName).trim(); })
+        .find(function (n) { return !records.some(function (r) { return !isRecoveredRecord(r) && String(r.representativeName).trim() === n; }); });
+    updateDashboard();
+    switchSection("committeesSection");
+    const committeeOpts = Array.from(document.querySelectorAll("#committeeRep option")).map(function (o) { return o.value; });
+    const recordOpts = Array.from(document.querySelectorAll("#committeeRecord option")).map(function (o) { return o.value; });
+    const general = buildGeneralReportDoc();
+    return {
+        recRep: recRep || "",
+        dash: recRep ? document.getElementById("dashReps").textContent.indexOf(recRep) === -1 : true,
+        latest: !records.filter(isRecoveredRecord).some(function (r) { return document.getElementById("latestRecords").innerHTML.indexOf(">" + r.recordNumber + "<") !== -1 && !records.some(function (o) { return !isRecoveredRecord(o) && o.recordNumber === r.recordNumber; }); }),
+        committeeRep: recRep ? committeeOpts.indexOf(recRep) === -1 : true,
+        committeeRecord: !records.filter(isRecoveredRecord).some(function (r) { return recordOpts.indexOf(r.id) !== -1; }),
+        general: general.indexOf("— " + auditedRecords().length + " سجل") !== -1
+    };
+});
+check("المستردة خارج «أعلى المندوبين» و«آخر السجلات» وفلاتر حصص اللجان وعدد التقرير العام",
+    leak.dash && leak.latest && leak.committeeRep && leak.committeeRecord && leak.general, JSON.stringify(leak));
+
 check("لا أخطاء JavaScript", errors.length === 0, errors.join(" | "));
 
 await browser.close();

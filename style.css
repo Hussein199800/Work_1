@@ -8047,3 +8047,62 @@ tr.is-recovered.is-selected td {
     margin: 4px 0 14px;
     text-align: start;
 }
+
+/* ================= ترتيب القائمة الجانبية (24/11/2026) =================
+   الأقسام أولاً تحت البحث، مجمّعة بعناوين؛ أدوات الجهاز والمستخدم في الأسفل. */
+
+.nav-group {
+    margin: 12px 12px 4px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    color: var(--on-panel-3);
+}
+
+.navigation .nav-group:first-child { margin-top: 0; }
+
+.sidebar-foot {
+    margin-top: auto;
+    display: grid;
+    gap: 8px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-foot .backup-status { margin-top: 0; }
+
+.profile-compact {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+}
+
+.profile-compact .profile-text { min-width: 0; }
+
+.profile-compact strong {
+    display: block;
+    font-size: var(--fs-md);
+    color: var(--on-accent);
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.profile-compact small {
+    display: block;
+    font-size: var(--fs-xs);
+    color: var(--on-panel-3);
+    line-height: 1.4;
+}
+
+.sidebar-prefs {
+    display: grid;
+    gap: 6px;
+}
+
+.sidebar-prefs .theme-toggle,
+.sidebar-prefs .font-size-control { height: 38px; }
+
+.sidebar-foot .logout-btn { margin-top: 0; }
+.sidebar-foot .logout-btn { border-top: 0; padding-top: 9px; border-radius: var(--r-md); }

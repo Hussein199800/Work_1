@@ -171,61 +171,11 @@
                 <kbd>Ctrl K</kbd>
             </button>
 
-            <!-- التبديل بين الوضع النهاري والليلي -->
-            <button type="button" class="theme-toggle" onclick="toggleTheme()" aria-label="تبديل الوضع النهاري والليلي">
-                <span class="theme-icon" aria-hidden="true"><i class="ti ti-sun"></i><i class="ti ti-moon"></i></span>
-                <span class="theme-label">الوضع الليلي</span>
-                <span class="theme-switch" aria-hidden="true"></span>
-            </button>
-
-            <!-- حجم خط الموقع: تكبير وتصغير (لهذا الجهاز فقط) -->
-            <div class="font-size-control" role="group" aria-label="حجم خط الموقع">
-                <i class="ti ti-text-size" aria-hidden="true"></i>
-                <span class="fs-label">حجم الخط</span>
-                <button type="button" onclick="changeUiFontScale(-1)" aria-label="تصغير خط الموقع" title="تصغير">A−</button>
-                <button type="button" class="fs-value" id="uiFontScaleValue" onclick="changeUiFontScale(0)" title="الحجم الأصلي">100%</button>
-                <button type="button" onclick="changeUiFontScale(1)" aria-label="تكبير خط الموقع" title="تكبير">A+</button>
-            </div>
-
-            <!-- حالة النسخ الاحتياطي: الضغط يأخذ نسخة الآن -->
-            <button type="button" class="backup-status" id="backupStatus" onclick="backupNow()">
-                <i class="ti ti-shield-check" aria-hidden="true"></i>
-                <span class="backup-status-text"><b>النسخ الاحتياطي</b><small id="backupStatusText">—</small></span>
-            </button>
-
-            <!-- بطاقة المستخدم -->
-
-            <div class="profile-card">
-
-                <div class="profile-row">
-                    <span class="profile-icon"><i class="ti ti-user-shield"></i></span>
-                    <div>
-                        <small>المستخدم</small>
-                        <strong id="currentUser">-</strong>
-                    </div>
-                </div>
-
-                <div class="profile-row">
-                    <span class="profile-icon"><i class="ti ti-id-badge-2"></i></span>
-                    <div>
-                        <small>الصلاحية</small>
-                        <strong id="profileRole">-</strong>
-                    </div>
-                </div>
-
-                <div class="profile-row">
-                    <span class="profile-icon"><i class="ti ti-calendar-event"></i></span>
-                    <div>
-                        <small>التاريخ</small>
-                        <strong id="profileDate">-</strong>
-                    </div>
-                </div>
-
-            </div>
-
             <!-- NAVIGATION -->
 
-            <nav class="navigation">
+            <nav class="navigation" aria-label="أقسام النظام">
+
+                <p class="nav-group">العمل اليومي</p>
 
                 <button type="button" class="tab-btn active" data-section="dashboardSection">
                     <i class="ti ti-layout-dashboard nav-icon"></i>
@@ -242,6 +192,8 @@
                     <span class="nav-text"><b>إنشاء سجل</b><small>إدخال سجل ووكالاته</small></span>
                 </button>
 
+                <p class="nav-group">التحليل</p>
+
                 <button type="button" class="tab-btn" data-section="reportsSection">
                     <i class="ti ti-chart-bar nav-icon"></i>
                     <span class="nav-text"><b>التقارير</b><small>تصفية وإجماليات مالية</small></span>
@@ -252,10 +204,7 @@
                     <span class="nav-text"><b>حصص اللجان</b><small>الإسعاف والتعاون</small></span>
                 </button>
 
-                <button type="button" class="tab-btn" data-section="devlogSection">
-                    <i class="ti ti-timeline-event nav-icon"></i>
-                    <span class="nav-text"><b>تطوير الموقع</b><small>مراحل العمل وما تغيّر</small></span>
-                </button>
+                <p class="nav-group">الإعدادات</p>
 
                 <button type="button" class="tab-btn manager-only" data-section="pricesSection">
                     <i class="ti ti-tag nav-icon"></i>
@@ -265,10 +214,47 @@
                 <!-- الإدارة (23/11/2026): الحاسبة، الطباعة والتخصيص، المستخدمون، النسخ الاحتياطي كتبويبات فرعية -->
                 <button type="button" class="tab-btn" data-section="adminSection">
                     <i class="ti ti-settings nav-icon"></i>
-                    <span class="nav-text"><b>الإدارة</b><small>الحاسبة، الشرح، الطباعة، المستخدمون، النسخ</small></span>
+                    <span class="nav-text"><b>الإدارة</b><small>الأدوات والإعدادات العامة</small></span>
                 </button>
 
             </nav>
+
+            <!-- أسفل القائمة: النسخ الاحتياطي، المستخدم، المظهر، الخروج -->
+            <div class="sidebar-foot">
+
+            <!-- حالة النسخ الاحتياطي: الضغط يأخذ نسخة الآن -->
+            <button type="button" class="backup-status" id="backupStatus" onclick="backupNow()">
+                <i class="ti ti-shield-check" aria-hidden="true"></i>
+                <span class="backup-status-text"><b>النسخ الاحتياطي</b><small id="backupStatusText">—</small></span>
+            </button>
+
+            <!-- بطاقة المستخدم (مختصرة: الاسم، الصلاحية · التاريخ) -->
+            <div class="profile-card profile-compact">
+                <span class="profile-icon"><i class="ti ti-user-shield" aria-hidden="true"></i></span>
+                <div class="profile-text">
+                    <strong id="currentUser">-</strong>
+                    <small><span id="profileRole">-</span> · <span id="profileDate">-</span></small>
+                </div>
+            </div>
+
+            <div class="sidebar-prefs">
+            <!-- التبديل بين الوضع النهاري والليلي -->
+            <button type="button" class="theme-toggle" onclick="toggleTheme()" aria-label="تبديل الوضع النهاري والليلي">
+                <span class="theme-icon" aria-hidden="true"><i class="ti ti-sun"></i><i class="ti ti-moon"></i></span>
+                <span class="theme-label">الوضع الليلي</span>
+                <span class="theme-switch" aria-hidden="true"></span>
+            </button>
+
+            <!-- حجم خط الموقع: تكبير وتصغير (لهذا الجهاز فقط) -->
+            <div class="font-size-control" role="group" aria-label="حجم خط الموقع">
+                <i class="ti ti-text-size" aria-hidden="true"></i>
+                <span class="fs-label">حجم الخط</span>
+                <button type="button" onclick="changeUiFontScale(-1)" aria-label="تصغير خط الموقع" title="تصغير">A−</button>
+                <button type="button" class="fs-value" id="uiFontScaleValue" onclick="changeUiFontScale(0)" title="الحجم الأصلي">100%</button>
+                <button type="button" onclick="changeUiFontScale(1)" aria-label="تكبير خط الموقع" title="تكبير">A+</button>
+            </div>
+
+            </div>
 
             <button
                 type="button"
@@ -278,6 +264,8 @@
                 <i class="ti ti-logout nav-icon"></i>
                 <span class="nav-text"><b>تسجيل الخروج</b><small>إنهاء الجلسة الحالية</small></span>
             </button>
+
+            </div>
 
         </aside>
 
@@ -1470,6 +1458,7 @@
             <section
                 id="devlogSection"
                 class="section"
+                data-admin
             >
 
                 <div class="page-title">
@@ -1740,6 +1729,8 @@
                                 <li>إعادة الترقيم مثل «تعبئة السلسلة» في Excel: عند حذف وكالة (مثلاً 65) تصبح 66 رقم 65 وهكذا، أو من زر «إعادة الترقيم» من أي رقم، وما قبله لا يتغير، مع التراجع.</li>
                                 <li>رقم السجل نفسه مسموح لمندوب أو مكتب آخر؛ التنبيه والمكرر في الاستيراد والمطابقة فقط لنفس الرقم والمندوب والمكتب، والأرقام الناقصة تُحسب لكل مندوب على حدة.</li>
                                 <li>«شرح النظام» صار تبويباً فرعياً في «الإدارة».</li>
+                                <li>ترتيب القائمة الجانبية: الأقسام أولاً تحت البحث مجمّعة بعناوين (العمل اليومي، التحليل، الإعدادات)، وأدوات الجهاز والمستخدم في الأسفل؛ و«حول الموقع» (هذه الصفحة) داخل «الإدارة».</li>
+                                <li>إصلاح: السجلات المستردة كانت تدخل في «أعلى المندوبين» و«آخر السجلات» وفلاتر حصص اللجان والتقارير وعدد التقرير العام وملف Excel لكل السجلات؛ وإجمالي ورقة المندوبين في Excel صار الصافي بعد المقاصة مثل أسطرها.</li>
                             </ul>
                         </div>
                     </li>
