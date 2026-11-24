@@ -295,6 +295,7 @@
                         <span>المطلوب من المندوبين</span>
                         <strong id="totalRepresentativeAmount">0 ل.س</strong>
                         <small id="dashDueNote"></small>
+                        <button type="button" class="dash-unpaid" id="dashUnpaid" hidden onclick="recordsView.paid = 'unpaid'; saveRecordsView(); switchSection('recordsSection');" title="عرض السجلات غير المقبوضة"></button>
                     </div>
 
                 </div>
@@ -483,6 +484,15 @@
                             <option value="recovered">المستردة (كلها)</option>
                             <option value="site">مستردة من موقع تدقيق آخر</option>
                             <option value="manual">مستردة من تدقيق يدوي</option>
+                        </select>
+                    </label>
+
+                    <label class="filter-field">
+                        <span>حالة القبض</span>
+                        <select id="rfPaid">
+                            <option value="all">الكل</option>
+                            <option value="unpaid">غير مقبوض</option>
+                            <option value="paid">مقبوض</option>
                         </select>
                     </label>
 
@@ -1731,6 +1741,8 @@
                                 <li>«شرح النظام» صار تبويباً فرعياً في «الإدارة».</li>
                                 <li>ترتيب القائمة الجانبية: الأقسام أولاً تحت البحث مجمّعة بعناوين (العمل اليومي، التحليل، الإعدادات)، وأدوات الجهاز والمستخدم في الأسفل؛ و«حول الموقع» (هذه الصفحة) داخل «الإدارة».</li>
                                 <li>إصلاح: السجلات المستردة كانت تدخل في «أعلى المندوبين» و«آخر السجلات» وفلاتر حصص اللجان والتقارير وعدد التقرير العام وملف Excel لكل السجلات؛ وإجمالي ورقة المندوبين في Excel صار الصافي بعد المقاصة مثل أسطرها.</li>
+                                <li>حالة القبض لكل سجل (مقبوض / غير مقبوض) من قائمة منسدلة في جدول السجلات، مع فلتر «حالة القبض» وعدد ومبلغ غير المقبوض في لوحة التحكم.</li>
+                                <li>«سجل التعديلات» لكل سجل (من قائمة ⋮): الإنشاء وكل تعديل وما تغيّر فيه، و«صار مقبوضاً بتاريخ …»، وإيصالات الاستدراك وتغييرات السعر، مع اسم المستخدم والوقت.</li>
                             </ul>
                         </div>
                     </li>

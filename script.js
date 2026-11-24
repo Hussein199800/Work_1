@@ -5752,6 +5752,10 @@ recordForm.addEventListener(
                 سجل قيد التعديل لم يعد موجوداً (مسودة قديمة، أو استعادة نسخة
                 احتياطية): يُحفظ كسجل جديد بدل أن يضيع بصمت.
             */
+            /* سجل التعديلات: إنشاء أو وصف ما تغيّر */
+            if (index !== -1) addRecordHistory(record, "edit", describeRecordChanges(records[index], record));
+            else addRecordHistory(record, "create", record.agencies.length + " وكالة");
+
             if (index !== -1) {
 
                 records[index] =
@@ -6103,7 +6107,7 @@ onReady(function () {
 ========================================================= */
 
 const RECORDS_VIEW_KEY = "audit_ui_records_view";
-const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", repName: "all", office: "all", auditor: "all", source: "all", sort: "date-desc" };
+const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", repName: "all", office: "all", auditor: "all", source: "all", paid: "all", sort: "date-desc" };
 
 function loadRecordsView() {
     try {
@@ -6156,6 +6160,9 @@ function getVisibleRecords() {
         if (view.source === "recovered" && !isRecoveredRecord(record)) return false;
         if ((view.source === "site" || view.source === "manual") && !(isRecoveredRecord(record) && record.source.kind === view.source)) return false;
         if (view.auditor !== "all" && getRecordAuditors(record).indexOf(view.auditor) === -1) return false;
+        /* حالة القبض */
+        if (view.paid === "paid" && !isRecordPaid(record)) return false;
+        if (view.paid === "unpaid" && isRecordPaid(record)) return false;
         if (q) {
             const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, getRecordAuditors(record).join(" "), formatDay(getRecordDay(record))].join(" ")).toLowerCase();
             if (hay.indexOf(q) === -1) return false;
@@ -6235,6 +6242,7 @@ function syncRecordsFilters() {
     set("rfRep", recordsView.rep);
     set("rfRepName", recordsView.repName);
     set("rfSource", recordsView.source);
+    set("rfPaid", recordsView.paid);
     set("rfOffice", recordsView.office);
     set("rfSort", recordsView.sort);
 
@@ -6244,7 +6252,7 @@ function syncRecordsFilters() {
 }
 
 document.getElementById("recordsFilters")?.addEventListener("change", function (event) {
-    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfRepName: "repName", rfSource: "source", rfOffice: "office", rfAuditor: "auditor", rfSort: "sort" };
+    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfRepName: "repName", rfSource: "source", rfPaid: "paid", rfOffice: "office", rfAuditor: "auditor", rfSort: "sort" };
     const key = map[event.target.id];
     if (!key) return;
     recordsView[key] = event.target.value;
@@ -6331,7 +6339,7 @@ function renderRecords() {
                 "<td>" + escapeHTML(record.representativeName) + "</td>" +
                 '<td class="num">' + (sum.agencyCount ? '<span class="agency-count">' + sum.agencyCount + "</span>" : "—") + "</td>" +
                 '<td class="num">—</td><td class="num">—</td>' +
-                '<td class="num">' + (sum.amountDue ? money(sum.amountDue) + '<small class="deduction-note">حسب المصدر</small>' : "—") + "</td>" +
+                '<td class="num">' + (sum.amountDue ? money(sum.amountDue) + '<small class="deduction-note">حسب المصدر</small>' : "—") + paymentControlHTML(record, canEdit) + "</td>" +
                 '<td class="date-cell">' + formatDay(getRecordDay(record)) + "</td>" +
                 '<td><div class="action-group">' +
                     '<button type="button" class="act-btn act-primary" onclick="showRecoveredDoc(\'' + record.id + '\')"><i class="ti ti-eye" aria-hidden="true"></i> عرض</button>' +
@@ -6350,7 +6358,7 @@ function renderRecords() {
             '<td class="num"><span class="agency-count">' + (record.agencies || []).length + "</span>" + bar + "</td>" +
             '<td class="num">' + money(getRecordBaseTotal(record)) + "</td>" +
             '<td class="num">' + money(getRecordGrandTotal(record)) + "</td>" +
-            '<td class="num money-cell">' + money(getRecordNetDue(record)) + (getRecordDeduction(record).amount > 0 ? '<small class="deduction-note" title="' + escapeHTML(getRecordDeduction(record).reason) + '">بعد حسم ' + money(getRecordDeduction(record).amount) + "</small>" : "") + "</td>" +
+            '<td class="num money-cell">' + money(getRecordNetDue(record)) + (getRecordDeduction(record).amount > 0 ? '<small class="deduction-note" title="' + escapeHTML(getRecordDeduction(record).reason) + '">بعد حسم ' + money(getRecordDeduction(record).amount) + "</small>" : "") + paymentControlHTML(record, canEdit) + "</td>" +
             '<td class="date-cell">' + date + "</td>" +
             /* الإجراءات الأكثر استخداماً ظاهرة، والباقي في قائمة ⋮ */
             '<td><div class="action-group">' +
@@ -6365,6 +6373,159 @@ function renderRecords() {
     syncRecordSelectionUI();
 
 }
+
+/* =========================================================
+حالة القبض وسجل التعديلات (24/11/2026، إضافي)
+record.payment = { status: "paid", at, by } فقط عند «مقبوض»؛ الغياب = غير مقبوض.
+record.history = [{ at, by, action, detail }] — يُضاف سطر مع كل إنشاء أو تعديل أو تغيير
+حالة القبض أو إيصالات الاستدراك أو تغيير سعر جماعي. للبرنامج فقط، لا يُطبع في التقارير.
+========================================================= */
+
+const HISTORY_MAX = 200;
+const HISTORY_ACTIONS = {
+    create: ["إنشاء", "ti-file-plus"],
+    edit: ["تعديل", "ti-edit"],
+    paid: ["مقبوض", "ti-cash"],
+    unpaid: ["غير مقبوض", "ti-cash-off"],
+    recovery: ["إيصالات الاستدراك", "ti-receipt"],
+    price: ["تغيير سعر", "ti-tag"],
+    import: ["استيراد", "ti-file-import"]
+};
+
+function getRecordHistory(record) {
+    return record && Array.isArray(record.history) ? record.history : [];
+}
+
+/* يضيف سطراً إلى نسخة جديدة من القائمة (لا يغيّر قائمة سجل آخر يشاركها) */
+function addRecordHistory(record, action, detail) {
+    const list = getRecordHistory(record).slice();
+    list.push({ at: new Date().toISOString(), by: currentUser ? currentUser.username : "", action: action, detail: detail || "" });
+    record.history = list.length > HISTORY_MAX ? list.slice(-HISTORY_MAX) : list;
+    return record;
+}
+
+function isRecordPaid(record) {
+    return !!(record && record.payment && record.payment.status === "paid");
+}
+
+function formatDateTime(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const pad = function (n) { return String(n).padStart(2, "0"); };
+    return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear() + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+/* وصف مختصر لما تغيّر بين نسختين من السجل */
+function describeRecordChanges(oldRecord, record) {
+    const parts = [];
+    const text = function (v) { return String(v == null ? "" : v).trim(); };
+    const field = function (label, a, b) {
+        if (text(a) !== text(b)) parts.push(label + ": " + (text(a) || "—") + " ← " + (text(b) || "—"));
+    };
+    field("رقم السجل", oldRecord.recordNumber, record.recordNumber);
+    field("المكتب", oldRecord.officeName, record.officeName);
+    field("المندوب", oldRecord.representativeName, record.representativeName);
+    const repType = function (r) { return r.representativeType === "external" ? "خارجي" : "داخلي"; };
+    field("نوع المندوب", repType(oldRecord), repType(record));
+    field("التاريخ", getRecordDay(oldRecord), getRecordDay(record));
+    if (text(getRecordNote(oldRecord)) !== text(getRecordNote(record))) parts.push("ملاحظة السجل");
+    const ded = function (r) { const d = getRecordDeduction(r); return d.amount > 0 ? money(d.amount) + (d.reason ? " (" + d.reason + ")" : "") : ""; };
+    field("الحسم", ded(oldRecord), ded(record));
+    field("المدققون", getRecordAuditors(oldRecord).join("، "), getRecordAuditors(record).join("، "));
+    const byId = function (list) { const m = {}; (list || []).forEach(function (a) { if (a && a.id) m[a.id] = a; }); return m; };
+    const before = byId(oldRecord.agencies), after = byId(record.agencies);
+    const added = [], removed = [], changed = [], renumbered = [];
+    Object.keys(after).forEach(function (id) {
+        if (!before[id]) { added.push(after[id].number); return; }
+        if (text(before[id].number) !== text(after[id].number)) renumbered.push(before[id].number + "←" + after[id].number);
+        const a = Object.assign({}, before[id], { number: "" }), b = Object.assign({}, after[id], { number: "" });
+        if (JSON.stringify(a) !== JSON.stringify(b)) changed.push(after[id].number);
+    });
+    Object.keys(before).forEach(function (id) { if (!after[id]) removed.push(before[id].number); });
+    const nums = function (list) { return list.slice(0, 15).join("، ") + (list.length > 15 ? "… (" + list.length + ")" : ""); };
+    if (added.length) parts.push("أُضيفت وكالات: " + nums(added));
+    if (removed.length) parts.push("حُذفت وكالات: " + nums(removed));
+    if (changed.length) parts.push("عُدّلت وكالات: " + nums(changed));
+    if (renumbered.length) parts.push("تغيّرت أرقام: " + nums(renumbered));
+    return parts.length ? parts.join("؛ ") : "حفظ بدون تغيير في البيانات";
+}
+
+/* تغيير حالة القبض من القائمة المنسدلة في جدول السجلات */
+function setRecordPaid(id, paid, control) {
+    const index = records.findIndex(function (r) { return r.id === id; });
+    if (index === -1) return;
+    if (!currentUser || currentUser.role === "viewer") {
+        notify("تغيير حالة القبض غير متاح للمشاهد.", "error");
+        if (control) control.value = isRecordPaid(records[index]) ? "paid" : "unpaid";
+        return;
+    }
+    const old = records[index];
+    if (isRecordPaid(old) === !!paid) return;
+    const apply = function () {
+        const updated = JSON.parse(JSON.stringify(old));
+        const now = new Date().toISOString();
+        if (paid) updated.payment = { status: "paid", at: now, by: currentUser.username };
+        else delete updated.payment;
+        updated.updatedAt = now;
+        addRecordHistory(updated, paid ? "paid" : "unpaid",
+            paid ? "صار مقبوضاً بتاريخ " + formatDateTime(now) : "أُعيد إلى «غير مقبوض» (كان مقبوضاً منذ " + formatDateTime(old.payment && old.payment.at) + ")");
+        const before = records.slice();
+        records[index] = updated;
+        return persistRecords().then(function () {
+            renderRecords();
+            updateDashboard();
+            notify((paid ? "السجل " + escapeHTML(updated.recordNumber) + " صار <strong>مقبوضاً</strong>." : "السجل " + escapeHTML(updated.recordNumber) + " صار <strong>غير مقبوض</strong>."), "success", 3500);
+        }).catch(function (error) {
+            records = before;
+            renderRecords();
+            notify("<strong>لم تُحفظ حالة القبض</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        });
+    };
+    if (paid) { apply(); return; }
+    appConfirm({
+        title: "إرجاع السجل إلى «غير مقبوض»",
+        message: "السجل " + old.recordNumber + " مسجّل مقبوضاً بتاريخ " + formatDateTime(old.payment && old.payment.at) + ". هل تريد إرجاعه إلى غير مقبوض؟ (يُكتب ذلك في سجل التعديلات)",
+        confirmText: "إرجاع إلى غير مقبوض",
+        cancelText: "إلغاء"
+    }).then(function (ok) {
+        if (ok) apply();
+        else if (control) control.value = "paid";
+    });
+}
+
+function paymentControlHTML(record, canEdit) {
+    const paid = isRecordPaid(record);
+    const title = paid ? "مقبوض بتاريخ " + formatDateTime(record.payment.at) + (record.payment.by ? " — " + record.payment.by : "") : "غير مقبوض";
+    if (!canEdit) return '<span class="pay-badge ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '">' + (paid ? "مقبوض" : "غير مقبوض") + "</span>";
+    return '<select class="pay-select ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '" aria-label="حالة القبض للسجل ' + escapeHTML(record.recordNumber) + '"' +
+        " onchange=\"setRecordPaid('" + escapeHTML(record.id) + "', this.value === 'paid', this)\">" +
+        '<option value="unpaid"' + (paid ? "" : " selected") + ">غير مقبوض</option>" +
+        '<option value="paid"' + (paid ? " selected" : "") + ">مقبوض</option></select>";
+}
+
+/* نافذة سجل التعديلات */
+function showRecordHistory(id) {
+    const record = records.find(function (r) { return r.id === id; });
+    if (!record) return;
+    const list = getRecordHistory(record).slice().reverse();
+    const rows = list.map(function (h) {
+        const a = HISTORY_ACTIONS[h.action] || [h.action || "—", "ti-point"];
+        return '<li class="history-item is-' + escapeHTML(h.action || "") + '"><span class="history-icon"><i class="ti ' + a[1] + '" aria-hidden="true"></i></span>' +
+            '<div><p class="history-head"><b>' + escapeHTML(a[0]) + "</b><time>" + escapeHTML(formatDateTime(h.at)) + "</time>" + (h.by ? "<span>" + escapeHTML(h.by) + "</span>" : "") + "</p>" +
+            (h.detail ? '<p class="history-detail">' + escapeHTML(h.detail) + "</p>" : "") + "</div></li>";
+    }).join("");
+    const older = '<li class="history-item is-legacy"><span class="history-icon"><i class="ti ti-history" aria-hidden="true"></i></span><div><p class="history-head"><b>قبل تفعيل سجل التعديلات</b>' +
+        (record.createdAt ? "<time>أُنشئ " + escapeHTML(formatDateTime(record.createdAt)) + "</time>" : "") + "</p></div></li>";
+    document.getElementById("modalContent").innerHTML =
+        '<div class="report-actions no-print"><button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button></div>' +
+        '<div class="history-view"><h2>سجل التعديلات — السجل ' + escapeHTML(record.recordNumber) + "</h2>" +
+        '<p class="history-sub">' + escapeHTML(record.representativeName || "") + " — " + escapeHTML(record.officeName || "") + " — الحالة: <b>" + (isRecordPaid(record) ? "مقبوض منذ " + escapeHTML(formatDateTime(record.payment.at)) : "غير مقبوض") + "</b></p>" +
+        '<ol class="history-list">' + rows + (list.length && list[list.length - 1].action === "create" ? "" : older) + "</ol></div>";
+    document.getElementById("recordModal").classList.remove("hidden");
+}
+
+window.setRecordPaid = setRecordPaid;
+window.showRecordHistory = showRecordHistory;
 
 /* =========================================================
 السجلات المستردة من مواقع تدقيق أخرى أو من تدقيق يدوي (23/11/2026)
@@ -6490,6 +6651,8 @@ function saveRecoveredForm(addAnother) {
     const doSave = function () {
         const before = records.slice();
         const idx = records.findIndex(function (r) { return r.id === record.id; });
+        if (old) addRecordHistory(record, "edit", describeRecordChanges(old, record));
+        else addRecordHistory(record, "create", "سجل مسترد — " + recoveredSourceText(record));
         if (idx === -1) records.push(record); else records[idx] = record;
         persistRecords().then(function () {
             notify("<strong>حُفظ السجل المسترد " + escapeHTML(recordNumber) + "</strong><span>" + escapeHTML(recoveredSourceText(record)) + "</span>", "success", 3500, true);
@@ -6763,7 +6926,7 @@ function applyRecoveredImport() {
             summary: { agencyCount: it.agencies, amountDue: it.amount },
             recordNote: it.note || undefined, createdAt: now, updatedAt: now
         };
-    });
+    }).map(function (r) { return addRecordHistory(r, "import", "سجل مسترد من ملف «" + (recoveredImport.fileName || "") + "»"); });
     const before = records.slice();
     records = records.concat(added);
     persistRecords().then(function () {
@@ -6916,6 +7079,8 @@ const CR_COLUMNS = {
         { key: "rep", label: "المندوب", get: function (r) { return String(r.representativeName || "").trim(); } },
         { key: "repType", label: "نوع المندوب", get: function (r) { return r.representativeType === "external" ? "خارجي" : "داخلي"; } },
         { key: "source", label: "المصدر", get: function (r) { return recoveredSourceText(r); } },
+        { key: "paid", label: "حالة القبض", get: function (r) { return isRecordPaid(r) ? "مقبوض" : "غير مقبوض"; } },
+        { key: "paidAt", label: "تاريخ القبض", get: function (r) { return isRecordPaid(r) ? formatDateTime(r.payment.at) : ""; } },
         { key: "agencies", label: "عدد الوكالات", type: "num", get: function (r, st) { return isRecoveredRecord(r) ? recoveredSummary(r).agencyCount : st.agencies.length; } },
         { key: "active", label: "الفعالة", type: "num", get: function (r, st) { return st.active.length - st.missingAgenciesCount; } },
         { key: "lost", label: "المفقودة", type: "num", get: function (r, st) { return st.missingAgenciesCount; } },
@@ -7709,6 +7874,8 @@ function openRecordMenu(button, id) {
     if (canEdit) {
         items.push({ icon: "ti-edit", text: "تعديل السجل", run: function () { editRecord(id); } });
     }
+
+    items.push({ icon: "ti-history", text: "سجل التعديلات", run: function () { showRecordHistory(id); } });
 
     if (canDelete) {
         items.push({ icon: "ti-trash", text: "حذف السجل", danger: true, run: function () { deleteRecord(id); } });
@@ -8868,9 +9035,12 @@ function saveRecordRecovery(id, mode) {
 
     const empty = Object.keys(next).every(function (k) { return !next[k]; });
     const updatedBefore = record.updatedAt;
+    const historyBefore = record.history;
 
     if (empty) delete record.recovery; else record.recovery = next;
     record.updatedAt = new Date().toISOString();
+    addRecordHistory(record, "recovery", empty ? "حُذفت بيانات الإيصالات" :
+        [next.centralReceipt ? "إيصال المركزية " + next.centralReceipt : "", next.branchReceipt ? "إيصال الفرع " + next.branchReceipt : "", next.text ? "فقرة إضافية" : ""].filter(Boolean).join("، "));
 
     persistRecords().then(function () {
         delete recoveryDrafts[id];
@@ -8879,6 +9049,7 @@ function saveRecordRecovery(id, mode) {
     }).catch(function (error) {
         if (before === undefined) delete record.recovery; else record.recovery = before;
         record.updatedAt = updatedBefore;
+        if (historyBefore === undefined) delete record.history; else record.history = historyBefore;
         notify("<strong>لم يُحفظ</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
     });
 }
@@ -13927,6 +14098,9 @@ function applyRecordReprice() {
             }, batch, at);
             it.record.updatedAt = at;
         });
+        const repriced = new Map();
+        items.forEach(function (it) { if (!repriced.has(it.record)) repriced.set(it.record, []); repriced.get(it.record).push(it.agency.number); });
+        logPriceHistory(repriced, "إعادة تسعير حسب تاريخ السجل");
 
         persistRecords().then(function () {
             refreshAfterReprice();
@@ -13961,6 +14135,7 @@ function undoRecordReprice() {
 
         const before = JSON.stringify(records);
         let count = 0;
+        const undone = new Map();
 
         records.forEach(function (record) {
             (record.agencies || []).forEach(function (a) {
@@ -13985,9 +14160,12 @@ function undoRecordReprice() {
                 hist.pop();
                 if (!hist.length) delete a.priceHistory;
                 record.updatedAt = new Date().toISOString();
+                if (!undone.has(record)) undone.set(record, []);
+                undone.get(record).push(a.number);
                 count++;
             });
         });
+        logPriceHistory(undone, "تراجع عن تغيير السعر");
 
         persistRecords().then(function () {
             refreshAfterReprice();
@@ -14002,6 +14180,13 @@ function undoRecordReprice() {
 }
 
 /* تحديث الواجهات بعد الحفظ؛ خطأ في عرضٍ ما لا يُلغي ما حُفظ */
+/* سطر «تغيير سعر» في سجل تعديلات كل سجل تغيّرت وكالاته (agencyNumbersByRecord: Map سجل ← أرقام) */
+function logPriceHistory(map, label) {
+    map.forEach(function (nums, record) {
+        addRecordHistory(record, "price", label + ": " + nums.length + " وكالة (" + nums.slice(0, 15).join("، ") + (nums.length > 15 ? "…" : "") + ")");
+    });
+}
+
 function refreshAfterReprice() {
     [renderRecordReprice, renderBulkPrice, renderRecords, updateDashboard, renderReports].forEach(function (step) {
         try { step(); } catch (error) { console.error("Refresh after reprice failed:", error); }
@@ -14294,6 +14479,9 @@ function applyBulkPrice() {
         });
         /* السجل تغيّر الآن (لحسم المزامنة بين الأجهزة لصالح هذا التعديل) */
         touched.forEach(function (r) { r.updatedAt = at; });
+        const bulkNums = new Map();
+        items.forEach(function (it) { if (!bulkNums.has(it.record)) bulkNums.set(it.record, []); bulkNums.get(it.record).push(it.agency.number); });
+        logPriceHistory(bulkNums, "تغيير سعر وكالات محفوظة");
         persistRecords().then(function () {
             refreshAfterReprice();
             notify("<strong>تغيّر سعر " + items.length + " وكالة</strong><span>حصص اللجنتين محسوبة من السعر الجديد.</span>", "success", 7000, true);
@@ -15821,6 +16009,17 @@ function updateDashboard() {
             ? "مجموع " + (records.length - recoveredCount) + " سجل و " + agencies.length + " وكالة" + (recoveredCount ? " (و " + recoveredCount + " سجل مسترد للمطابقة)" : "")
             : "لم يُسجَّل أي سجل بعد"
     );
+
+    /* حالة القبض: كم سجلاً مدقّقاً لم يُقبض بعد ومبلغه الصافي */
+    const unpaid = auditedRecords().filter(function (r) { return !isRecordPaid(r); });
+    const unpaidBox = document.getElementById("dashUnpaid");
+    if (unpaidBox) {
+        const amount = unpaid.reduce(function (sum, r) { return sum + getRecordNetDue(r); }, 0);
+        unpaidBox.hidden = !auditedRecords().length;
+        unpaidBox.innerHTML = unpaid.length
+            ? '<i class="ti ti-cash-off" aria-hidden="true"></i> غير مقبوض: <b>' + unpaid.length + "</b> سجل بمبلغ <b>" + money(amount) + "</b>"
+            : '<i class="ti ti-circle-check" aria-hidden="true"></i> كل السجلات مقبوضة';
+    }
 
     try {
         setText(
