@@ -1346,6 +1346,20 @@ function normalizeDigits(text) {
         .replace(/٫/g, ".");
 }
 
+/* هوية السجل (24/11/2026): رقم السجل ليس فريداً؛ نفس الرقم مسموح لمندوب أو مكتب آخر.
+   التكرار الحقيقي = نفس الرقم + نفس المندوب + نفس المكتب (بعد تنظيف المسافات والأرقام). */
+function identityPart(text) {
+    return normalizeDigits(String(text == null ? "" : text)).replace(/\s+/g, " ").trim();
+}
+
+function recordIdentityKey(record) {
+    return identityPart(record && record.recordNumber) + "\u0001" + identityPart(record && record.representativeName) + "\u0001" + identityPart(record && record.officeName);
+}
+
+function sameRecordIdentity(a, b) {
+    return recordIdentityKey(a) === recordIdentityKey(b);
+}
+
 function number(value) {
 
 /* نص من حقل إدخال: أرقام عربية أو فواصل آلاف لا تتحول إلى صفر */
@@ -1875,6 +1889,209 @@ function (button) {
 );
 
 /* =========================================================
+تخصيص الواجهة (24/11/2026): تفضيلات لهذا الجهاز فقط (audit_ui_*)، لا بيانات.
+الوضع، حجم الخط، كثافة الجداول (audit_ui_density)، صفحة البداية (audit_ui_start_section)،
+والإعداد الافتراضي للتقارير (audit_ui_report).
+========================================================= */
+
+const DENSITY_KEY = "audit_ui_density";
+const START_SECTION_KEY = "audit_ui_start_section";
+
+function readUiPref(key, fallback) {
+    try { const v = localStorage.getItem(key); return v === null ? fallback : v; } catch (e) { return fallback; }
+}
+
+function writeUiPref(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) {}
+}
+
+function applyDensity() {
+    document.documentElement.setAttribute("data-density", readUiPref(DENSITY_KEY, "comfortable") === "compact" ? "compact" : "comfortable");
+}
+applyDensity();
+
+function startSectionPref() {
+    return readUiPref(START_SECTION_KEY, "last");
+}
+
+function syncPersonalize() {
+    const box = document.getElementById("personalizeCard");
+    if (!box) return;
+    const check = function (name, value) {
+        box.querySelectorAll('input[name="' + name + '"]').forEach(function (r) {
+            r.checked = r.value === value;
+            r.closest("label")?.classList.toggle("is-on", r.checked);
+        });
+    };
+    check("prefTheme", currentTheme());
+    check("prefDensity", readUiPref(DENSITY_KEY, "comfortable"));
+    const start = document.getElementById("prefStart");
+    if (start) start.value = startSectionPref();
+    const font = document.getElementById("prefFontValue");
+    if (font) font.textContent = Math.round(currentUiFontScale() * 100) + "%";
+    const rp = reportPrefs();
+    const rs = document.getElementById("prefReportScale");
+    if (rs) rs.textContent = Math.round(rp.scale * 100) + "%";
+    const rec = document.getElementById("prefRecovery");
+    if (rec) rec.checked = rp.recovery;
+    const sig = document.getElementById("prefSignatures");
+    if (sig) sig.checked = rp.signatures;
+    syncUiFontScaleLabel();
+}
+
+document.getElementById("personalizeCard")?.addEventListener("change", function (event) {
+    const t = event.target;
+    if (t.name === "prefTheme" && t.value !== currentTheme()) toggleTheme();
+    if (t.name === "prefDensity") { writeUiPref(DENSITY_KEY, t.value); applyDensity(); }
+    if (t.id === "prefStart") writeUiPref(START_SECTION_KEY, t.value);
+    if (t.id === "prefRecovery") saveReportPrefs({ recovery: t.checked });
+    if (t.id === "prefSignatures") saveReportPrefs({ signatures: t.checked });
+    syncPersonalize();
+});
+
+document.getElementById("personalizeCard")?.addEventListener("click", function (event) {
+    const b = event.target.closest("[data-pref-report-scale]");
+    if (!b) return;
+    const step = Number(b.dataset.prefReportScale);
+    const next = Math.min(REPORT_SCALE_MAX, Math.max(REPORT_SCALE_MIN, Math.round((reportPrefs().scale + step * 0.1) * 10) / 10));
+    saveReportPrefs({ scale: next });
+    syncPersonalize();
+});
+
+window.syncPersonalize = syncPersonalize;
+
+/* =========================================================
+«عرض المزيد / عرض أقل» (24/11/2026): أي عنصر .expandable يُطوى إلى أسطر قليلة،
+ويظهر الزر فقط إن كان النص أطول فعلاً. لا قصّ للنص بـ«…» في أي مكان.
+========================================================= */
+
+function applyExpandables(root) {
+    (root || document).querySelectorAll(".expandable:not([data-exp])").forEach(function (el) {
+        el.dataset.exp = "1";
+        el.classList.add("is-clamped");
+        if (el.scrollHeight <= el.clientHeight + 2) { el.classList.remove("is-clamped"); return; }
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "expand-toggle no-print";
+        btn.textContent = "عرض المزيد";
+        btn.setAttribute("aria-expanded", "false");
+        btn.addEventListener("click", function () {
+            const open = el.classList.toggle("is-clamped") === false;
+            btn.textContent = open ? "عرض أقل" : "عرض المزيد";
+            btn.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+        el.insertAdjacentElement("afterend", btn);
+    });
+}
+
+/* «حول الموقع»: آخر 4 مراحل ظاهرة، والأقدم تحت «عرض المراحل السابقة» */
+const DEVLOG_VISIBLE = 4;
+function setupDevlogStages() {
+    const list = document.querySelector("#devlogSection .devlog-timeline");
+    if (!list || list.dataset.folded) return;
+    const stages = Array.prototype.slice.call(list.querySelectorAll(":scope > .devlog-stage"));
+    if (stages.length <= DEVLOG_VISIBLE) return;
+    list.dataset.folded = "1";
+    const older = stages.slice(0, stages.length - DEVLOG_VISIBLE);
+    older.forEach(function (li) { li.classList.add("is-older-hidden"); });
+    const box = document.createElement("div");
+    box.className = "devlog-more no-print";
+    box.innerHTML = '<button type="button" class="secondary-btn"><i class="ti ti-history" aria-hidden="true"></i> عرض المراحل السابقة (' + older.length + ")</button>";
+    box.querySelector("button").addEventListener("click", function () {
+        const hidden = older[0].classList.contains("is-older-hidden");
+        older.forEach(function (li) { li.classList.toggle("is-older-hidden", !hidden); });
+        this.innerHTML = hidden ? '<i class="ti ti-chevron-up" aria-hidden="true"></i> إخفاء المراحل السابقة' : '<i class="ti ti-history" aria-hidden="true"></i> عرض المراحل السابقة (' + older.length + ")";
+    });
+    list.parentNode.insertBefore(box, list);
+}
+
+/* =========================================================
+خيارات تُفعَّل عند الحاجة (24/11/2026): «مفتاح» يُظهر لوحة مخفية.
+<input type="checkbox" data-reveal="panelId"> + <div id="panelId" class="reveal-panel" hidden>
+اللوحة تُفتح تلقائياً إذا كان فيها قيمة (تعديل سجل، مسودة)، وإطفاء المفتاح وفيها
+قيمة يسأل ثم يمسحها (حتى لا يُحفظ شيء مخفي دون علم المستخدم).
+========================================================= */
+
+function revealFields(panel) {
+    return panel ? Array.prototype.slice.call(panel.querySelectorAll("input:not([type=file]):not([type=checkbox]), textarea, select")) : [];
+}
+
+function revealHasValue(panel) {
+    return revealFields(panel).some(function (el) { return String(el.value || "").trim() !== ""; });
+}
+
+function setReveal(panelId, open) {
+    const panel = document.getElementById(panelId);
+    const toggle = document.querySelector('[data-reveal="' + panelId + '"]');
+    if (!panel) return;
+    panel.hidden = !open;
+    if (toggle) { toggle.checked = !!open; toggle.closest(".reveal-toggle")?.classList.toggle("is-on", !!open); }
+}
+
+/* closeEmpty: عند تحميل سجل أو تفريغ النموذج تُغلق اللوحة الفارغة */
+function syncReveal(panelId, closeEmpty) {
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    if (revealHasValue(panel)) setReveal(panelId, true);
+    else if (closeEmpty) setReveal(panelId, false);
+}
+
+document.addEventListener("change", function (event) {
+    const toggle = event.target;
+    if (!toggle.matches || !toggle.matches("input[type=checkbox][data-reveal]")) return;
+    const panelId = toggle.dataset.reveal;
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    if (toggle.checked) {
+        setReveal(panelId, true);
+        const first = revealFields(panel)[0] || panel.querySelector("button");
+        if (first) setTimeout(function () { try { first.focus(); } catch (e) {} }, 30);
+        return;
+    }
+    if (!revealHasValue(panel)) { setReveal(panelId, false); return; }
+    /* فيها قيمة: إخفاؤها يعني مسحها — بعد تأكيد */
+    toggle.checked = true;
+    appConfirm({
+        title: "إطفاء «" + (panel.dataset.revealLabel || "الخيار") + "»",
+        message: "سيُمسح ما كُتب فيه ولن يُحفظ مع السجل. متابعة؟",
+        confirmText: "إطفاء ومسح",
+        cancelText: "إبقاء",
+        danger: true
+    }).then(function (ok) {
+        if (!ok) return;
+        revealFields(panel).forEach(function (el) {
+            el.value = el.tagName === "SELECT" ? (el.options[0] ? el.options[0].value : "") : "";
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        setReveal(panelId, false);
+    });
+});
+
+/* الفلاتر المطوية: تُفتح تلقائياً وتُظهر عدد ما هو مفعّل بداخلها */
+function syncFilterMore(detailsId, countId, active) {
+    const details = document.getElementById(detailsId);
+    const count = document.getElementById(countId);
+    if (!details) return;
+    if (count) { count.hidden = !active; count.textContent = active ? String(active) : ""; }
+    if (active && !details.open) details.open = true;
+}
+
+function syncRecordsFilterMore() {
+    const active = ["source", "rep", "office", "auditor"].filter(function (k) { return recordsView[k] && recordsView[k] !== "all"; }).length;
+    syncFilterMore("rfMore", "rfMoreCount", active);
+}
+
+function syncReportFilterMore() {
+    const box = document.getElementById("reportFilterMore");
+    if (!box) return;
+    let active = box.querySelectorAll('input[type="checkbox"]:checked').length;
+    const stamps = document.getElementById("filterStamps");
+    if (stamps && stamps.value) active++;
+    syncFilterMore("reportFilterMore", "reportMoreCount", active);
+}
+
+/* =========================================================
 الإدارة (23/11/2026): تبويب رئيسي واحد بدل «الحاسبة» و«المستخدمون»، فيه تبويبات فرعية
 لكل واحد قسمه (section) المعتاد بنفس معرّفه، فكل الكود القديم يعمل كما هو.
 آخر تبويب فرعي مفتوح تفضيل واجهة (audit_ui_admin_tab).
@@ -1882,9 +2099,12 @@ function (button) {
 
 const ADMIN_TABS = [
     { id: "calculatorSection", icon: "ti-calculator", text: "الحاسبة" },
-    { id: "printSettingsSection", icon: "ti-printer", text: "الطباعة والتخصيص", manager: true },
+    { id: "guideSection", icon: "ti-book-2", text: "شرح النظام" },
+    { id: "personalizeSection", icon: "ti-adjustments-horizontal", text: "تخصيص الواجهة" },
+    { id: "printSettingsSection", icon: "ti-signature", text: "التوقيعات والطباعة", manager: true },
     { id: "usersSection", icon: "ti-users", text: "المستخدمون", manager: true },
-    { id: "backupSection", icon: "ti-database", text: "النسخ الاحتياطي", manager: true }
+    { id: "backupSection", icon: "ti-database", text: "النسخ الاحتياطي", manager: true },
+    { id: "devlogSection", icon: "ti-timeline-event", text: "حول الموقع" }
 ];
 const ADMIN_TAB_KEY = "audit_ui_admin_tab";
 
@@ -2097,6 +2317,20 @@ if (
 if (id === "backupSection" || id === "usersSection") {
 
     if (typeof renderStorageInfo === "function") renderStorageInfo();
+
+}
+
+
+if (id === "personalizeSection") {
+
+    syncPersonalize();
+
+}
+
+
+if (id === "devlogSection") {
+
+    setupDevlogStages();
 
 }
 
@@ -2497,6 +2731,7 @@ function renderAgencyPricePeriod() {
     select.innerHTML = pricePeriodOptionsHTML(value, type);
     select.value = pricePeriodChoices().some(function (c) { return c.value === value; }) ? value : "";
     select.closest(".price-period-group")?.classList.toggle("is-override", !!select.value);
+    syncReveal("pricePeriodBox", false);
 }
 
 function setAgencyPricePeriod(value) {
@@ -2507,6 +2742,7 @@ function setAgencyPricePeriod(value) {
     }
     select.value = value || "";
     renderAgencyPricePeriod();
+    syncReveal("pricePeriodBox", true);
 }
 
 /* تغيير فترة سعر وكالة مضافة من سطرها */
@@ -4593,14 +4829,14 @@ container.innerHTML =
 
                             <button
                                 type="button"
-                                class="secondary-btn"
+                                class="secondary-btn btn-edit"
                                 onclick="
                                     editPendingAgency(
                                         ${index}
                                     )
                                 "
                             >
-                                تعديل
+                                <i class="ti ti-edit" aria-hidden="true"></i> تعديل
                             </button>
 
 
@@ -4613,7 +4849,7 @@ container.innerHTML =
                                     )
                                 "
                             >
-                                حذف
+                                <i class="ti ti-trash" aria-hidden="true"></i> حذف
                             </button>
 
                         </div>
@@ -4823,15 +5059,34 @@ if (!agency) {
     return;
 }
 
-appConfirm({
-    title: "حذف الوكالة",
-    message: "هل تريد حذف الوكالة رقم " + agency.number + " من هذا السجل؟",
-    confirmText: "حذف الوكالة",
-    cancelText: "إلغاء",
-    danger: true
-}).then(function (ok) {
+/* بعد الحذف: هل يمكن إعادة ترقيم ما بعدها (66 تصبح 65…)؟ فقط لرقم صحيح لا تحمله وكالة أخرى */
+const n = /^\d+$/.test(identityPart(agency.number)) ? Number(identityPart(agency.number)) : null;
+const later = n === null ? [] : pendingAgencies.filter(function (a) {
+    return a !== agency && /^\d+$/.test(identityPart(a.number)) && Number(identityPart(a.number)) > n;
+});
+const sameLeft = n !== null && pendingAgencies.some(function (a) { return a !== agency && identityPart(a.number) === String(n); });
+const canRenumber = later.length > 0 && !sameLeft && !editingAgency;
 
-    if (!ok) {
+const ask = canRenumber
+    ? appChoose({
+        title: "حذف الوكالة رقم " + agency.number,
+        message: "بعدها " + later.length + " وكالة. «حذف وإعادة الترقيم» يجعل الوكالة " + (n + 1) + " رقم " + n + " وهكذا بالتسلسل حتى الأخيرة، وما قبل " + n + " لا يتغير.",
+        choices: [
+            { value: "renumber", label: "حذف وإعادة ترقيم ما بعدها", kind: "danger" },
+            { value: "delete", label: "حذف فقط", kind: "secondary" }
+        ]
+    })
+    : appConfirm({
+        title: "حذف الوكالة",
+        message: "هل تريد حذف الوكالة رقم " + agency.number + " من هذا السجل؟",
+        confirmText: "حذف الوكالة",
+        cancelText: "إلغاء",
+        danger: true
+    }).then(function (ok) { return ok ? "delete" : null; });
+
+ask.then(function (choice) {
+
+    if (!choice) {
         return;
     }
 
@@ -4845,12 +5100,131 @@ appConfirm({
         clearAgencyForm();
     }
 
+    if (choice === "renumber") {
+        renumberPendingAgencies(n + 1, n, "حُذفت الوكالة رقم " + agency.number);
+        return;
+    }
+
     renderPendingAgencies();
 
     notify("تم حذف الوكالة رقم " + escapeHTML(agency.number) + ".", "info", 2500);
 });
 
 }
+
+/* =========================================================
+إعادة الترقيم (24/11/2026) — مثل «تعبئة السلسلة» في Excel:
+كل وكالة رقمها الصحيح ≥ from (بترتيب أرقامها ثم ترتيب إضافتها) تأخذ startAt ثم startAt+1…
+ما قبل from والأرقام غير الصحيحة لا تتغير. يُحفظ القديم للتراجع.
+========================================================= */
+
+let renumberUndo = null;
+
+function renumberPlan(from, startAt) {
+    const list = pendingAgencies
+        .map(function (a, i) { return { a: a, i: i, n: identityPart(a.number) }; })
+        .filter(function (x) { return /^\d+$/.test(x.n) && Number(x.n) >= from; })
+        .sort(function (x, y) { return Number(x.n) - Number(y.n) || x.i - y.i; });
+    return list.map(function (x, k) { return { agency: x.a, from: x.n, to: String(startAt + k) }; });
+}
+
+function renumberPendingAgencies(from, startAt, prefix) {
+    if (editingAgency) {
+        notify("أنهِ تعديل الوكالة المفتوحة أولاً («إضافة الوكالة» أو «إلغاء»)، ثم أعد الترقيم.", "warning", 6000);
+        renderPendingAgencies();
+        return 0;
+    }
+    const plan = renumberPlan(from, startAt).filter(function (p) { return p.from !== p.to; });
+    if (plan.length) {
+        renumberUndo = plan.map(function (p) { return { id: p.agency.id, agency: p.agency, number: p.agency.number }; });
+        plan.forEach(function (p) { p.agency.number = p.to; });
+        /* أرقام تغيّرت: لا يصح بعدها تراجع «الإدراج والإزاحة» القديم */
+        lastInsertShift = null;
+    }
+    renderPendingAgencies();
+    const numberInput = document.getElementById("agencyNumber");
+    if (numberInput && !editingAgency) numberInput.value = getNextAgencyNumber();
+    updatePreview();
+    if (typeof saveRecordDraft === "function") saveRecordDraft();
+    const head = prefix ? escapeHTML(prefix) + " — " : "";
+    if (!plan.length) {
+        notify(head + "الأرقام متسلسلة أصلاً، لم يتغير شيء.", "info", 3500);
+        return 0;
+    }
+    notify("<strong>" + head + "أُعيد ترقيم " + plan.length + " وكالة</strong><span>من " + escapeHTML(plan[0].from) + " ← " + escapeHTML(plan[0].to) +
+        " حتى " + escapeHTML(plan[plan.length - 1].from) + " ← " + escapeHTML(plan[plan.length - 1].to) + "</span>" +
+        '<span class="toast-actions"><button type="button" class="act-btn" onclick="undoRenumberAgencies()">تراجع عن الترقيم</button></span>',
+        "success", 9000, true);
+    return plan.length;
+}
+
+function undoRenumberAgencies() {
+    if (!renumberUndo) return;
+    const list = renumberUndo;
+    renumberUndo = null;
+    list.forEach(function (x) { if (pendingAgencies.indexOf(x.agency) !== -1) x.agency.number = x.number; });
+    renderPendingAgencies();
+    const numberInput = document.getElementById("agencyNumber");
+    if (numberInput && !editingAgency) numberInput.value = getNextAgencyNumber();
+    updatePreview();
+    if (typeof saveRecordDraft === "function") saveRecordDraft();
+    notify("أُعيدت الأرقام كما كانت.", "info", 3000);
+}
+
+/* أول فجوة في التسلسل: الاقتراح الافتراضي للنافذة */
+function firstNumberGap() {
+    const nums = Array.from(new Set(pendingAgencies.map(function (a) { return identityPart(a.number); })
+        .filter(function (n) { return /^\d+$/.test(n); }).map(Number))).sort(function (a, b) { return a - b; });
+    for (let i = 1; i < nums.length; i++) {
+        if (nums[i] - nums[i - 1] > 1) return { from: nums[i], startAt: nums[i - 1] + 1 };
+    }
+    return nums.length ? { from: nums[0], startAt: nums[0] } : null;
+}
+
+function openRenumberDialog() {
+    if (editingAgency) {
+        notify("أنهِ تعديل الوكالة المفتوحة أولاً، ثم أعد الترقيم.", "warning", 5000);
+        return;
+    }
+    const gap = firstNumberGap();
+    if (!gap) {
+        notify("لا توجد وكالات بأرقام لإعادة ترقيمها.", "info", 3000);
+        return;
+    }
+    const preview = function (values, dialog) {
+        const from = number(values.from), startAt = number(values.startAt);
+        const msg = dialog.querySelector(".app-dialog-message");
+        if (!(from > 0) || !(startAt > 0)) { msg.textContent = "اكتب رقمين صحيحين."; return; }
+        const plan = renumberPlan(from, startAt);
+        const changed = plan.filter(function (p) { return p.from !== p.to; });
+        msg.textContent = plan.length
+            ? "الوكالات من " + from + " فما فوق (" + plan.length + " وكالة) تصبح " + startAt + "، " + (startAt + 1) + "… حتى " + plan[plan.length - 1].to +
+              ". سيتغير " + changed.length + " رقم، وما قبل " + from + " لا يتغير."
+            : "لا توجد وكالة رقمها " + from + " أو أكبر.";
+    };
+    appChoose({
+        title: "إعادة ترقيم الوكالات (تعبئة السلسلة)",
+        message: "",
+        fields: [
+            { id: "from", label: "ابدأ من الوكالة رقم", value: gap.from, numeric: true, onInput: preview },
+            { id: "startAt", label: "لتصبح رقم", value: gap.startAt, numeric: true, onInput: preview }
+        ],
+        onOpen: preview,
+        choices: [{ value: "apply", label: "إعادة الترقيم", kind: "primary" }]
+    }).then(function (res) {
+        if (!res || res.choice !== "apply") return;
+        const from = number(res.values.from), startAt = number(res.values.startAt);
+        if (!(from > 0) || !(startAt > 0) || Math.floor(from) !== from || Math.floor(startAt) !== startAt) {
+            notify("اكتب رقمين صحيحين.", "error");
+            return;
+        }
+        renumberPendingAgencies(from, startAt);
+    });
+}
+
+window.openRenumberDialog = openRenumberDialog;
+window.undoRenumberAgencies = undoRenumberAgencies;
+window.renumberPendingAgencies = renumberPendingAgencies;
 
 window.removePendingAgency =
 removePendingAgency;
@@ -5572,7 +5946,7 @@ recordForm.addEventListener(
             حتى لا يُحفظ نفس السجل مرتين دون انتباه.
         */
         const sameRecord = records.find(function (r) {
-            return r.id !== record.id && String(r.recordNumber).trim() === recordNumber;
+            return r.id !== record.id && sameRecordIdentity(r, record);
         });
 
         const proceed = function () {
@@ -5598,6 +5972,10 @@ recordForm.addEventListener(
                 سجل قيد التعديل لم يعد موجوداً (مسودة قديمة، أو استعادة نسخة
                 احتياطية): يُحفظ كسجل جديد بدل أن يضيع بصمت.
             */
+            /* سجل التعديلات: إنشاء أو وصف ما تغيّر */
+            if (index !== -1) addRecordHistory(record, "edit", describeRecordChanges(records[index], record));
+            else addRecordHistory(record, "create", record.agencies.length + " وكالة");
+
             if (index !== -1) {
 
                 records[index] =
@@ -5674,7 +6052,7 @@ recordForm.addEventListener(
 
         if (sameRecord) {
             appChoose({
-                title: "رقم السجل " + recordNumber + " موجود مسبقاً",
+                title: "السجل " + recordNumber + " لنفس المندوب والمكتب موجود مسبقاً",
                 message: "يوجد سجل محفوظ بنفس الرقم (" + (sameRecord.officeName || "") + " — " + (sameRecord.representativeName || "") + " — " +
                     formatDay(getRecordDay(sameRecord)) + " — " + (sameRecord.agencies || []).length + " وكالة). هل هذا سجل مختلف فعلاً؟",
                 choices: [
@@ -5857,6 +6235,7 @@ function setFormDeduction(d) {
     const r = document.getElementById("recordDeductionReason");
     if (a) a.value = d && number(d.amount) > 0 ? String(number(d.amount)) : "";
     if (r) r.value = d && number(d.amount) > 0 ? String(d.reason || "") : "";
+    syncReveal("recordDeductionBox", true);
     if (typeof updateRecordDock === "function") { try { updateRecordDock(); } catch (e) {} }
 }
 
@@ -5879,6 +6258,7 @@ function getFormRecordNote() {
 function setFormRecordNote(text) {
     const el = document.getElementById("recordNote");
     if (el) el.value = text || "";
+    syncReveal("recordNoteBox", true);
 }
 
 document.getElementById("recordNote")?.addEventListener("input", function () {
@@ -5949,7 +6329,7 @@ onReady(function () {
 ========================================================= */
 
 const RECORDS_VIEW_KEY = "audit_ui_records_view";
-const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", repName: "all", office: "all", auditor: "all", source: "all", sort: "date-desc" };
+const RECORDS_VIEW_DEFAULT = { period: "all", from: "", to: "", rep: "all", repName: "all", office: "all", auditor: "all", source: "all", paid: "all", sort: "date-desc" };
 
 function loadRecordsView() {
     try {
@@ -6002,6 +6382,9 @@ function getVisibleRecords() {
         if (view.source === "recovered" && !isRecoveredRecord(record)) return false;
         if ((view.source === "site" || view.source === "manual") && !(isRecoveredRecord(record) && record.source.kind === view.source)) return false;
         if (view.auditor !== "all" && getRecordAuditors(record).indexOf(view.auditor) === -1) return false;
+        /* حالة القبض */
+        if (view.paid === "paid" && !isRecordPaid(record)) return false;
+        if (view.paid === "unpaid" && isRecordPaid(record)) return false;
         if (q) {
             const hay = normalizeDigits([record.recordNumber, record.officeName, record.representativeName, getRecordAuditors(record).join(" "), formatDay(getRecordDay(record))].join(" ")).toLowerCase();
             if (hay.indexOf(q) === -1) return false;
@@ -6081,6 +6464,8 @@ function syncRecordsFilters() {
     set("rfRep", recordsView.rep);
     set("rfRepName", recordsView.repName);
     set("rfSource", recordsView.source);
+    set("rfPaid", recordsView.paid);
+    syncRecordsFilterMore();
     set("rfOffice", recordsView.office);
     set("rfSort", recordsView.sort);
 
@@ -6090,7 +6475,7 @@ function syncRecordsFilters() {
 }
 
 document.getElementById("recordsFilters")?.addEventListener("change", function (event) {
-    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfRepName: "repName", rfSource: "source", rfOffice: "office", rfAuditor: "auditor", rfSort: "sort" };
+    const map = { rfPeriod: "period", rfFrom: "from", rfTo: "to", rfRep: "rep", rfRepName: "repName", rfSource: "source", rfPaid: "paid", rfOffice: "office", rfAuditor: "auditor", rfSort: "sort" };
     const key = map[event.target.id];
     if (!key) return;
     recordsView[key] = event.target.value;
@@ -6177,11 +6562,11 @@ function renderRecords() {
                 "<td>" + escapeHTML(record.representativeName) + "</td>" +
                 '<td class="num">' + (sum.agencyCount ? '<span class="agency-count">' + sum.agencyCount + "</span>" : "—") + "</td>" +
                 '<td class="num">—</td><td class="num">—</td>' +
-                '<td class="num">' + (sum.amountDue ? money(sum.amountDue) + '<small class="deduction-note">حسب المصدر</small>' : "—") + "</td>" +
+                '<td class="num">' + (sum.amountDue ? money(sum.amountDue) + '<small class="deduction-note">حسب المصدر</small>' : "—") + paymentControlHTML(record, canEdit) + "</td>" +
                 '<td class="date-cell">' + formatDay(getRecordDay(record)) + "</td>" +
                 '<td><div class="action-group">' +
                     '<button type="button" class="act-btn act-primary" onclick="showRecoveredDoc(\'' + record.id + '\')"><i class="ti ti-eye" aria-hidden="true"></i> عرض</button>' +
-                    (canEdit ? '<button type="button" class="act-btn" onclick="openRecoveredForm(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                    (canEdit ? '<button type="button" class="act-btn act-edit" onclick="openRecoveredForm(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
                     '<button type="button" class="act-btn act-more" aria-haspopup="menu" aria-label="إجراءات أخرى للسجل ' + escapeHTML(record.recordNumber) + '" onclick="openRecordMenu(this, \'' + record.id + '\')"><i class="ti ti-dots-vertical" aria-hidden="true"></i></button>' +
                 "</div></td></tr>";
         }
@@ -6196,12 +6581,12 @@ function renderRecords() {
             '<td class="num"><span class="agency-count">' + (record.agencies || []).length + "</span>" + bar + "</td>" +
             '<td class="num">' + money(getRecordBaseTotal(record)) + "</td>" +
             '<td class="num">' + money(getRecordGrandTotal(record)) + "</td>" +
-            '<td class="num money-cell">' + money(getRecordNetDue(record)) + (getRecordDeduction(record).amount > 0 ? '<small class="deduction-note" title="' + escapeHTML(getRecordDeduction(record).reason) + '">بعد حسم ' + money(getRecordDeduction(record).amount) + "</small>" : "") + "</td>" +
+            '<td class="num money-cell">' + money(getRecordNetDue(record)) + (getRecordDeduction(record).amount > 0 ? '<small class="deduction-note" title="' + escapeHTML(getRecordDeduction(record).reason) + '">بعد حسم ' + money(getRecordDeduction(record).amount) + "</small>" : "") + paymentControlHTML(record, canEdit) + "</td>" +
             '<td class="date-cell">' + date + "</td>" +
             /* الإجراءات الأكثر استخداماً ظاهرة، والباقي في قائمة ⋮ */
             '<td><div class="action-group">' +
                 '<button type="button" class="act-btn act-primary" onclick="showFinalRecordReport(\'' + record.id + '\', \'summary\')"><i class="ti ti-file-text" aria-hidden="true"></i> التقرير</button>' +
-                (canEdit ? '<button type="button" class="act-btn" onclick="editRecord(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                (canEdit ? '<button type="button" class="act-btn act-edit" onclick="editRecord(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
                 '<button type="button" class="act-btn act-more" aria-haspopup="menu" aria-label="إجراءات أخرى للسجل ' + escapeHTML(record.recordNumber) + '" onclick="openRecordMenu(this, \'' + record.id + '\')"><i class="ti ti-dots-vertical" aria-hidden="true"></i></button>' +
             "</div></td>" +
             "</tr>";
@@ -6211,6 +6596,160 @@ function renderRecords() {
     syncRecordSelectionUI();
 
 }
+
+/* =========================================================
+حالة القبض وسجل التعديلات (24/11/2026، إضافي)
+record.payment = { status: "paid", at, by } فقط عند «مقبوض»؛ الغياب = غير مقبوض.
+record.history = [{ at, by, action, detail }] — يُضاف سطر مع كل إنشاء أو تعديل أو تغيير
+حالة القبض أو إيصالات الاستدراك أو تغيير سعر جماعي. للبرنامج فقط، لا يُطبع في التقارير.
+========================================================= */
+
+const HISTORY_MAX = 200;
+const HISTORY_ACTIONS = {
+    create: ["إنشاء", "ti-file-plus"],
+    edit: ["تعديل", "ti-edit"],
+    paid: ["مقبوض", "ti-cash"],
+    unpaid: ["غير مقبوض", "ti-cash-off"],
+    recovery: ["إيصالات الاستدراك", "ti-receipt"],
+    price: ["تغيير سعر", "ti-tag"],
+    import: ["استيراد", "ti-file-import"]
+};
+
+function getRecordHistory(record) {
+    return record && Array.isArray(record.history) ? record.history : [];
+}
+
+/* يضيف سطراً إلى نسخة جديدة من القائمة (لا يغيّر قائمة سجل آخر يشاركها) */
+function addRecordHistory(record, action, detail) {
+    const list = getRecordHistory(record).slice();
+    list.push({ at: new Date().toISOString(), by: currentUser ? currentUser.username : "", action: action, detail: detail || "" });
+    record.history = list.length > HISTORY_MAX ? list.slice(-HISTORY_MAX) : list;
+    return record;
+}
+
+function isRecordPaid(record) {
+    return !!(record && record.payment && record.payment.status === "paid");
+}
+
+function formatDateTime(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const pad = function (n) { return String(n).padStart(2, "0"); };
+    return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear() + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+/* وصف مختصر لما تغيّر بين نسختين من السجل */
+function describeRecordChanges(oldRecord, record) {
+    const parts = [];
+    const text = function (v) { return String(v == null ? "" : v).trim(); };
+    const field = function (label, a, b) {
+        if (text(a) !== text(b)) parts.push(label + ": " + (text(a) || "—") + " ← " + (text(b) || "—"));
+    };
+    field("رقم السجل", oldRecord.recordNumber, record.recordNumber);
+    field("المكتب", oldRecord.officeName, record.officeName);
+    field("المندوب", oldRecord.representativeName, record.representativeName);
+    const repType = function (r) { return r.representativeType === "external" ? "خارجي" : "داخلي"; };
+    field("نوع المندوب", repType(oldRecord), repType(record));
+    field("التاريخ", getRecordDay(oldRecord), getRecordDay(record));
+    if (text(getRecordNote(oldRecord)) !== text(getRecordNote(record))) parts.push("ملاحظة السجل");
+    const ded = function (r) { const d = getRecordDeduction(r); return d.amount > 0 ? money(d.amount) + (d.reason ? " (" + d.reason + ")" : "") : ""; };
+    field("الحسم", ded(oldRecord), ded(record));
+    field("المدققون", getRecordAuditors(oldRecord).join("، "), getRecordAuditors(record).join("، "));
+    const byId = function (list) { const m = {}; (list || []).forEach(function (a) { if (a && a.id) m[a.id] = a; }); return m; };
+    const before = byId(oldRecord.agencies), after = byId(record.agencies);
+    const added = [], removed = [], changed = [], renumbered = [];
+    Object.keys(after).forEach(function (id) {
+        if (!before[id]) { added.push(after[id].number); return; }
+        if (text(before[id].number) !== text(after[id].number)) renumbered.push(before[id].number + "←" + after[id].number);
+        const a = Object.assign({}, before[id], { number: "" }), b = Object.assign({}, after[id], { number: "" });
+        if (JSON.stringify(a) !== JSON.stringify(b)) changed.push(after[id].number);
+    });
+    Object.keys(before).forEach(function (id) { if (!after[id]) removed.push(before[id].number); });
+    const nums = function (list) { return list.slice(0, 15).join("، ") + (list.length > 15 ? "… (" + list.length + ")" : ""); };
+    if (added.length) parts.push("أُضيفت وكالات: " + nums(added));
+    if (removed.length) parts.push("حُذفت وكالات: " + nums(removed));
+    if (changed.length) parts.push("عُدّلت وكالات: " + nums(changed));
+    if (renumbered.length) parts.push("تغيّرت أرقام: " + nums(renumbered));
+    return parts.length ? parts.join("؛ ") : "حفظ بدون تغيير في البيانات";
+}
+
+/* تغيير حالة القبض من القائمة المنسدلة في جدول السجلات */
+function setRecordPaid(id, paid, control) {
+    const index = records.findIndex(function (r) { return r.id === id; });
+    if (index === -1) return;
+    if (!currentUser || currentUser.role === "viewer") {
+        notify("تغيير حالة القبض غير متاح للمشاهد.", "error");
+        if (control) control.value = isRecordPaid(records[index]) ? "paid" : "unpaid";
+        return;
+    }
+    const old = records[index];
+    if (isRecordPaid(old) === !!paid) return;
+    const apply = function () {
+        const updated = JSON.parse(JSON.stringify(old));
+        const now = new Date().toISOString();
+        if (paid) updated.payment = { status: "paid", at: now, by: currentUser.username };
+        else delete updated.payment;
+        updated.updatedAt = now;
+        addRecordHistory(updated, paid ? "paid" : "unpaid",
+            paid ? "صار مقبوضاً بتاريخ " + formatDateTime(now) : "أُعيد إلى «غير مقبوض» (كان مقبوضاً منذ " + formatDateTime(old.payment && old.payment.at) + ")");
+        const before = records.slice();
+        records[index] = updated;
+        return persistRecords().then(function () {
+            renderRecords();
+            updateDashboard();
+            notify((paid ? "السجل " + escapeHTML(updated.recordNumber) + " صار <strong>مقبوضاً</strong>." : "السجل " + escapeHTML(updated.recordNumber) + " صار <strong>غير مقبوض</strong>."), "success", 3500);
+        }).catch(function (error) {
+            records = before;
+            renderRecords();
+            notify("<strong>لم تُحفظ حالة القبض</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        });
+    };
+    if (paid) { apply(); return; }
+    appConfirm({
+        title: "إرجاع السجل إلى «غير مقبوض»",
+        message: "السجل " + old.recordNumber + " مسجّل مقبوضاً بتاريخ " + formatDateTime(old.payment && old.payment.at) + ". هل تريد إرجاعه إلى غير مقبوض؟ (يُكتب ذلك في سجل التعديلات)",
+        confirmText: "إرجاع إلى غير مقبوض",
+        cancelText: "إلغاء"
+    }).then(function (ok) {
+        if (ok) apply();
+        else if (control) control.value = "paid";
+    });
+}
+
+function paymentControlHTML(record, canEdit) {
+    const paid = isRecordPaid(record);
+    const title = paid ? "مقبوض بتاريخ " + formatDateTime(record.payment.at) + (record.payment.by ? " — " + record.payment.by : "") : "غير مقبوض";
+    if (!canEdit) return '<span class="pay-badge ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '">' + (paid ? "مقبوض" : "غير مقبوض") + "</span>";
+    return '<select class="pay-select ' + (paid ? "is-paid" : "is-unpaid") + '" title="' + escapeHTML(title) + '" aria-label="حالة القبض للسجل ' + escapeHTML(record.recordNumber) + '"' +
+        " onchange=\"setRecordPaid('" + escapeHTML(record.id) + "', this.value === 'paid', this)\">" +
+        '<option value="unpaid"' + (paid ? "" : " selected") + ">غير مقبوض</option>" +
+        '<option value="paid"' + (paid ? " selected" : "") + ">مقبوض</option></select>";
+}
+
+/* نافذة سجل التعديلات */
+function showRecordHistory(id) {
+    const record = records.find(function (r) { return r.id === id; });
+    if (!record) return;
+    const list = getRecordHistory(record).slice().reverse();
+    const rows = list.map(function (h) {
+        const a = HISTORY_ACTIONS[h.action] || [h.action || "—", "ti-point"];
+        return '<li class="history-item is-' + escapeHTML(h.action || "") + '"><span class="history-icon"><i class="ti ' + a[1] + '" aria-hidden="true"></i></span>' +
+            '<div><p class="history-head"><b>' + escapeHTML(a[0]) + "</b><time>" + escapeHTML(formatDateTime(h.at)) + "</time>" + (h.by ? "<span>" + escapeHTML(h.by) + "</span>" : "") + "</p>" +
+            (h.detail ? '<p class="history-detail expandable">' + escapeHTML(h.detail) + "</p>" : "") + "</div></li>";
+    }).join("");
+    const older = '<li class="history-item is-legacy"><span class="history-icon"><i class="ti ti-history" aria-hidden="true"></i></span><div><p class="history-head"><b>قبل تفعيل سجل التعديلات</b>' +
+        (record.createdAt ? "<time>أُنشئ " + escapeHTML(formatDateTime(record.createdAt)) + "</time>" : "") + "</p></div></li>";
+    document.getElementById("modalContent").innerHTML =
+        '<div class="report-actions no-print"><button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button></div>' +
+        '<div class="history-view"><h2>سجل التعديلات — السجل ' + escapeHTML(record.recordNumber) + "</h2>" +
+        '<p class="history-sub">' + escapeHTML(record.representativeName || "") + " — " + escapeHTML(record.officeName || "") + " — الحالة: <b>" + (isRecordPaid(record) ? "مقبوض منذ " + escapeHTML(formatDateTime(record.payment.at)) : "غير مقبوض") + "</b></p>" +
+        '<ol class="history-list">' + rows + (list.length && list[list.length - 1].action === "create" ? "" : older) + "</ol></div>";
+    document.getElementById("recordModal").classList.remove("hidden");
+    requestAnimationFrame(function () { applyExpandables(document.getElementById("modalContent")); });
+}
+
+window.setRecordPaid = setRecordPaid;
+window.showRecordHistory = showRecordHistory;
 
 /* =========================================================
 السجلات المستردة من مواقع تدقيق أخرى أو من تدقيق يدوي (23/11/2026)
@@ -6225,6 +6764,11 @@ const RECOVERED_SOURCES = { site: "موقع تدقيق آخر", manual: "تدق�
 
 function isRecoveredRecord(record) {
     return !!(record && record.source && RECOVERED_SOURCES[record.source.kind]);
+}
+
+/* السجلات المدقّقة في هذا الموقع فقط (بلا المستردة): لكل إجمالي أو عدّ أو قائمة تصفية للتدقيق */
+function auditedRecords() {
+    return records.filter(function (r) { return !isRecoveredRecord(r); });
 }
 
 function recoveredSummary(record) {
@@ -6331,6 +6875,8 @@ function saveRecoveredForm(addAnother) {
     const doSave = function () {
         const before = records.slice();
         const idx = records.findIndex(function (r) { return r.id === record.id; });
+        if (old) addRecordHistory(record, "edit", describeRecordChanges(old, record));
+        else addRecordHistory(record, "create", "سجل مسترد — " + recoveredSourceText(record));
         if (idx === -1) records.push(record); else records[idx] = record;
         persistRecords().then(function () {
             notify("<strong>حُفظ السجل المسترد " + escapeHTML(recordNumber) + "</strong><span>" + escapeHTML(recoveredSourceText(record)) + "</span>", "success", 3500, true);
@@ -6343,10 +6889,10 @@ function saveRecoveredForm(addAnother) {
     };
 
     /* رقم موجود (مدقّق هنا أو مسترد قبلاً): تنبيه للمطابقة قبل الحفظ */
-    const same = records.filter(function (r) { return r.id !== record.id && String(r.recordNumber).trim() === recordNumber; });
+    const same = records.filter(function (r) { return r.id !== record.id && sameRecordIdentity(r, record); });
     if (same.length) {
         appChoose({
-            title: "رقم السجل " + recordNumber + " موجود مسبقاً",
+            title: "السجل " + recordNumber + " لنفس المندوب والمكتب موجود مسبقاً",
             message: same.map(function (r) { return (isRecoveredRecord(r) ? "مسترد" : "مدقّق هنا") + ": " + (r.representativeName || "") + " — " + (r.officeName || "") + " — " + formatDay(getRecordDay(r)); }).join(" | ") +
                 ". هل هو سجل مختلف فعلاً؟",
             choices: [{ value: "save", label: "احفظه رغم التكرار", kind: "primary" }]
@@ -6386,7 +6932,7 @@ function showRecoveredDoc(id) {
     document.getElementById("modalContent").innerHTML =
         '<div class="report-actions no-print">' +
             '<button type="button" class="secondary-btn" onclick="openReportDocument(buildRecoveredDoc(records.find(function (r) { return r.id === \'' + escapeHTML(id) + '\'; })), \'سجل مسترد ' + escapeHTML(record.recordNumber).replace(/'/g, "") + '\')"><i class="ti ti-printer"></i> طباعة</button>' +
-            (canEdit ? '<button type="button" class="secondary-btn" onclick="openRecoveredForm(\'' + escapeHTML(id) + '\')"><i class="ti ti-edit"></i> تعديل</button>' : "") +
+            (canEdit ? '<button type="button" class="secondary-btn btn-edit" onclick="openRecoveredForm(\'' + escapeHTML(id) + '\')"><i class="ti ti-edit"></i> تعديل</button>' : "") +
             '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button>' +
         "</div>" + buildRecoveredDoc(record);
     document.getElementById("recordModal").classList.remove("hidden");
@@ -6506,7 +7052,7 @@ function prepareRecoveredImport(rows, fileName) {
     const get = function (row, key) { return map[key] === undefined ? "" : row[map[key]]; };
     const existing = {};
     records.forEach(function (r) {
-        const n = String(r.recordNumber).trim();
+        const n = recordIdentityKey(r);
         existing[n] = existing[n] || [];
         existing[n].push(r);
     });
@@ -6527,12 +7073,14 @@ function prepareRecoveredImport(rows, fileName) {
         };
     });
     items.forEach(function (it) {
+        /* المكرر = نفس الرقم + المندوب + المكتب؛ نفس الرقم لمندوب آخر سجل مختلف */
+        const key = recordIdentityKey({ recordNumber: it.number, representativeName: it.rep, officeName: it.office });
         if (!it.number || !it.rep || !it.office) it.status = "invalid";
-        else if (inFile[it.number]) it.status = "dup-file";
-        else if ((existing[it.number] || []).some(function (r) { return !isRecoveredRecord(r); })) it.status = "dup-own";
-        else if ((existing[it.number] || []).length) it.status = "dup-recovered";
+        else if (inFile[key]) it.status = "dup-file";
+        else if ((existing[key] || []).some(function (r) { return !isRecoveredRecord(r); })) it.status = "dup-own";
+        else if ((existing[key] || []).length) it.status = "dup-recovered";
         else it.status = "new";
-        if (it.number) inFile[it.number] = true;
+        if (it.number) inFile[key] = true;
     });
     recoveredImport = { fileName: fileName, items: items, kind: "site", sourceName: "", includeDup: false };
     renderRecoveredImport();
@@ -6540,8 +7088,8 @@ function prepareRecoveredImport(rows, fileName) {
 
 const IMPORT_STATUS = {
     "new": ["جديد", "is-new"],
-    "dup-own": ["مدقّق هنا بنفس الرقم", "is-dup"],
-    "dup-recovered": ["مسترد سابقاً بنفس الرقم", "is-dup"],
+    "dup-own": ["مدقّق هنا (نفس الرقم والمندوب والمكتب)", "is-dup"],
+    "dup-recovered": ["مسترد سابقاً (نفس الرقم والمندوب والمكتب)", "is-dup"],
     "dup-file": ["مكرر في الملف", "is-dup"],
     "invalid": ["ناقص (رقم/مندوب/مكتب)", "is-bad"]
 };
@@ -6602,7 +7150,7 @@ function applyRecoveredImport() {
             summary: { agencyCount: it.agencies, amountDue: it.amount },
             recordNote: it.note || undefined, createdAt: now, updatedAt: now
         };
-    });
+    }).map(function (r) { return addRecordHistory(r, "import", "سجل مسترد من ملف «" + (recoveredImport.fileName || "") + "»"); });
     const before = records.slice();
     records = records.concat(added);
     persistRecords().then(function () {
@@ -6638,31 +7186,45 @@ function recordsMatchingData() {
     const own = records.filter(function (r) { return !isRecoveredRecord(r); });
     const site = records.filter(function (r) { return isRecoveredRecord(r) && r.source.kind === "site"; });
     const manual = records.filter(function (r) { return isRecoveredRecord(r) && r.source.kind === "manual"; });
-    const byNumber = {};
+    /* المكرر: نفس الرقم + المندوب + المكتب في أكثر من سجل (24/11/2026: نفس الرقم لمندوب آخر طبيعي) */
+    const byKey = {};
+    records.forEach(function (r) { (byKey[recordIdentityKey(r)] = byKey[recordIdentityKey(r)] || []).push(r); });
+    const duplicates = Object.keys(byKey).filter(function (k) { return byKey[k].length > 1; })
+        .map(function (k) { return { number: identityPart(byKey[k][0].recordNumber), list: byKey[k] }; })
+        .sort(function (a, b) { return a.number.localeCompare(b.number, "ar", { numeric: true }); });
+    /* الأرقام الناقصة لكل مندوب ومكتب على حدة (كل مندوب له تسلسله) — الأرقام الصحيحة فقط */
+    const groups = {};
     records.forEach(function (r) {
-        const n = String(r.recordNumber).trim();
-        (byNumber[n] = byNumber[n] || []).push(r);
+        const n = identityPart(r.recordNumber);
+        if (!/^\d+$/.test(n)) return;
+        const rep = identityPart(r.representativeName) || "—";
+        const office = identityPart(r.officeName) || "—";
+        const key = rep + "\u0001" + office;
+        (groups[key] = groups[key] || { rep: rep, office: office, nums: new Set() }).nums.add(Number(n));
     });
-    const duplicates = Object.keys(byNumber).filter(function (n) { return byNumber[n].length > 1; })
-        .sort(function (a, b) { return a.localeCompare(b, "ar", { numeric: true }); })
-        .map(function (n) { return { number: n, list: byNumber[n] }; });
-    /* الأرقام الناقصة في التسلسل (الأرقام الصحيحة فقط) */
-    const nums = Object.keys(byNumber).filter(function (n) { return /^\d+$/.test(n); }).map(Number).sort(function (a, b) { return a - b; });
-    const gaps = [];
+    const sequences = [];
     let missing = 0;
-    for (let i = 1; i < nums.length; i++) {
-        if (nums[i] - nums[i - 1] > 1) {
-            gaps.push([nums[i - 1] + 1, nums[i] - 1]);
-            missing += nums[i] - nums[i - 1] - 1;
+    Object.keys(groups).forEach(function (key) {
+        const g = groups[key];
+        const nums = Array.from(g.nums).sort(function (a, b) { return a - b; });
+        const gaps = [];
+        let count = 0;
+        for (let i = 1; i < nums.length; i++) {
+            if (nums[i] - nums[i - 1] > 1) { gaps.push([nums[i - 1] + 1, nums[i] - 1]); count += nums[i] - nums[i - 1] - 1; }
         }
-    }
+        missing += count;
+        sequences.push({ rep: g.rep, office: g.office, range: [nums[0], nums[nums.length - 1]], records: nums.length, gaps: gaps, missing: count });
+    });
+    sequences.sort(function (a, b) { return a.rep.localeCompare(b.rep, "ar") || a.office.localeCompare(b.office, "ar"); });
+    const gaps = [];
+    sequences.forEach(function (q) { q.gaps.forEach(function (g) { gaps.push(g); }); });
     const reps = {};
     records.forEach(function (r) {
         const name = String(r.representativeName || "").trim() || "—";
         reps[name] = reps[name] || { own: 0, recovered: 0 };
         if (isRecoveredRecord(r)) reps[name].recovered++; else reps[name].own++;
     });
-    return { own: own, site: site, manual: manual, duplicates: duplicates, gaps: gaps, missing: missing, range: nums.length ? [nums[0], nums[nums.length - 1]] : null, reps: reps };
+    return { own: own, site: site, manual: manual, duplicates: duplicates, gaps: gaps, missing: missing, sequences: sequences, reps: reps };
 }
 
 function buildRecordsMatchingDoc() {
@@ -6674,15 +7236,20 @@ function buildRecordsMatchingDoc() {
         "<div><dt>مدقّقة في هذا الموقع</dt><dd>" + d.own.length + "</dd></div>" +
         "<div><dt>مستردة من موقع آخر</dt><dd>" + d.site.length + "</dd></div>" +
         "<div><dt>مستردة من تدقيق يدوي</dt><dd>" + d.manual.length + "</dd></div>" +
-        "<div><dt>أرقام مكررة</dt><dd>" + d.duplicates.length + "</dd></div>" +
+        "<div><dt>سجلات مكررة</dt><dd>" + d.duplicates.length + "</dd></div>" +
         "<div><dt>أرقام ناقصة في التسلسل</dt><dd>" + d.missing + "</dd></div>" +
         "</dl>";
-    html += '<section class="doc-section"><h3>الأرقام الناقصة في التسلسل' + (d.range ? " (من " + d.range[0] + " إلى " + d.range[1] + ")" : "") + "</h3>" +
-        (d.gaps.length
-            ? '<p class="matching-gaps">' + d.gaps.map(function (g) { return g[0] === g[1] ? String(g[0]) : g[0] + "–" + g[1]; }).join("، ") + "</p>" +
-              '<p class="doc-empty">أرقام سجلات لا توجد في أي مصدر: لم تُدقَّق هنا ولم تُسترد. راجعها مع الدفتر.</p>'
-            : '<p class="doc-empty">لا أرقام ناقصة بين أصغر رقم وأكبره.</p>') + "</section>";
-    html += '<section class="doc-section"><h3>أرقام مكررة (موجودة أكثر من مرة)</h3>' +
+    const gapText = function (gaps) { return gaps.map(function (g) { return g[0] === g[1] ? String(g[0]) : g[0] + "–" + g[1]; }).join("، "); };
+    const withGaps = d.sequences.filter(function (q) { return q.missing > 0; });
+    html += '<section class="doc-section"><h3>الأرقام الناقصة في التسلسل (لكل مندوب ومكتب)</h3>' +
+        (withGaps.length
+            ? '<table class="doc-table"><thead><tr><th>المندوب</th><th>المكتب</th><th>من — إلى</th><th class="num">عدد الناقص</th><th>الأرقام الناقصة</th></tr></thead><tbody>' +
+              withGaps.map(function (q) {
+                  return "<tr><td>" + escapeHTML(q.rep) + "</td><td>" + escapeHTML(q.office) + "</td><td>" + q.range[0] + " — " + q.range[1] + '</td><td class="num">' + q.missing + '</td><td class="matching-gaps">' + gapText(q.gaps) + "</td></tr>";
+              }).join("") + "</tbody></table>" +
+              '<p class="doc-empty">أرقام سجلات لا توجد في أي مصدر لهذا المندوب في هذا المكتب: لم تُدقَّق هنا ولم تُسترد. راجعها مع الدفتر.</p>'
+            : '<p class="doc-empty">لا أرقام ناقصة في تسلسل أي مندوب.</p>') + "</section>";
+    html += '<section class="doc-section"><h3>سجلات مكررة (نفس الرقم والمندوب والمكتب أكثر من مرة)</h3>' +
         (d.duplicates.length
             ? '<table class="doc-table"><thead><tr><th>رقم السجل</th><th>المصدر</th><th>المندوب</th><th>المكتب</th><th>التاريخ</th></tr></thead><tbody>' +
               d.duplicates.map(function (g) {
@@ -6690,7 +7257,7 @@ function buildRecordsMatchingDoc() {
                       return "<tr" + (i === 0 ? ' class="dup-first"' : "") + "><td>" + (i === 0 ? "<strong>" + escapeHTML(g.number) + "</strong>" : "") + "</td><td>" + srcOf(r) + "</td><td>" + escapeHTML(r.representativeName) + "</td><td>" + escapeHTML(r.officeName) + "</td><td>" + formatDay(getRecordDay(r)) + "</td></tr>";
                   }).join("");
               }).join("") + "</tbody></table>"
-            : '<p class="doc-empty">لا أرقام مكررة.</p>') + "</section>";
+            : '<p class="doc-empty">لا سجلات مكررة. (نفس الرقم لمندوب أو مكتب آخر ليس تكراراً.)</p>') + "</section>";
     const names = Object.keys(d.reps).sort(function (a, b) { return a.localeCompare(b, "ar"); });
     html += '<section class="doc-section"><h3>حسب المندوب</h3><table class="doc-table"><thead><tr><th>المندوب</th><th class="num">مدقّقة هنا</th><th class="num">مستردة</th><th class="num">المجموع</th></tr></thead><tbody>' +
         names.map(function (n) { const x = d.reps[n]; return "<tr><td>" + escapeHTML(n) + '</td><td class="num">' + x.own + '</td><td class="num">' + x.recovered + '</td><td class="num">' + (x.own + x.recovered) + "</td></tr>"; }).join("") +
@@ -6736,6 +7303,8 @@ const CR_COLUMNS = {
         { key: "rep", label: "المندوب", get: function (r) { return String(r.representativeName || "").trim(); } },
         { key: "repType", label: "نوع المندوب", get: function (r) { return r.representativeType === "external" ? "خارجي" : "داخلي"; } },
         { key: "source", label: "المصدر", get: function (r) { return recoveredSourceText(r); } },
+        { key: "paid", label: "حالة القبض", get: function (r) { return isRecordPaid(r) ? "مقبوض" : "غير مقبوض"; } },
+        { key: "paidAt", label: "تاريخ القبض", get: function (r) { return isRecordPaid(r) ? formatDateTime(r.payment.at) : ""; } },
         { key: "agencies", label: "عدد الوكالات", type: "num", get: function (r, st) { return isRecoveredRecord(r) ? recoveredSummary(r).agencyCount : st.agencies.length; } },
         { key: "active", label: "الفعالة", type: "num", get: function (r, st) { return st.active.length - st.missingAgenciesCount; } },
         { key: "lost", label: "المفقودة", type: "num", get: function (r, st) { return st.missingAgenciesCount; } },
@@ -6779,12 +7348,23 @@ const CR_COLUMNS = {
 };
 
 /* قوالب جاهزة (لا تُحذف) + قوالب المستخدم المحفوظة */
+/* قوالب جاهزة مثبتة (لا تُحذف): icon + desc للبطاقات أعلى نافذة البناء. المعرّفات القديمة باقية كما هي. */
 const CR_BUILTIN = [
-    { id: "builtin-4", name: "المطلوب من المندوبين (4 أعمدة)", level: "record", columns: ["rep", "recordNumber", "date", "net"], title: "المطلوب من المندوبين", sort: "rep", group: false, totals: true, signatures: true, orientation: "auto" },
-    { id: "builtin-7", name: "ملخص السجلات (7 أعمدة)", level: "record", columns: ["recordNumber", "date", "office", "rep", "agencies", "grand", "net"], title: "ملخص السجلات", sort: "date", group: false, totals: true, signatures: true, orientation: "auto" },
-    { id: "builtin-rep", name: "حسب المندوب مع المقاصة", level: "record", columns: ["rep", "recordNumber", "date", "due", "deduction", "deductionReason", "net"], title: "المطلوب من المندوبين بعد المقاصة", sort: "rep", group: true, totals: true, signatures: true, orientation: "auto" },
-    { id: "builtin-agencies", name: "تفاصيل الوكالات", level: "agency", columns: ["recordNumber", "rep", "number", "type", "status", "price", "missingValue", "due", "grand"], title: "تفاصيل الوكالات", sort: "record", group: false, totals: true, signatures: false, orientation: "auto" }
+    { id: "builtin-4", name: "المطلوب من المندوبين (4 أعمدة)", icon: "ti-list-numbers", desc: "المندوب، رقم السجل، التاريخ، الصافي", level: "record", columns: ["rep", "recordNumber", "date", "net"], title: "المطلوب من المندوبين", sort: "rep", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-7", name: "ملخص السجلات (7 أعمدة)", icon: "ti-table", desc: "الرقم والتاريخ والمكتب والمندوب والوكالات والإجمالي والصافي", level: "record", columns: ["recordNumber", "date", "office", "rep", "agencies", "grand", "net"], title: "ملخص السجلات", sort: "date", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-rep", name: "حسب المندوب مع المقاصة", icon: "ti-users-group", desc: "مجموع لكل مندوب: المطلوب والحسم وسببه والصافي", level: "record", columns: ["rep", "recordNumber", "date", "due", "deduction", "deductionReason", "net"], title: "المطلوب من المندوبين بعد المقاصة", sort: "rep", group: true, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-paid", name: "المقبوض وغير المقبوض", icon: "ti-cash", desc: "حالة القبض وتاريخه لكل سجل، مجمّعة حسب المندوب", level: "record", columns: ["rep", "recordNumber", "office", "date", "net", "paid", "paidAt"], title: "كشف القبض", sort: "rep", group: true, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-committees", name: "حصص اللجان", icon: "ti-heart-handshake", desc: "حصة الإسعاف وحصة التعاون لكل سجل مع الإجمالي", level: "record", columns: ["recordNumber", "date", "rep", "agencies", "ambulance", "cooperation"], title: "حصص لجنة الإسعاف ولجنة التعاون", sort: "date", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-missing", name: "النقص وإيصالات الاستدراك", icon: "ti-receipt", desc: "عدد النقص وقيمته وإيصالا المركزية والفرع", level: "record", columns: ["recordNumber", "date", "rep", "missingCount", "missingValue", "centralReceipt", "branchReceipt"], title: "النقص وإيصالات استدراكه", sort: "date", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-transport", name: "بدل الانتقال", icon: "ti-route", desc: "البدل الكامل وحصة المندوب منه، حسب المندوب", level: "record", columns: ["rep", "repType", "recordNumber", "date", "transport", "transportShare"], title: "بدل الانتقال", sort: "rep", group: true, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-sources", name: "القائمة الكاملة لسجلات الفرع", icon: "ti-list-check", desc: "المدقّقة هنا والمستردة مع مصدر كل سجل", level: "record", columns: ["recordNumber", "rep", "office", "date", "source", "agencies", "net"], title: "القائمة الكاملة لسجلات الفرع", sort: "rep", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-finance", name: "الملخص المالي الكامل", icon: "ti-report-money", desc: "كل مبالغ السجل من السعر إلى الصافي (صفحة أفقية)", level: "record", columns: ["recordNumber", "date", "rep", "agencies", "base", "additions", "missingValue", "transport", "grand", "due", "deduction", "net"], title: "الملخص المالي للسجلات", sort: "date", group: false, totals: true, signatures: true, orientation: "landscape" },
+    { id: "builtin-agencies", name: "تفاصيل الوكالات", icon: "ti-file-certificate", desc: "سطر لكل وكالة: النوع والحالة والسعر والنقص والمطلوب", level: "agency", columns: ["recordNumber", "rep", "number", "type", "status", "price", "missingValue", "due", "grand"], title: "تفاصيل الوكالات", sort: "record", group: false, totals: true, signatures: false, orientation: "auto" }
 ];
+
+function crBuiltin(id) {
+    return CR_BUILTIN.find(function (t) { return t.id === id; });
+}
 
 function crLoadPrefs() {
     let p = null;
@@ -6798,7 +7378,7 @@ function crSavePrefs(prefs) {
 }
 
 function crNormalize(state) {
-    const base = Object.assign({}, CR_BUILTIN[1], state || {});
+    const base = Object.assign({}, crBuiltin("builtin-7"), state || {});
     const valid = CR_COLUMNS[base.level === "agency" ? "agency" : "record"].map(function (c) { return c.key; });
     base.level = base.level === "agency" ? "agency" : "record";
     base.columns = (Array.isArray(base.columns) ? base.columns : []).filter(function (k) { return valid.indexOf(k) !== -1; });
@@ -6859,7 +7439,7 @@ function openCustomReport() {
         return;
     }
     const prefs = crLoadPrefs();
-    crState = crNormalize(prefs.last || CR_BUILTIN[1]);
+    crState = crNormalize(prefs.last || crBuiltin("builtin-7"));
     renderCustomReportBuilder();
 }
 
@@ -6998,10 +7578,18 @@ function renderCustomReportBuilder() {
     let html = '<div class="cr-builder">' +
         '<div class="cr-head"><h2><i class="ti ti-table-options" aria-hidden="true"></i> تقرير مخصّص</h2>' +
         "<p>" + crRecordIds.length + " سجل " + (selectedRecordIds.size ? "محدد" : "(كل الظاهر حسب الفلترة الحالية)") + "</p></div>" +
+        /* القوالب الجاهزة المثبتة: بطاقة لكل قالب، ضغطة واحدة تطبّقه ثم يمكن تعديله */
+        '<section class="cr-pinned" aria-label="قوالب جاهزة"><h3><i class="ti ti-pin" aria-hidden="true"></i> قوالب جاهزة <small>اختر واحداً ثم عدّل الأعمدة إن احتجت</small></h3><div class="cr-pinned-grid">' +
+            CR_BUILTIN.map(function (t) {
+                return '<button type="button" class="cr-pin' + (s.templateId === t.id ? " is-active" : "") + '" data-cr-template="' + t.id + '" aria-pressed="' + (s.templateId === t.id) + '">' +
+                    '<i class="ti ' + (t.icon || "ti-table") + '" aria-hidden="true"></i><b>' + escapeHTML(t.name) + "</b><small>" + escapeHTML(t.desc || "") + "</small></button>";
+            }).join("") +
+        "</div></section>" +
         '<div class="cr-grid">' +
         '<div class="cr-panel">' +
-            '<label class="input-group"><span>قالب</span><select id="crTemplate"><option value="">— اختر قالباً —</option>' +
-                templates.map(function (t) { return '<option value="' + escapeHTML(t.id) + '">' + escapeHTML(t.name) + (String(t.id).indexOf("builtin") === 0 ? "" : " (محفوظ)") + "</option>"; }).join("") +
+            '<label class="input-group"><span>كل القوالب <small>(الجاهزة وقوالبك المحفوظة)</small></span><select id="crTemplate"><option value="">— اختر قالباً —</option>' +
+                '<optgroup label="قوالب جاهزة">' + CR_BUILTIN.map(function (t) { return '<option value="' + escapeHTML(t.id) + '">' + escapeHTML(t.name) + "</option>"; }).join("") + "</optgroup>" +
+                (prefs.templates.length ? '<optgroup label="قوالبي">' + prefs.templates.map(function (t) { return '<option value="' + escapeHTML(t.id) + '">' + escapeHTML(t.name) + "</option>"; }).join("") + "</optgroup>" : "") +
             "</select></label>" +
             '<div class="cr-row"><button type="button" class="secondary-btn" data-cr="save-template"><i class="ti ti-device-floppy"></i> حفظ كقالب</button>' +
             '<button type="button" class="secondary-btn" data-cr="delete-template"><i class="ti ti-trash"></i> حذف القالب</button></div>' +
@@ -7064,7 +7652,7 @@ document.getElementById("modalContent")?.addEventListener("change", function (ev
     if (!crState || !event.target.closest(".cr-builder")) return;
     const t = event.target;
     if (t.name === "crLevel") {
-        crState = crNormalize(Object.assign(crStatePublic(), { level: t.value, columns: t.value === "agency" ? CR_BUILTIN[3].columns : CR_BUILTIN[1].columns }));
+        crState = crNormalize(Object.assign(crStatePublic(), { level: t.value, columns: t.value === "agency" ? crBuiltin("builtin-agencies").columns : crBuiltin("builtin-7").columns }));
         renderCustomReportBuilder();
         return;
     }
@@ -7114,6 +7702,12 @@ document.getElementById("modalContent")?.addEventListener("click", function (eve
         crState.columns.sort(function (a, b) { return crState.order.indexOf(a) - crState.order.indexOf(b); });
         renderCustomReportBuilder();
         document.querySelector('[data-cr-' + (up ? "up" : "down") + '="' + k + '"]')?.focus();
+        return;
+    }
+    const pin = event.target.closest("[data-cr-template]");
+    if (pin) {
+        const tpl = crBuiltin(pin.dataset.crTemplate);
+        if (tpl) { crState = crNormalize(tpl); crState.templateId = tpl.id; renderCustomReportBuilder(); const sel = document.getElementById("crTemplate"); if (sel) sel.value = tpl.id; }
         return;
     }
     const btn = event.target.closest("[data-cr]");
@@ -7333,7 +7927,7 @@ function openGlobalSearch() {
                 '<span class="search-icon search-icon-agency" style="--c:' + (AGENCY_TYPE_COLORS[a.type] || "#45577c") + '">' + escapeHTML(a.number) + "</span>" +
                 '<span class="search-text"><b>وكالة ' + escapeHTML(a.number) + " — " + escapeHTML(AGENCY_NAMES[a.type] || "") + "</b><small>سجل " + escapeHTML(r.recordNumber) + " — " +
                 escapeHTML(r.officeName) + " — " + getAgencyStatusName(a.status) + "</small></span>" +
-                (canEdit ? '<button type="button" class="act-btn search-edit" data-edit="' + i + '"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                (canEdit ? '<button type="button" class="act-btn act-edit search-edit" data-edit="' + i + '"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
                 "</div>";
         }).join("");
     };
@@ -7529,6 +8123,8 @@ function openRecordMenu(button, id) {
     if (canEdit) {
         items.push({ icon: "ti-edit", text: "تعديل السجل", run: function () { editRecord(id); } });
     }
+
+    items.push({ icon: "ti-history", text: "سجل التعديلات", run: function () { showRecordHistory(id); } });
 
     if (canDelete) {
         items.push({ icon: "ti-trash", text: "حذف السجل", danger: true, run: function () { deleteRecord(id); } });
@@ -8688,9 +9284,12 @@ function saveRecordRecovery(id, mode) {
 
     const empty = Object.keys(next).every(function (k) { return !next[k]; });
     const updatedBefore = record.updatedAt;
+    const historyBefore = record.history;
 
     if (empty) delete record.recovery; else record.recovery = next;
     record.updatedAt = new Date().toISOString();
+    addRecordHistory(record, "recovery", empty ? "حُذفت بيانات الإيصالات" :
+        [next.centralReceipt ? "إيصال المركزية " + next.centralReceipt : "", next.branchReceipt ? "إيصال الفرع " + next.branchReceipt : "", next.text ? "فقرة إضافية" : ""].filter(Boolean).join("، "));
 
     persistRecords().then(function () {
         delete recoveryDrafts[id];
@@ -8699,6 +9298,7 @@ function saveRecordRecovery(id, mode) {
     }).catch(function (error) {
         if (before === undefined) delete record.recovery; else record.recovery = before;
         record.updatedAt = updatedBefore;
+        if (historyBefore === undefined) delete record.history; else record.history = historyBefore;
         notify("<strong>لم يُحفظ</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
     });
 }
@@ -9009,7 +9609,7 @@ function buildTypeAgenciesDoc(record, type, backMode, forPrint) {
             '<td class="num">' + money(rep) + "</td>" +
             '<td class="num total-col">' + money(grand) + "</td>" +
             '<td class="small-text">' + (a.notes ? formatNotesHTML(a.notes) : "—") + "</td>" +
-            (canEdit ? '<td class="no-print"><button type="button" class="act-btn" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
+            (canEdit ? '<td class="no-print"><button type="button" class="act-btn act-edit" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
             "</tr>";
     });
 
@@ -9256,7 +9856,7 @@ function buildAgencyAuditDoc(record, filter, backMode, forPrint) {
                 '<td class="small-text">' + (stampParts.length ? stampParts.join("<br>") : "—") + "</td>" +
                 '<td class="num">' + money(a.representativeAmount) + "</td>" +
                 '<td class="small-text">' + (a.notes ? formatNotesHTML(a.notes) : "—") + "</td>" +
-                (canEdit ? '<td class="no-print"><button type="button" class="act-btn" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
+                (canEdit ? '<td class="no-print"><button type="button" class="act-btn act-edit" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
                 "</tr>";
         });
 
@@ -9556,6 +10156,7 @@ function appChoose(options) {
                 '<div class="app-dialog-icon" aria-hidden="true"><i class="ti ti-arrows-sort"></i></div>' +
                 '<h3 id="appChooseTitle"></h3>' +
                 '<p class="app-dialog-message"></p>' +
+                '<div class="app-dialog-fields"></div>' +
                 '<div class="app-dialog-actions app-choose-actions"></div>' +
             "</div>";
 
@@ -9574,29 +10175,59 @@ function appChoose(options) {
 
         const actions = dialog.querySelector(".app-choose-actions");
 
+        /* حقول اختيارية (options.fields = [{ id, label, value, numeric }]): عندها تُرجع { choice, values } بدل القيمة */
+        const fieldsBox = dialog.querySelector(".app-dialog-fields");
+        const fields = Array.isArray(options.fields) ? options.fields : null;
+        if (fields) {
+            fields.forEach(function (f) {
+                const label = document.createElement("label");
+                label.className = "input-group";
+                const span = document.createElement("span");
+                span.textContent = f.label || "";
+                const input = document.createElement("input");
+                input.type = "text";
+                input.dataset.field = f.id;
+                input.value = f.value == null ? "" : String(f.value);
+                if (f.numeric) { input.inputMode = "numeric"; input.dir = "ltr"; }
+                if (typeof f.onInput === "function") input.addEventListener("input", function () { f.onInput(readFields(), dialog); });
+                label.appendChild(span);
+                label.appendChild(input);
+                fieldsBox.appendChild(label);
+            });
+        } else {
+            fieldsBox.remove();
+        }
+        function readFields() {
+            const values = {};
+            dialog.querySelectorAll("[data-field]").forEach(function (el) { values[el.dataset.field] = el.value; });
+            return values;
+        }
+
         (options.choices || []).concat([{ value: null, label: "إلغاء", kind: "secondary" }]).forEach(function (choice) {
             const b = document.createElement("button");
             b.type = "button";
             b.className = (choice.kind === "danger" ? "danger-btn" : choice.kind === "primary" ? "primary-btn" : "secondary-btn");
             b.textContent = choice.label;
-            b.addEventListener("click", function () { finish(choice.value); });
+            b.addEventListener("click", function () { finish(fields ? { choice: choice.value, values: readFields() } : choice.value); });
             actions.appendChild(b);
         });
 
-        dialog.addEventListener("cancel", function (event) { event.preventDefault(); finish(null); });
-        dialog.addEventListener("close", function () { finish(null); });
+        const cancelValue = fields ? { choice: null, values: {} } : null;
+        dialog.addEventListener("cancel", function (event) { event.preventDefault(); finish(cancelValue); });
+        dialog.addEventListener("close", function () { finish(cancelValue); });
         dialog.addEventListener("keydown", function (event) {
-            if (event.key === "Escape") { event.preventDefault(); finish(null); }
+            if (event.key === "Escape") { event.preventDefault(); finish(cancelValue); }
         });
         dialog.addEventListener("click", function (event) {
-            if (event.target === dialog) finish(null);
+            if (event.target === dialog) finish(cancelValue);
         });
 
         document.body.appendChild(dialog);
 
         if (typeof dialog.showModal === "function") {
             dialog.showModal();
-            actions.querySelector("button")?.focus();
+            (fields ? dialog.querySelector("[data-field]") : actions.querySelector("button"))?.focus();
+            if (fields && options.onOpen) options.onOpen(readFields(), dialog);
         } else {
             finish(null);
         }
@@ -9945,7 +10576,7 @@ function buildGeneralReportDoc() {
         filterActive ? "تقرير مصفّى" : "التقرير العام",
         filterActive
             ? escapeHTML(reportFilterLabel(filter)) + " — " + todayArabic()
-            : "كل السجلات حتى تاريخ " + todayArabic() + " — " + records.length + " سجل"
+            : "كل السجلات حتى تاريخ " + todayArabic() + " — " + auditedRecords().length + " سجل"
     );
 
     html += '<div class="doc-summary-row">' +
@@ -10058,7 +10689,7 @@ function getCommitteeFilteredRecords() {
     const rep = document.getElementById("committeeRep")?.value || "";
     const recordId = document.getElementById("committeeRecord")?.value || "";
 
-    return records.filter(function (record) {
+    return auditedRecords().filter(function (record) {
         const day = getRecordDay(record);
         if (from && day < from) return false;
         if (to && day > to) return false;
@@ -10075,7 +10706,7 @@ function fillCommitteeFilterOptions() {
 
     if (repSelect) {
         const current = repSelect.value;
-        const names = Array.from(new Set(records.map(function (r) { return (r.representativeName || "").trim(); }).filter(Boolean))).sort();
+        const names = Array.from(new Set(auditedRecords().map(function (r) { return (r.representativeName || "").trim(); }).filter(Boolean))).sort();
         repSelect.innerHTML = '<option value="">كل المندوبين</option>' +
             names.map(function (n) { return '<option value="' + escapeHTML(n) + '">' + escapeHTML(n) + "</option>"; }).join("");
         repSelect.value = names.indexOf(current) !== -1 ? current : "";
@@ -10084,7 +10715,7 @@ function fillCommitteeFilterOptions() {
     if (recordSelect) {
         const current = recordSelect.value;
         recordSelect.innerHTML = '<option value="">كل السجلات</option>' +
-            records.map(function (r) {
+            auditedRecords().map(function (r) {
                 return '<option value="' + r.id + '">سجل ' + escapeHTML(r.recordNumber) + " — " + escapeHTML(r.officeName) + "</option>";
             }).join("");
         recordSelect.value = records.some(function (r) { return r.id === current; }) ? current : "";
@@ -11249,7 +11880,7 @@ function fillReportFilterOptions() {
 
     if (repsBox) {
         const checked = readCheckedValues("filterReps");
-        const names = Array.from(new Set(records.map(function (r) { return (r.representativeName || "").trim(); }).filter(Boolean)))
+        const names = Array.from(new Set(auditedRecords().map(function (r) { return (r.representativeName || "").trim(); }).filter(Boolean)))
             .sort(function (a, b) { return a.localeCompare(b, "ar"); });
         repsBox.innerHTML = names.length
             ? names.map(function (n) { return chipHTML(n, n, checked.indexOf(n) !== -1); }).join("")
@@ -11374,7 +12005,7 @@ function filteredAgenciesTableHTML(matched, forPrint, limit) {
             '<td class="small-text">' + (stampParts.length ? stampParts.join("، ") : "—") + "</td>" +
             '<td class="num">' + money(rep) + "</td>" +
             '<td class="num total-col">' + money(grand) + "</td>" +
-            (canEdit ? '<td><button type="button" class="act-btn" onclick="openAgencyForEdit(\'' + m.record.id + "', " + m.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
+            (canEdit ? '<td><button type="button" class="act-btn act-edit" onclick="openAgencyForEdit(\'' + m.record.id + "', " + m.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
             "</tr>";
     });
 
@@ -12143,10 +12774,13 @@ function renderGuide() {
             "<li><b>بعد تعديل وكالة:</b> اضغط «إضافة الوكالة» ثم «حفظ السجل» حتى يُحفظ التعديل.</li>" +
             "<li><b>إضافة سريعة:</b> <b>Ctrl + S</b> يضيف الوكالة من أي حقل في صفحة إنشاء السجل، و«وكالة مماثلة للأخيرة» (أو <b>Ctrl + D</b>) يكرر آخر وكالة (نوعها وحالتها وإضافاتها وطوابعها) بالرقم التالي. إذا قفز رقم الوكالة عن آخر رقم (مثلاً 90 ثم 92) يظهر تنبيه أصفر داخل إشعار الإضافة. رقم ونوع آخر وكالة يظهران في الشريط السفلي.</li>" +
             "<li><b>وكالة منسية:</b> اكتب رقمها الصحيح (مثلاً 116) ثم «إضافة الوكالة»، واختر «إدراجها وإزاحة الأرقام»: تأخذ رقمها، وكل وكالة بعدها يزداد رقمها 1 مع بقاء بياناتها.</li>" +
+            "<li><b>إعادة الترقيم:</b> عند حذف وكالة اختر «حذف وإعادة ترقيم ما بعدها» (حذف 65 ← تصبح 66 رقم 65 وهكذا)، أو زر «إعادة الترقيم» فوق «الوكالات المضافة»: من رقم تختاره تأخذ الوكالات أرقاماً متسلسلة مثل تعبئة السلسلة في Excel، وما قبله لا يتغير، مع «تراجع عن الترقيم».</li>" +
+            "<li><b>رقم السجل:</b> ليس فريداً؛ نفس الرقم مسموح لمندوب أو مكتب آخر. التنبيه يظهر فقط إذا تكرر الرقم لنفس المندوب ونفس المكتب.</li>" +
             "<li><b>تغيير النوع:</b> من قائمة «النوع» في سطر الوكالة المضافة؛ تُعاد حسابها بسعر النوع الجديد ويبقى رقمها.</li>" +
             "<li><b>أسعار حسب الفترات:</b> من قسم الأسعار ← «أسعار حسب الفترات». كل جدول يبدأ من تاريخ (يوم) محدد، وكل وكالة جديدة تأخذ أسعار فترة «تاريخ السجل»، والسجلات المحفوظة لا تتغير.</li>" +
             "<li><b>الوضع الليلي:</b> زر «الوضع الليلي» في القائمة الجانبية (أو أيقونة القمر على الهاتف)، ويُحفظ اختيارك.</li>" +
             "<li><b>الحفظ التلقائي:</b> السجل غير المحفوظ يُستعاد تلقائياً إذا أُغلقت الصفحة أو انقطعت الكهرباء.</li>" +
+            "<li><b>الإدارة:</b> تبويب واحد فيه الحاسبة وشرح النظام والطباعة والتخصيص والمستخدمون والنسخ الاحتياطي.</li>" +
             "<li><b>الحاسبة:</b> لحساب حصة أعضاء مجلس الفرع من بدل الانتقال لسجلات ومدى وكالات محددة، ولحساب وكالة دون إنشاء سجل، ولمطابقة ما سلّمه المندوب. كل ذلك منفصل ولا يغيّر أي رقم في السجلات.</li>" +
             "<li><b>حفظ PDF:</b> في نافذة الطباعة اختر «حفظ بتنسيق PDF» وفعّل «رسومات الخلفية» لتظهر الألوان.</li>" +
             "<li><b>النسخ الاحتياطي:</b> البيانات محفوظة في هذا المتصفح فقط؛ حمّل نسخة احتياطية بانتظام من «الإدارة ← النسخ الاحتياطي»، خصوصاً قبل أي تحديث.</li>" +
@@ -12194,6 +12828,7 @@ reportsDirty = false;
 /* التصفية: كل الأرقام أدناه تُحسب على الوكالات المطابقة فقط */
 
 fillReportFilterOptions();
+syncReportFilterMore();
 
 const reportFilter =
     getReportFilter();
@@ -13232,7 +13867,7 @@ html += `
     <p class="guide-link no-print">
         <i class="ti ti-info-circle"></i>
         معنى الألوان والعلامات وطريقة الحساب موجودة في
-        <button type="button" class="link-btn" onclick="switchSection('guideSection')">دليل النظام</button>
+        <button type="button" class="link-btn" onclick="switchSection('guideSection')">شرح النظام (الإدارة)</button>
     </p>
 
 `;
@@ -13713,6 +14348,9 @@ function applyRecordReprice() {
             }, batch, at);
             it.record.updatedAt = at;
         });
+        const repriced = new Map();
+        items.forEach(function (it) { if (!repriced.has(it.record)) repriced.set(it.record, []); repriced.get(it.record).push(it.agency.number); });
+        logPriceHistory(repriced, "إعادة تسعير حسب تاريخ السجل");
 
         persistRecords().then(function () {
             refreshAfterReprice();
@@ -13747,6 +14385,7 @@ function undoRecordReprice() {
 
         const before = JSON.stringify(records);
         let count = 0;
+        const undone = new Map();
 
         records.forEach(function (record) {
             (record.agencies || []).forEach(function (a) {
@@ -13771,9 +14410,12 @@ function undoRecordReprice() {
                 hist.pop();
                 if (!hist.length) delete a.priceHistory;
                 record.updatedAt = new Date().toISOString();
+                if (!undone.has(record)) undone.set(record, []);
+                undone.get(record).push(a.number);
                 count++;
             });
         });
+        logPriceHistory(undone, "تراجع عن تغيير السعر");
 
         persistRecords().then(function () {
             refreshAfterReprice();
@@ -13788,6 +14430,13 @@ function undoRecordReprice() {
 }
 
 /* تحديث الواجهات بعد الحفظ؛ خطأ في عرضٍ ما لا يُلغي ما حُفظ */
+/* سطر «تغيير سعر» في سجل تعديلات كل سجل تغيّرت وكالاته (agencyNumbersByRecord: Map سجل ← أرقام) */
+function logPriceHistory(map, label) {
+    map.forEach(function (nums, record) {
+        addRecordHistory(record, "price", label + ": " + nums.length + " وكالة (" + nums.slice(0, 15).join("، ") + (nums.length > 15 ? "…" : "") + ")");
+    });
+}
+
 function refreshAfterReprice() {
     [renderRecordReprice, renderBulkPrice, renderRecords, updateDashboard, renderReports].forEach(function (step) {
         try { step(); } catch (error) { console.error("Refresh after reprice failed:", error); }
@@ -14080,6 +14729,9 @@ function applyBulkPrice() {
         });
         /* السجل تغيّر الآن (لحسم المزامنة بين الأجهزة لصالح هذا التعديل) */
         touched.forEach(function (r) { r.updatedAt = at; });
+        const bulkNums = new Map();
+        items.forEach(function (it) { if (!bulkNums.has(it.record)) bulkNums.set(it.record, []); bulkNums.get(it.record).push(it.agency.number); });
+        logPriceHistory(bulkNums, "تغيير سعر وكالات محفوظة");
         persistRecords().then(function () {
             refreshAfterReprice();
             notify("<strong>تغيّر سعر " + items.length + " وكالة</strong><span>حصص اللجنتين محسوبة من السعر الجديد.</span>", "success", 7000, true);
@@ -15608,6 +16260,17 @@ function updateDashboard() {
             : "لم يُسجَّل أي سجل بعد"
     );
 
+    /* حالة القبض: كم سجلاً مدقّقاً لم يُقبض بعد ومبلغه الصافي */
+    const unpaid = auditedRecords().filter(function (r) { return !isRecordPaid(r); });
+    const unpaidBox = document.getElementById("dashUnpaid");
+    if (unpaidBox) {
+        const amount = unpaid.reduce(function (sum, r) { return sum + getRecordNetDue(r); }, 0);
+        unpaidBox.hidden = !auditedRecords().length;
+        unpaidBox.innerHTML = unpaid.length
+            ? '<i class="ti ti-cash-off" aria-hidden="true"></i> غير مقبوض: <b>' + unpaid.length + "</b> سجل بمبلغ <b>" + money(amount) + "</b>"
+            : '<i class="ti ti-circle-check" aria-hidden="true"></i> كل السجلات مقبوضة';
+    }
+
     try {
         setText(
             "dashDate",
@@ -15672,7 +16335,7 @@ function updateDashboard() {
 
     if (repsBox) {
         const map = {};
-        records.forEach(function (record) {
+        auditedRecords().forEach(function (record) {
             const name = (record.representativeName || "-").trim() || "-";
             if (!map[name]) map[name] = { name: name, total: 0, records: 0 };
             map[name].total += getRecordNetDue(record);
@@ -15696,7 +16359,7 @@ function updateDashboard() {
         return;
     }
 
-    const latest = records.slice().reverse().slice(0, 5);
+    const latest = auditedRecords().reverse().slice(0, 5);
 
     if (latest.length === 0) {
         container.innerHTML =
@@ -15897,7 +16560,10 @@ function () {
 
             updateAll();
 
+            /* صفحة البداية: آخر صفحة (الافتراضي) أو صفحة يختارها المستخدم في «تخصيص الواجهة» */
+            const startPref = startSectionPref();
             const savedSection =
+                (startPref !== "last" ? startPref : "") ||
                 localStorage.getItem("activeSection") ||
                 sessionStorage.getItem("activeSection") ||
                 "dashboardSection";
@@ -17416,7 +18082,7 @@ function fbSync(reason) {
                     const num = editedRemote.record ? editedRemote.record.recordNumber : "";
                     notify("<strong>السجل " + escapeHTML(num) + " الذي تعدّله الآن عُدّل من جهاز آخر</strong>" +
                         "<span>إن حفظت الآن فستُكتب نسختك فوق تعديله. الأفضل فتح النسخة الجديدة ثم إعادة تعديلك.</span>" +
-                        (editedRemote.record ? '<span class="toast-actions"><button type="button" class="act-btn" onclick="editRecord(\'' + escapeHTML(editingId) + '\')">فتح النسخة الجديدة</button></span>' : ""),
+                        (editedRemote.record ? '<span class="toast-actions"><button type="button" class="act-btn act-edit" onclick="editRecord(\'' + escapeHTML(editingId) + '\')">فتح النسخة الجديدة</button></span>' : ""),
                         "warning", 30000, true);
                 }
 
@@ -17980,11 +18646,13 @@ function exportAllRecordsToExcel() {
         return;
     }
 
-    const subtitle = "كل السجلات حتى " + todayArabic() + " — " + records.length + " سجل";
+    /* المستردة ملخّص بلا وكالات: لا تدخل في التقرير العام (لها «مطابقة السجلات» والتقرير المخصّص) */
+    const list = auditedRecords();
+    const subtitle = "كل السجلات حتى " + todayArabic() + " — " + list.length + " سجل";
 
     let tBase = 0, tTransport = 0, tShare = 0, tAdd = 0, tMissing = 0, tRep = 0, tDed = 0, tAg = 0, tActive = 0, tCancelled = 0, tLost = 0, tAmb = 0, tCoop = 0;
 
-    const rows = records.map(function (record) {
+    const rows = list.map(function (record) {
         const stats = getRecordFinalStats(record);
         const base = Object.keys(stats.byType).reduce(function (s, t) { return s + stats.byType[t].total; }, 0);
         const active = stats.active.length - stats.missingAgenciesCount;
@@ -18001,7 +18669,7 @@ function exportAllRecordsToExcel() {
     });
 
     const summary = buildStyledSummarySheet("نقابة المحامين — فرع إدلب | التقرير العام", subtitle, [
-        { label: "عدد السجلات", value: records.length },
+        { label: "عدد السجلات", value: list.length },
         { label: "عدد الوكالات", value: tAg },
         { label: "الوكالات الفعالة", value: tActive },
         { label: "الوكالات المفقودة", value: tLost },
@@ -18034,7 +18702,7 @@ function exportAllRecordsToExcel() {
 
     /* حسب المندوب */
     const map = {};
-    records.forEach(function (record) {
+    list.forEach(function (record) {
         const name = (record.representativeName || "-").trim() || "-";
         if (!map[name]) map[name] = { records: 0, agencies: 0, total: 0 };
         map[name].records += 1;
@@ -18052,7 +18720,7 @@ function exportAllRecordsToExcel() {
         headers: ["المندوب", "عدد السجلات", "عدد الوكالات", "المطلوب"],
         rows: repRows,
         moneyCols: [3],
-        totalRow: ["الإجمالي", records.length, tAg, tRep],
+        totalRow: ["الإجمالي", list.length, tAg, tRep - tDed],
         widths: [28, 14, 14, 20]
     });
 

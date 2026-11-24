@@ -44,6 +44,8 @@
   source: { kind: "site"|"manual", name },   // اختياري (23/11/2026): سجل مسترد من موقع تدقيق آخر أو تدقيق يدوي (agencies = [])
   summary: { agencyCount, amountDue },       // اختياري: ملخص السجل المسترد كما في مصدره
   deduction: { amount, reason },     // اختياري (19/11/2026): المقاصة — حسم للمندوب وسببه؛ ينقص المطلوب منه فقط (getRecordNetDue)
+  payment: { status: "paid", at, by }, // اختياري (24/11/2026): حالة القبض؛ الغياب = غير مقبوض
+  history: [{ at, by, action, detail }], // اختياري (24/11/2026): سجل التعديلات (create/edit/paid/unpaid/recovery/price/import)، حد 200 سطر
   recordNote: "نص",                  // اختياري (3/11/2026): ملاحظة على السجل كاملاً — مربع في التقرير وExcel؛ يُحفظ فقط إن كُتب
   createdAt, updatedAt               // ISO
 }

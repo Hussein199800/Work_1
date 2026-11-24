@@ -104,6 +104,7 @@ await page.locator("dialog[open] .app-dialog-cancel").click();
 check("«رجوع» يُبقي السجل الجديد", await ev(function () { return pendingAgencies.length === 1 && !document.getElementById("editingRecordId").value; }));
 
 /* 3) فترة السعر لا تنتقل إلى سجل آخر */
+await ev(function () { setReveal("pricePeriodBox", true); });
 await page.selectOption("#agencyPricePeriod", "2026-03-01");
 await ev(function () { editRecord("r1"); });
 await open.click();

@@ -100,6 +100,7 @@ await ev(function () { closeRecordModal(true); });
 await ev(function () { renderRecords(); });
 const row = await ev(function () { const tr = Array.from(document.querySelectorAll("#recordsTableBody tr")).find(function (t) { return /101/.test(t.textContent); }); return tr ? { cls: tr.className, text: tr.textContent } : null; });
 check("الجدول: شارة «مسترد» وصف مميز", row && /is-recovered/.test(row.cls) && /مسترد/.test(row.text) && /تدقيق يدوي/.test(row.text), JSON.stringify(row));
+await ev(function () { document.getElementById("rfMore").open = true; });
 await page.selectOption("#rfSource", "own");
 await page.waitForTimeout(150);
 const ownOnly = await ev(function () { return getVisibleRecords().map(function (r) { return r.recordNumber; }).join(","); });
@@ -143,7 +144,20 @@ check("ملف بلا أعمدة مطلوبة: رسالة واضحة", /لم أج
 /* 4) المطابقة */
 const match = await ev(function () { const d = recordsMatchingData(); return { own: d.own.length, site: d.site.length, manual: d.manual.length, dups: d.duplicates.map(function (x) { return x.number; }).join(","), gaps: JSON.stringify(d.gaps), missing: d.missing }; });
 check("المطابقة: الأعداد حسب المصدر", match.own === 3 && match.site === 2 && match.manual === 2, JSON.stringify(match));
-check("المطابقة: المكرر 104، والناقص 105", match.dups === "104" && match.gaps === "[[105,105]]" && match.missing === 1, JSON.stringify(match));
+check("المطابقة: المكرر 104 (نفس الرقم والمندوب والمكتب)", match.dups === "104", JSON.stringify(match));
+/* 24/11/2026: الناقص يُحسب لكل مندوب ومكتب؛ كل رقم ناقص غائب فعلاً عن سجلات ذلك المندوب في ذلك المكتب، وكل رقم بين طرفيه إما موجود أو ناقص */
+const seqOk = await ev(function () {
+    const d = recordsMatchingData();
+    return d.sequences.every(function (q) {
+        const have = new Set(records.filter(function (r) { return identityPart(r.representativeName) === q.rep && identityPart(r.officeName) === q.office; })
+            .map(function (r) { return Number(identityPart(r.recordNumber)); }));
+        const miss = new Set();
+        q.gaps.forEach(function (g) { for (let n = g[0]; n <= g[1]; n++) miss.add(n); });
+        for (let n = q.range[0]; n <= q.range[1]; n++) if (have.has(n) === miss.has(n)) return false;
+        return miss.size === q.missing;
+    }) && d.missing === d.sequences.reduce(function (s, q) { return s + q.missing; }, 0);
+});
+check("المطابقة: الأرقام الناقصة صحيحة لكل مندوب ومكتب", seqOk);
 const doc = await ev(function () { return buildRecordsMatchingDoc(); });
 check("مستند المطابقة قابل للطباعة", /مطابقة سجلات الفرع/.test(doc) && /105/.test(doc));
 
@@ -159,6 +173,27 @@ check("التقرير المخصّص: المصدر وعدد الوكالات و�
 
 /* 6) النسخة الاحتياطية تقبل السجلات المستردة */
 check("النسخة الاحتياطية بالسجلات المستردة صالحة للاستعادة", await ev(function () { return backupDataProblem(JSON.parse(buildBackupJSON())) === ""; }));
+
+/* 24/11/2026: المستردة لا تدخل في قوائم وأعداد التدقيق */
+const leak = await ev(function () {
+    const recRep = records.filter(isRecoveredRecord).map(function (r) { return String(r.representativeName).trim(); })
+        .find(function (n) { return !records.some(function (r) { return !isRecoveredRecord(r) && String(r.representativeName).trim() === n; }); });
+    updateDashboard();
+    switchSection("committeesSection");
+    const committeeOpts = Array.from(document.querySelectorAll("#committeeRep option")).map(function (o) { return o.value; });
+    const recordOpts = Array.from(document.querySelectorAll("#committeeRecord option")).map(function (o) { return o.value; });
+    const general = buildGeneralReportDoc();
+    return {
+        recRep: recRep || "",
+        dash: recRep ? document.getElementById("dashReps").textContent.indexOf(recRep) === -1 : true,
+        latest: !records.filter(isRecoveredRecord).some(function (r) { return document.getElementById("latestRecords").innerHTML.indexOf(">" + r.recordNumber + "<") !== -1 && !records.some(function (o) { return !isRecoveredRecord(o) && o.recordNumber === r.recordNumber; }); }),
+        committeeRep: recRep ? committeeOpts.indexOf(recRep) === -1 : true,
+        committeeRecord: !records.filter(isRecoveredRecord).some(function (r) { return recordOpts.indexOf(r.id) !== -1; }),
+        general: general.indexOf("— " + auditedRecords().length + " سجل") !== -1
+    };
+});
+check("المستردة خارج «أعلى المندوبين» و«آخر السجلات» وفلاتر حصص اللجان وعدد التقرير العام",
+    leak.dash && leak.latest && leak.committeeRep && leak.committeeRecord && leak.general, JSON.stringify(leak));
 
 check("لا أخطاء JavaScript", errors.length === 0, errors.join(" | "));
 

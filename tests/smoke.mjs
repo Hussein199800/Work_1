@@ -95,7 +95,7 @@ check("الحصص حسب التاريخ ومبلغ الفترة المحدد", b
 await ev(function () { switchSection("pricesSection"); });
 await page.waitForTimeout(300);
 /* updatedAt يتغير عمداً عند التطبيق والتراجع (لتعرف المزامنة أن هذه النسخة أحدث) */
-const snapshot = function () { return ev(function () { return JSON.stringify(records.map(function (r) { const x = Object.assign({}, r); delete x.updatedAt; return x; })); }); };
+const snapshot = function () { return ev(function () { return JSON.stringify(records.map(function (r) { const x = Object.assign({}, r); delete x.updatedAt; delete x.history; return x; })); }); };
 const original = await snapshot();
 await page.locator("#recordRepriceCard summary").click();
 await page.locator('[data-reprice-record="r2"]').uncheck();
@@ -110,6 +110,10 @@ await page.click('[data-reprice="undo"]');
 await page.locator("dialog[open] .app-dialog-ok").click();
 await page.waitForTimeout(600);
 check("التراجع يعيد السجلات كما كانت حرفياً", (await snapshot()) === original);
+check("سجل التعديلات: «إعادة تسعير» ثم «تراجع» على السجل المعدّل فقط", await ev(function () {
+    const acts = function (id) { return (records.find(function (r) { return r.id === id; }).history || []).map(function (h) { return h.action + ":" + h.detail.split(":")[0]; }).join("|"); };
+    return acts("r1") === "price:إعادة تسعير حسب تاريخ السجل|price:تراجع عن تغيير السعر" && acts("r2") === "";
+}));
 
 /* 3) سجل جديد بثلاثة أسعار */
 await ev(function () { switchSection("newRecordSection"); });
@@ -120,6 +124,7 @@ await page.fill("#representativeName", "مندوب");
 await ev(function () { const d = document.getElementById("recordDate"); d.value = "2026-03-06"; d.dispatchEvent(new Event("change", { bubbles: true })); });
 await ev(function () { const s = document.getElementById("agencyType"); s.value = "general"; s.dispatchEvent(new Event("change", { bubbles: true })); syncChoiceChips(); });
 async function addAgency(n, period) {
+    await ev(function () { setReveal("pricePeriodBox", true); });
     await page.selectOption("#agencyPricePeriod", period);
     await ev(function () { const s = document.getElementById("agencyType"); s.value = "general"; s.dispatchEvent(new Event("change", { bubbles: true })); syncChoiceChips(); });
     await page.fill("#agencyNumber", String(n));
