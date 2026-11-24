@@ -1346,6 +1346,20 @@ function normalizeDigits(text) {
         .replace(/٫/g, ".");
 }
 
+/* هوية السجل (24/11/2026): رقم السجل ليس فريداً؛ نفس الرقم مسموح لمندوب أو مكتب آخر.
+   التكرار الحقيقي = نفس الرقم + نفس المندوب + نفس المكتب (بعد تنظيف المسافات والأرقام). */
+function identityPart(text) {
+    return normalizeDigits(String(text == null ? "" : text)).replace(/\s+/g, " ").trim();
+}
+
+function recordIdentityKey(record) {
+    return identityPart(record && record.recordNumber) + "\u0001" + identityPart(record && record.representativeName) + "\u0001" + identityPart(record && record.officeName);
+}
+
+function sameRecordIdentity(a, b) {
+    return recordIdentityKey(a) === recordIdentityKey(b);
+}
+
 function number(value) {
 
 /* نص من حقل إدخال: أرقام عربية أو فواصل آلاف لا تتحول إلى صفر */
@@ -1882,6 +1896,7 @@ function (button) {
 
 const ADMIN_TABS = [
     { id: "calculatorSection", icon: "ti-calculator", text: "الحاسبة" },
+    { id: "guideSection", icon: "ti-book-2", text: "شرح النظام" },
     { id: "printSettingsSection", icon: "ti-printer", text: "الطباعة والتخصيص", manager: true },
     { id: "usersSection", icon: "ti-users", text: "المستخدمون", manager: true },
     { id: "backupSection", icon: "ti-database", text: "النسخ الاحتياطي", manager: true }
@@ -4823,15 +4838,34 @@ if (!agency) {
     return;
 }
 
-appConfirm({
-    title: "حذف الوكالة",
-    message: "هل تريد حذف الوكالة رقم " + agency.number + " من هذا السجل؟",
-    confirmText: "حذف الوكالة",
-    cancelText: "إلغاء",
-    danger: true
-}).then(function (ok) {
+/* بعد الحذف: هل يمكن إعادة ترقيم ما بعدها (66 تصبح 65…)؟ فقط لرقم صحيح لا تحمله وكالة أخرى */
+const n = /^\d+$/.test(identityPart(agency.number)) ? Number(identityPart(agency.number)) : null;
+const later = n === null ? [] : pendingAgencies.filter(function (a) {
+    return a !== agency && /^\d+$/.test(identityPart(a.number)) && Number(identityPart(a.number)) > n;
+});
+const sameLeft = n !== null && pendingAgencies.some(function (a) { return a !== agency && identityPart(a.number) === String(n); });
+const canRenumber = later.length > 0 && !sameLeft && !editingAgency;
 
-    if (!ok) {
+const ask = canRenumber
+    ? appChoose({
+        title: "حذف الوكالة رقم " + agency.number,
+        message: "بعدها " + later.length + " وكالة. «حذف وإعادة الترقيم» يجعل الوكالة " + (n + 1) + " رقم " + n + " وهكذا بالتسلسل حتى الأخيرة، وما قبل " + n + " لا يتغير.",
+        choices: [
+            { value: "renumber", label: "حذف وإعادة ترقيم ما بعدها", kind: "danger" },
+            { value: "delete", label: "حذف فقط", kind: "secondary" }
+        ]
+    })
+    : appConfirm({
+        title: "حذف الوكالة",
+        message: "هل تريد حذف الوكالة رقم " + agency.number + " من هذا السجل؟",
+        confirmText: "حذف الوكالة",
+        cancelText: "إلغاء",
+        danger: true
+    }).then(function (ok) { return ok ? "delete" : null; });
+
+ask.then(function (choice) {
+
+    if (!choice) {
         return;
     }
 
@@ -4845,12 +4879,131 @@ appConfirm({
         clearAgencyForm();
     }
 
+    if (choice === "renumber") {
+        renumberPendingAgencies(n + 1, n, "حُذفت الوكالة رقم " + agency.number);
+        return;
+    }
+
     renderPendingAgencies();
 
     notify("تم حذف الوكالة رقم " + escapeHTML(agency.number) + ".", "info", 2500);
 });
 
 }
+
+/* =========================================================
+إعادة الترقيم (24/11/2026) — مثل «تعبئة السلسلة» في Excel:
+كل وكالة رقمها الصحيح ≥ from (بترتيب أرقامها ثم ترتيب إضافتها) تأخذ startAt ثم startAt+1…
+ما قبل from والأرقام غير الصحيحة لا تتغير. يُحفظ القديم للتراجع.
+========================================================= */
+
+let renumberUndo = null;
+
+function renumberPlan(from, startAt) {
+    const list = pendingAgencies
+        .map(function (a, i) { return { a: a, i: i, n: identityPart(a.number) }; })
+        .filter(function (x) { return /^\d+$/.test(x.n) && Number(x.n) >= from; })
+        .sort(function (x, y) { return Number(x.n) - Number(y.n) || x.i - y.i; });
+    return list.map(function (x, k) { return { agency: x.a, from: x.n, to: String(startAt + k) }; });
+}
+
+function renumberPendingAgencies(from, startAt, prefix) {
+    if (editingAgency) {
+        notify("أنهِ تعديل الوكالة المفتوحة أولاً («إضافة الوكالة» أو «إلغاء»)، ثم أعد الترقيم.", "warning", 6000);
+        renderPendingAgencies();
+        return 0;
+    }
+    const plan = renumberPlan(from, startAt).filter(function (p) { return p.from !== p.to; });
+    if (plan.length) {
+        renumberUndo = plan.map(function (p) { return { id: p.agency.id, agency: p.agency, number: p.agency.number }; });
+        plan.forEach(function (p) { p.agency.number = p.to; });
+        /* أرقام تغيّرت: لا يصح بعدها تراجع «الإدراج والإزاحة» القديم */
+        lastInsertShift = null;
+    }
+    renderPendingAgencies();
+    const numberInput = document.getElementById("agencyNumber");
+    if (numberInput && !editingAgency) numberInput.value = getNextAgencyNumber();
+    updatePreview();
+    if (typeof saveRecordDraft === "function") saveRecordDraft();
+    const head = prefix ? escapeHTML(prefix) + " — " : "";
+    if (!plan.length) {
+        notify(head + "الأرقام متسلسلة أصلاً، لم يتغير شيء.", "info", 3500);
+        return 0;
+    }
+    notify("<strong>" + head + "أُعيد ترقيم " + plan.length + " وكالة</strong><span>من " + escapeHTML(plan[0].from) + " ← " + escapeHTML(plan[0].to) +
+        " حتى " + escapeHTML(plan[plan.length - 1].from) + " ← " + escapeHTML(plan[plan.length - 1].to) + "</span>" +
+        '<span class="toast-actions"><button type="button" class="act-btn" onclick="undoRenumberAgencies()">تراجع عن الترقيم</button></span>',
+        "success", 9000, true);
+    return plan.length;
+}
+
+function undoRenumberAgencies() {
+    if (!renumberUndo) return;
+    const list = renumberUndo;
+    renumberUndo = null;
+    list.forEach(function (x) { if (pendingAgencies.indexOf(x.agency) !== -1) x.agency.number = x.number; });
+    renderPendingAgencies();
+    const numberInput = document.getElementById("agencyNumber");
+    if (numberInput && !editingAgency) numberInput.value = getNextAgencyNumber();
+    updatePreview();
+    if (typeof saveRecordDraft === "function") saveRecordDraft();
+    notify("أُعيدت الأرقام كما كانت.", "info", 3000);
+}
+
+/* أول فجوة في التسلسل: الاقتراح الافتراضي للنافذة */
+function firstNumberGap() {
+    const nums = Array.from(new Set(pendingAgencies.map(function (a) { return identityPart(a.number); })
+        .filter(function (n) { return /^\d+$/.test(n); }).map(Number))).sort(function (a, b) { return a - b; });
+    for (let i = 1; i < nums.length; i++) {
+        if (nums[i] - nums[i - 1] > 1) return { from: nums[i], startAt: nums[i - 1] + 1 };
+    }
+    return nums.length ? { from: nums[0], startAt: nums[0] } : null;
+}
+
+function openRenumberDialog() {
+    if (editingAgency) {
+        notify("أنهِ تعديل الوكالة المفتوحة أولاً، ثم أعد الترقيم.", "warning", 5000);
+        return;
+    }
+    const gap = firstNumberGap();
+    if (!gap) {
+        notify("لا توجد وكالات بأرقام لإعادة ترقيمها.", "info", 3000);
+        return;
+    }
+    const preview = function (values, dialog) {
+        const from = number(values.from), startAt = number(values.startAt);
+        const msg = dialog.querySelector(".app-dialog-message");
+        if (!(from > 0) || !(startAt > 0)) { msg.textContent = "اكتب رقمين صحيحين."; return; }
+        const plan = renumberPlan(from, startAt);
+        const changed = plan.filter(function (p) { return p.from !== p.to; });
+        msg.textContent = plan.length
+            ? "الوكالات من " + from + " فما فوق (" + plan.length + " وكالة) تصبح " + startAt + "، " + (startAt + 1) + "… حتى " + plan[plan.length - 1].to +
+              ". سيتغير " + changed.length + " رقم، وما قبل " + from + " لا يتغير."
+            : "لا توجد وكالة رقمها " + from + " أو أكبر.";
+    };
+    appChoose({
+        title: "إعادة ترقيم الوكالات (تعبئة السلسلة)",
+        message: "",
+        fields: [
+            { id: "from", label: "ابدأ من الوكالة رقم", value: gap.from, numeric: true, onInput: preview },
+            { id: "startAt", label: "لتصبح رقم", value: gap.startAt, numeric: true, onInput: preview }
+        ],
+        onOpen: preview,
+        choices: [{ value: "apply", label: "إعادة الترقيم", kind: "primary" }]
+    }).then(function (res) {
+        if (!res || res.choice !== "apply") return;
+        const from = number(res.values.from), startAt = number(res.values.startAt);
+        if (!(from > 0) || !(startAt > 0) || Math.floor(from) !== from || Math.floor(startAt) !== startAt) {
+            notify("اكتب رقمين صحيحين.", "error");
+            return;
+        }
+        renumberPendingAgencies(from, startAt);
+    });
+}
+
+window.openRenumberDialog = openRenumberDialog;
+window.undoRenumberAgencies = undoRenumberAgencies;
+window.renumberPendingAgencies = renumberPendingAgencies;
 
 window.removePendingAgency =
 removePendingAgency;
@@ -5572,7 +5725,7 @@ recordForm.addEventListener(
             حتى لا يُحفظ نفس السجل مرتين دون انتباه.
         */
         const sameRecord = records.find(function (r) {
-            return r.id !== record.id && String(r.recordNumber).trim() === recordNumber;
+            return r.id !== record.id && sameRecordIdentity(r, record);
         });
 
         const proceed = function () {
@@ -5674,7 +5827,7 @@ recordForm.addEventListener(
 
         if (sameRecord) {
             appChoose({
-                title: "رقم السجل " + recordNumber + " موجود مسبقاً",
+                title: "السجل " + recordNumber + " لنفس المندوب والمكتب موجود مسبقاً",
                 message: "يوجد سجل محفوظ بنفس الرقم (" + (sameRecord.officeName || "") + " — " + (sameRecord.representativeName || "") + " — " +
                     formatDay(getRecordDay(sameRecord)) + " — " + (sameRecord.agencies || []).length + " وكالة). هل هذا سجل مختلف فعلاً؟",
                 choices: [
@@ -6343,10 +6496,10 @@ function saveRecoveredForm(addAnother) {
     };
 
     /* رقم موجود (مدقّق هنا أو مسترد قبلاً): تنبيه للمطابقة قبل الحفظ */
-    const same = records.filter(function (r) { return r.id !== record.id && String(r.recordNumber).trim() === recordNumber; });
+    const same = records.filter(function (r) { return r.id !== record.id && sameRecordIdentity(r, record); });
     if (same.length) {
         appChoose({
-            title: "رقم السجل " + recordNumber + " موجود مسبقاً",
+            title: "السجل " + recordNumber + " لنفس المندوب والمكتب موجود مسبقاً",
             message: same.map(function (r) { return (isRecoveredRecord(r) ? "مسترد" : "مدقّق هنا") + ": " + (r.representativeName || "") + " — " + (r.officeName || "") + " — " + formatDay(getRecordDay(r)); }).join(" | ") +
                 ". هل هو سجل مختلف فعلاً؟",
             choices: [{ value: "save", label: "احفظه رغم التكرار", kind: "primary" }]
@@ -6506,7 +6659,7 @@ function prepareRecoveredImport(rows, fileName) {
     const get = function (row, key) { return map[key] === undefined ? "" : row[map[key]]; };
     const existing = {};
     records.forEach(function (r) {
-        const n = String(r.recordNumber).trim();
+        const n = recordIdentityKey(r);
         existing[n] = existing[n] || [];
         existing[n].push(r);
     });
@@ -6527,12 +6680,14 @@ function prepareRecoveredImport(rows, fileName) {
         };
     });
     items.forEach(function (it) {
+        /* المكرر = نفس الرقم + المندوب + المكتب؛ نفس الرقم لمندوب آخر سجل مختلف */
+        const key = recordIdentityKey({ recordNumber: it.number, representativeName: it.rep, officeName: it.office });
         if (!it.number || !it.rep || !it.office) it.status = "invalid";
-        else if (inFile[it.number]) it.status = "dup-file";
-        else if ((existing[it.number] || []).some(function (r) { return !isRecoveredRecord(r); })) it.status = "dup-own";
-        else if ((existing[it.number] || []).length) it.status = "dup-recovered";
+        else if (inFile[key]) it.status = "dup-file";
+        else if ((existing[key] || []).some(function (r) { return !isRecoveredRecord(r); })) it.status = "dup-own";
+        else if ((existing[key] || []).length) it.status = "dup-recovered";
         else it.status = "new";
-        if (it.number) inFile[it.number] = true;
+        if (it.number) inFile[key] = true;
     });
     recoveredImport = { fileName: fileName, items: items, kind: "site", sourceName: "", includeDup: false };
     renderRecoveredImport();
@@ -6540,8 +6695,8 @@ function prepareRecoveredImport(rows, fileName) {
 
 const IMPORT_STATUS = {
     "new": ["جديد", "is-new"],
-    "dup-own": ["مدقّق هنا بنفس الرقم", "is-dup"],
-    "dup-recovered": ["مسترد سابقاً بنفس الرقم", "is-dup"],
+    "dup-own": ["مدقّق هنا (نفس الرقم والمندوب والمكتب)", "is-dup"],
+    "dup-recovered": ["مسترد سابقاً (نفس الرقم والمندوب والمكتب)", "is-dup"],
     "dup-file": ["مكرر في الملف", "is-dup"],
     "invalid": ["ناقص (رقم/مندوب/مكتب)", "is-bad"]
 };
@@ -6638,31 +6793,45 @@ function recordsMatchingData() {
     const own = records.filter(function (r) { return !isRecoveredRecord(r); });
     const site = records.filter(function (r) { return isRecoveredRecord(r) && r.source.kind === "site"; });
     const manual = records.filter(function (r) { return isRecoveredRecord(r) && r.source.kind === "manual"; });
-    const byNumber = {};
+    /* المكرر: نفس الرقم + المندوب + المكتب في أكثر من سجل (24/11/2026: نفس الرقم لمندوب آخر طبيعي) */
+    const byKey = {};
+    records.forEach(function (r) { (byKey[recordIdentityKey(r)] = byKey[recordIdentityKey(r)] || []).push(r); });
+    const duplicates = Object.keys(byKey).filter(function (k) { return byKey[k].length > 1; })
+        .map(function (k) { return { number: identityPart(byKey[k][0].recordNumber), list: byKey[k] }; })
+        .sort(function (a, b) { return a.number.localeCompare(b.number, "ar", { numeric: true }); });
+    /* الأرقام الناقصة لكل مندوب ومكتب على حدة (كل مندوب له تسلسله) — الأرقام الصحيحة فقط */
+    const groups = {};
     records.forEach(function (r) {
-        const n = String(r.recordNumber).trim();
-        (byNumber[n] = byNumber[n] || []).push(r);
+        const n = identityPart(r.recordNumber);
+        if (!/^\d+$/.test(n)) return;
+        const rep = identityPart(r.representativeName) || "—";
+        const office = identityPart(r.officeName) || "—";
+        const key = rep + "\u0001" + office;
+        (groups[key] = groups[key] || { rep: rep, office: office, nums: new Set() }).nums.add(Number(n));
     });
-    const duplicates = Object.keys(byNumber).filter(function (n) { return byNumber[n].length > 1; })
-        .sort(function (a, b) { return a.localeCompare(b, "ar", { numeric: true }); })
-        .map(function (n) { return { number: n, list: byNumber[n] }; });
-    /* الأرقام الناقصة في التسلسل (الأرقام الصحيحة فقط) */
-    const nums = Object.keys(byNumber).filter(function (n) { return /^\d+$/.test(n); }).map(Number).sort(function (a, b) { return a - b; });
-    const gaps = [];
+    const sequences = [];
     let missing = 0;
-    for (let i = 1; i < nums.length; i++) {
-        if (nums[i] - nums[i - 1] > 1) {
-            gaps.push([nums[i - 1] + 1, nums[i] - 1]);
-            missing += nums[i] - nums[i - 1] - 1;
+    Object.keys(groups).forEach(function (key) {
+        const g = groups[key];
+        const nums = Array.from(g.nums).sort(function (a, b) { return a - b; });
+        const gaps = [];
+        let count = 0;
+        for (let i = 1; i < nums.length; i++) {
+            if (nums[i] - nums[i - 1] > 1) { gaps.push([nums[i - 1] + 1, nums[i] - 1]); count += nums[i] - nums[i - 1] - 1; }
         }
-    }
+        missing += count;
+        sequences.push({ rep: g.rep, office: g.office, range: [nums[0], nums[nums.length - 1]], records: nums.length, gaps: gaps, missing: count });
+    });
+    sequences.sort(function (a, b) { return a.rep.localeCompare(b.rep, "ar") || a.office.localeCompare(b.office, "ar"); });
+    const gaps = [];
+    sequences.forEach(function (q) { q.gaps.forEach(function (g) { gaps.push(g); }); });
     const reps = {};
     records.forEach(function (r) {
         const name = String(r.representativeName || "").trim() || "—";
         reps[name] = reps[name] || { own: 0, recovered: 0 };
         if (isRecoveredRecord(r)) reps[name].recovered++; else reps[name].own++;
     });
-    return { own: own, site: site, manual: manual, duplicates: duplicates, gaps: gaps, missing: missing, range: nums.length ? [nums[0], nums[nums.length - 1]] : null, reps: reps };
+    return { own: own, site: site, manual: manual, duplicates: duplicates, gaps: gaps, missing: missing, sequences: sequences, reps: reps };
 }
 
 function buildRecordsMatchingDoc() {
@@ -6674,15 +6843,20 @@ function buildRecordsMatchingDoc() {
         "<div><dt>مدقّقة في هذا الموقع</dt><dd>" + d.own.length + "</dd></div>" +
         "<div><dt>مستردة من موقع آخر</dt><dd>" + d.site.length + "</dd></div>" +
         "<div><dt>مستردة من تدقيق يدوي</dt><dd>" + d.manual.length + "</dd></div>" +
-        "<div><dt>أرقام مكررة</dt><dd>" + d.duplicates.length + "</dd></div>" +
+        "<div><dt>سجلات مكررة</dt><dd>" + d.duplicates.length + "</dd></div>" +
         "<div><dt>أرقام ناقصة في التسلسل</dt><dd>" + d.missing + "</dd></div>" +
         "</dl>";
-    html += '<section class="doc-section"><h3>الأرقام الناقصة في التسلسل' + (d.range ? " (من " + d.range[0] + " إلى " + d.range[1] + ")" : "") + "</h3>" +
-        (d.gaps.length
-            ? '<p class="matching-gaps">' + d.gaps.map(function (g) { return g[0] === g[1] ? String(g[0]) : g[0] + "–" + g[1]; }).join("، ") + "</p>" +
-              '<p class="doc-empty">أرقام سجلات لا توجد في أي مصدر: لم تُدقَّق هنا ولم تُسترد. راجعها مع الدفتر.</p>'
-            : '<p class="doc-empty">لا أرقام ناقصة بين أصغر رقم وأكبره.</p>') + "</section>";
-    html += '<section class="doc-section"><h3>أرقام مكررة (موجودة أكثر من مرة)</h3>' +
+    const gapText = function (gaps) { return gaps.map(function (g) { return g[0] === g[1] ? String(g[0]) : g[0] + "–" + g[1]; }).join("، "); };
+    const withGaps = d.sequences.filter(function (q) { return q.missing > 0; });
+    html += '<section class="doc-section"><h3>الأرقام الناقصة في التسلسل (لكل مندوب ومكتب)</h3>' +
+        (withGaps.length
+            ? '<table class="doc-table"><thead><tr><th>المندوب</th><th>المكتب</th><th>من — إلى</th><th class="num">عدد الناقص</th><th>الأرقام الناقصة</th></tr></thead><tbody>' +
+              withGaps.map(function (q) {
+                  return "<tr><td>" + escapeHTML(q.rep) + "</td><td>" + escapeHTML(q.office) + "</td><td>" + q.range[0] + " — " + q.range[1] + '</td><td class="num">' + q.missing + '</td><td class="matching-gaps">' + gapText(q.gaps) + "</td></tr>";
+              }).join("") + "</tbody></table>" +
+              '<p class="doc-empty">أرقام سجلات لا توجد في أي مصدر لهذا المندوب في هذا المكتب: لم تُدقَّق هنا ولم تُسترد. راجعها مع الدفتر.</p>'
+            : '<p class="doc-empty">لا أرقام ناقصة في تسلسل أي مندوب.</p>') + "</section>";
+    html += '<section class="doc-section"><h3>سجلات مكررة (نفس الرقم والمندوب والمكتب أكثر من مرة)</h3>' +
         (d.duplicates.length
             ? '<table class="doc-table"><thead><tr><th>رقم السجل</th><th>المصدر</th><th>المندوب</th><th>المكتب</th><th>التاريخ</th></tr></thead><tbody>' +
               d.duplicates.map(function (g) {
@@ -6690,7 +6864,7 @@ function buildRecordsMatchingDoc() {
                       return "<tr" + (i === 0 ? ' class="dup-first"' : "") + "><td>" + (i === 0 ? "<strong>" + escapeHTML(g.number) + "</strong>" : "") + "</td><td>" + srcOf(r) + "</td><td>" + escapeHTML(r.representativeName) + "</td><td>" + escapeHTML(r.officeName) + "</td><td>" + formatDay(getRecordDay(r)) + "</td></tr>";
                   }).join("");
               }).join("") + "</tbody></table>"
-            : '<p class="doc-empty">لا أرقام مكررة.</p>') + "</section>";
+            : '<p class="doc-empty">لا سجلات مكررة. (نفس الرقم لمندوب أو مكتب آخر ليس تكراراً.)</p>') + "</section>";
     const names = Object.keys(d.reps).sort(function (a, b) { return a.localeCompare(b, "ar"); });
     html += '<section class="doc-section"><h3>حسب المندوب</h3><table class="doc-table"><thead><tr><th>المندوب</th><th class="num">مدقّقة هنا</th><th class="num">مستردة</th><th class="num">المجموع</th></tr></thead><tbody>' +
         names.map(function (n) { const x = d.reps[n]; return "<tr><td>" + escapeHTML(n) + '</td><td class="num">' + x.own + '</td><td class="num">' + x.recovered + '</td><td class="num">' + (x.own + x.recovered) + "</td></tr>"; }).join("") +
@@ -9556,6 +9730,7 @@ function appChoose(options) {
                 '<div class="app-dialog-icon" aria-hidden="true"><i class="ti ti-arrows-sort"></i></div>' +
                 '<h3 id="appChooseTitle"></h3>' +
                 '<p class="app-dialog-message"></p>' +
+                '<div class="app-dialog-fields"></div>' +
                 '<div class="app-dialog-actions app-choose-actions"></div>' +
             "</div>";
 
@@ -9574,29 +9749,59 @@ function appChoose(options) {
 
         const actions = dialog.querySelector(".app-choose-actions");
 
+        /* حقول اختيارية (options.fields = [{ id, label, value, numeric }]): عندها تُرجع { choice, values } بدل القيمة */
+        const fieldsBox = dialog.querySelector(".app-dialog-fields");
+        const fields = Array.isArray(options.fields) ? options.fields : null;
+        if (fields) {
+            fields.forEach(function (f) {
+                const label = document.createElement("label");
+                label.className = "input-group";
+                const span = document.createElement("span");
+                span.textContent = f.label || "";
+                const input = document.createElement("input");
+                input.type = "text";
+                input.dataset.field = f.id;
+                input.value = f.value == null ? "" : String(f.value);
+                if (f.numeric) { input.inputMode = "numeric"; input.dir = "ltr"; }
+                if (typeof f.onInput === "function") input.addEventListener("input", function () { f.onInput(readFields(), dialog); });
+                label.appendChild(span);
+                label.appendChild(input);
+                fieldsBox.appendChild(label);
+            });
+        } else {
+            fieldsBox.remove();
+        }
+        function readFields() {
+            const values = {};
+            dialog.querySelectorAll("[data-field]").forEach(function (el) { values[el.dataset.field] = el.value; });
+            return values;
+        }
+
         (options.choices || []).concat([{ value: null, label: "إلغاء", kind: "secondary" }]).forEach(function (choice) {
             const b = document.createElement("button");
             b.type = "button";
             b.className = (choice.kind === "danger" ? "danger-btn" : choice.kind === "primary" ? "primary-btn" : "secondary-btn");
             b.textContent = choice.label;
-            b.addEventListener("click", function () { finish(choice.value); });
+            b.addEventListener("click", function () { finish(fields ? { choice: choice.value, values: readFields() } : choice.value); });
             actions.appendChild(b);
         });
 
-        dialog.addEventListener("cancel", function (event) { event.preventDefault(); finish(null); });
-        dialog.addEventListener("close", function () { finish(null); });
+        const cancelValue = fields ? { choice: null, values: {} } : null;
+        dialog.addEventListener("cancel", function (event) { event.preventDefault(); finish(cancelValue); });
+        dialog.addEventListener("close", function () { finish(cancelValue); });
         dialog.addEventListener("keydown", function (event) {
-            if (event.key === "Escape") { event.preventDefault(); finish(null); }
+            if (event.key === "Escape") { event.preventDefault(); finish(cancelValue); }
         });
         dialog.addEventListener("click", function (event) {
-            if (event.target === dialog) finish(null);
+            if (event.target === dialog) finish(cancelValue);
         });
 
         document.body.appendChild(dialog);
 
         if (typeof dialog.showModal === "function") {
             dialog.showModal();
-            actions.querySelector("button")?.focus();
+            (fields ? dialog.querySelector("[data-field]") : actions.querySelector("button"))?.focus();
+            if (fields && options.onOpen) options.onOpen(readFields(), dialog);
         } else {
             finish(null);
         }
@@ -12143,10 +12348,13 @@ function renderGuide() {
             "<li><b>بعد تعديل وكالة:</b> اضغط «إضافة الوكالة» ثم «حفظ السجل» حتى يُحفظ التعديل.</li>" +
             "<li><b>إضافة سريعة:</b> <b>Ctrl + S</b> يضيف الوكالة من أي حقل في صفحة إنشاء السجل، و«وكالة مماثلة للأخيرة» (أو <b>Ctrl + D</b>) يكرر آخر وكالة (نوعها وحالتها وإضافاتها وطوابعها) بالرقم التالي. إذا قفز رقم الوكالة عن آخر رقم (مثلاً 90 ثم 92) يظهر تنبيه أصفر داخل إشعار الإضافة. رقم ونوع آخر وكالة يظهران في الشريط السفلي.</li>" +
             "<li><b>وكالة منسية:</b> اكتب رقمها الصحيح (مثلاً 116) ثم «إضافة الوكالة»، واختر «إدراجها وإزاحة الأرقام»: تأخذ رقمها، وكل وكالة بعدها يزداد رقمها 1 مع بقاء بياناتها.</li>" +
+            "<li><b>إعادة الترقيم:</b> عند حذف وكالة اختر «حذف وإعادة ترقيم ما بعدها» (حذف 65 ← تصبح 66 رقم 65 وهكذا)، أو زر «إعادة الترقيم» فوق «الوكالات المضافة»: من رقم تختاره تأخذ الوكالات أرقاماً متسلسلة مثل تعبئة السلسلة في Excel، وما قبله لا يتغير، مع «تراجع عن الترقيم».</li>" +
+            "<li><b>رقم السجل:</b> ليس فريداً؛ نفس الرقم مسموح لمندوب أو مكتب آخر. التنبيه يظهر فقط إذا تكرر الرقم لنفس المندوب ونفس المكتب.</li>" +
             "<li><b>تغيير النوع:</b> من قائمة «النوع» في سطر الوكالة المضافة؛ تُعاد حسابها بسعر النوع الجديد ويبقى رقمها.</li>" +
             "<li><b>أسعار حسب الفترات:</b> من قسم الأسعار ← «أسعار حسب الفترات». كل جدول يبدأ من تاريخ (يوم) محدد، وكل وكالة جديدة تأخذ أسعار فترة «تاريخ السجل»، والسجلات المحفوظة لا تتغير.</li>" +
             "<li><b>الوضع الليلي:</b> زر «الوضع الليلي» في القائمة الجانبية (أو أيقونة القمر على الهاتف)، ويُحفظ اختيارك.</li>" +
             "<li><b>الحفظ التلقائي:</b> السجل غير المحفوظ يُستعاد تلقائياً إذا أُغلقت الصفحة أو انقطعت الكهرباء.</li>" +
+            "<li><b>الإدارة:</b> تبويب واحد فيه الحاسبة وشرح النظام والطباعة والتخصيص والمستخدمون والنسخ الاحتياطي.</li>" +
             "<li><b>الحاسبة:</b> لحساب حصة أعضاء مجلس الفرع من بدل الانتقال لسجلات ومدى وكالات محددة، ولحساب وكالة دون إنشاء سجل، ولمطابقة ما سلّمه المندوب. كل ذلك منفصل ولا يغيّر أي رقم في السجلات.</li>" +
             "<li><b>حفظ PDF:</b> في نافذة الطباعة اختر «حفظ بتنسيق PDF» وفعّل «رسومات الخلفية» لتظهر الألوان.</li>" +
             "<li><b>النسخ الاحتياطي:</b> البيانات محفوظة في هذا المتصفح فقط؛ حمّل نسخة احتياطية بانتظام من «الإدارة ← النسخ الاحتياطي»، خصوصاً قبل أي تحديث.</li>" +
@@ -13232,7 +13440,7 @@ html += `
     <p class="guide-link no-print">
         <i class="ti ti-info-circle"></i>
         معنى الألوان والعلامات وطريقة الحساب موجودة في
-        <button type="button" class="link-btn" onclick="switchSection('guideSection')">دليل النظام</button>
+        <button type="button" class="link-btn" onclick="switchSection('guideSection')">شرح النظام (الإدارة)</button>
     </p>
 
 `;

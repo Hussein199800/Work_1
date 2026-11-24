@@ -252,11 +252,6 @@
                     <span class="nav-text"><b>حصص اللجان</b><small>الإسعاف والتعاون</small></span>
                 </button>
 
-                <button type="button" class="tab-btn" data-section="guideSection">
-                    <i class="ti ti-book-2 nav-icon"></i>
-                    <span class="nav-text"><b>دليل النظام</b><small>الألوان والشرح والإرشادات</small></span>
-                </button>
-
                 <button type="button" class="tab-btn" data-section="devlogSection">
                     <i class="ti ti-timeline-event nav-icon"></i>
                     <span class="nav-text"><b>تطوير الموقع</b><small>مراحل العمل وما تغيّر</small></span>
@@ -270,7 +265,7 @@
                 <!-- الإدارة (23/11/2026): الحاسبة، الطباعة والتخصيص، المستخدمون، النسخ الاحتياطي كتبويبات فرعية -->
                 <button type="button" class="tab-btn" data-section="adminSection">
                     <i class="ti ti-settings nav-icon"></i>
-                    <span class="nav-text"><b>الإدارة</b><small>الحاسبة، الطباعة، المستخدمون، النسخ</small></span>
+                    <span class="nav-text"><b>الإدارة</b><small>الحاسبة، الشرح، الطباعة، المستخدمون، النسخ</small></span>
                 </button>
 
             </nav>
@@ -1191,11 +1186,16 @@
                                 <i class="ti ti-list-details"></i> الوكالات المضافة
                             </h3>
 
-                            <span
-                                id="agencyCounter"
-                                class="counter"
-                            >
-                                عدد الوكالات: 0
+                            <span class="pending-head-actions">
+                                <button type="button" class="secondary-btn small-btn" id="renumberAgenciesBtn" onclick="openRenumberDialog()" title="مثل تعبئة السلسلة في Excel: من رقم معيّن تأخذ الوكالات أرقاماً متسلسلة، وما قبله لا يتغير">
+                                    <i class="ti ti-sort-ascending-numbers"></i> إعادة الترقيم
+                                </button>
+                                <span
+                                    id="agencyCounter"
+                                    class="counter"
+                                >
+                                    عدد الوكالات: 0
+                                </span>
                             </span>
 
                         </div>
@@ -1450,12 +1450,13 @@
             <section
                 id="guideSection"
                 class="section"
+                data-admin
             >
 
                 <div class="page-title">
                     <span class="page-icon"><i class="ti ti-book-2"></i></span>
                     <div class="page-title-text">
-                        <h2>دليل النظام</h2>
+                        <h2>شرح النظام</h2>
                         <p>شرح الألوان والحسابات وطريقة الاستخدام — يتحدث تلقائياً مع الأسعار والبيانات</p>
                     </div>
                 </div>
@@ -1726,6 +1727,19 @@
                                 <li>تبويب رئيسي واحد «الإدارة» بدل «الحاسبة» و«المستخدمون»، فيه تبويبات فرعية: الحاسبة، الطباعة والتخصيص، المستخدمون، النسخ الاحتياطي.</li>
                                 <li>التوقيعات في آخر التقارير صارت للجنة التدقيق فقط (الرئيس وأربعة أعضاء) بدل المدقق ورئيس مكتب المحاسبة، والصفات والأسماء وعنوان القسم قابلة للتعديل من «الطباعة والتخصيص».</li>
                                 <li>زر ظاهر «إضافة سجل مسترد» في صفحة السجلات، و«سجل مسترد؟» في صفحة إنشاء سجل.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-sort-ascending-numbers"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">24 تشرين الثاني 2026</p>
+                            <h3>إعادة ترقيم الوكالات، ورقم السجل غير الفريد</h3>
+                            <ul class="devlog-list">
+                                <li>إعادة الترقيم مثل «تعبئة السلسلة» في Excel: عند حذف وكالة (مثلاً 65) تصبح 66 رقم 65 وهكذا، أو من زر «إعادة الترقيم» من أي رقم، وما قبله لا يتغير، مع التراجع.</li>
+                                <li>رقم السجل نفسه مسموح لمندوب أو مكتب آخر؛ التنبيه والمكرر في الاستيراد والمطابقة فقط لنفس الرقم والمندوب والمكتب، والأرقام الناقصة تُحسب لكل مندوب على حدة.</li>
+                                <li>«شرح النظام» صار تبويباً فرعياً في «الإدارة».</li>
                             </ul>
                         </div>
                     </li>

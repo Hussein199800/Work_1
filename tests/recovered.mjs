@@ -143,7 +143,20 @@ check("ملف بلا أعمدة مطلوبة: رسالة واضحة", /لم أج
 /* 4) المطابقة */
 const match = await ev(function () { const d = recordsMatchingData(); return { own: d.own.length, site: d.site.length, manual: d.manual.length, dups: d.duplicates.map(function (x) { return x.number; }).join(","), gaps: JSON.stringify(d.gaps), missing: d.missing }; });
 check("المطابقة: الأعداد حسب المصدر", match.own === 3 && match.site === 2 && match.manual === 2, JSON.stringify(match));
-check("المطابقة: المكرر 104، والناقص 105", match.dups === "104" && match.gaps === "[[105,105]]" && match.missing === 1, JSON.stringify(match));
+check("المطابقة: المكرر 104 (نفس الرقم والمندوب والمكتب)", match.dups === "104", JSON.stringify(match));
+/* 24/11/2026: الناقص يُحسب لكل مندوب ومكتب؛ كل رقم ناقص غائب فعلاً عن سجلات ذلك المندوب في ذلك المكتب، وكل رقم بين طرفيه إما موجود أو ناقص */
+const seqOk = await ev(function () {
+    const d = recordsMatchingData();
+    return d.sequences.every(function (q) {
+        const have = new Set(records.filter(function (r) { return identityPart(r.representativeName) === q.rep && identityPart(r.officeName) === q.office; })
+            .map(function (r) { return Number(identityPart(r.recordNumber)); }));
+        const miss = new Set();
+        q.gaps.forEach(function (g) { for (let n = g[0]; n <= g[1]; n++) miss.add(n); });
+        for (let n = q.range[0]; n <= q.range[1]; n++) if (have.has(n) === miss.has(n)) return false;
+        return miss.size === q.missing;
+    }) && d.missing === d.sequences.reduce(function (s, q) { return s + q.missing; }, 0);
+});
+check("المطابقة: الأرقام الناقصة صحيحة لكل مندوب ومكتب", seqOk);
 const doc = await ev(function () { return buildRecordsMatchingDoc(); });
 check("مستند المطابقة قابل للطباعة", /مطابقة سجلات الفرع/.test(doc) && /105/.test(doc));
 

@@ -8031,3 +8031,19 @@ tr.is-recovered.is-selected td {
 }
 
 #auditCommitteeCard .audit-committee-form { display: block; }
+
+/* إعادة ترقيم الوكالات (24/11/2026) */
+.pending-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.app-dialog-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin: 4px 0 14px;
+    text-align: start;
+}
