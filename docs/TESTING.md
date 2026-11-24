@@ -98,3 +98,9 @@ node tests/perf.mjs
 npm i --no-save xlsx-js-style@1.2.0   # أو XLSX_BUNDLE=/مسار/xlsx.bundle.js
 node tests/audittable.mjs
 ```
+
+## فلاتر الأعمدة وتاريخ التدقيق (`tests/colfilters.mjs`)
+قيم بمربعات اختيار، من–إلى للأرقام والتواريخ (أرقام عربية مقبولة)، تجميع الفلاتر، الشرائح، الترتيب، البقاء بعد إعادة الفتح، «إعادة الضبط»، Escape والنقر خارجها، وتاريخ التدقيق تحت تاريخ السجل:
+```bash
+node tests/colfilters.mjs
+```

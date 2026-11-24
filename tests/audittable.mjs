@@ -153,7 +153,7 @@ if (hasXlsx) {
             return { names: wb.SheetNames.join(","), header: (rows[3] || []).join("|"), body: rows.slice(4).map(function (r) { return r.join("|"); }) };
         }, buf);
         check("أوراق الملف: الملخص، السجلات، غير المقبوض، انتبه", sheets.names === "الملخص,السجلات,غير المقبوض,انتبه", sheets.names);
-        check("أعمدة ورقة السجلات", /رقم السجل\|المندوب\|المكتب\|تاريخ السجل\|المصدر\|عدد الوكالات\|المطلوب من المندوب\|المدقق\|حالة القبض\|تاريخ القبض\|رقم الإيصال/.test(sheets.header), sheets.header);
+        check("أعمدة ورقة السجلات", /رقم السجل\|المندوب\|المكتب\|تاريخ السجل\|تاريخ التدقيق \(الحفظ\)\|المصدر\|عدد الوكالات\|المطلوب من المندوب\|المدقق\|حالة القبض\|تاريخ القبض\|رقم الإيصال/.test(sheets.header), sheets.header);
         check("صف السجل المقبوض فيه الإيصال وتاريخ القبض", sheets.body.some(function (r) { return /أحمد باكير/.test(r) && /مقبوض/.test(r) && /12152/.test(r); }), sheets.body.join(" // "));
         check("السجل المسترد بمصدره", sheets.body.some(function (r) { return /مستورد من موقع تدقيق آخر \(موقع قديم\)/.test(r); }));
     }

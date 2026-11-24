@@ -242,6 +242,38 @@ check("لا توقيع للمدقق ولا لرئيس مكتب المحاسبة"
 check("الإعداد القديم (بدون صفات) يُقرأ بالصفات الافتراضية", sig.oldShape);
 check("تظهر في التقرير المخصّص أيضاً", sig.custom);
 check("الأسماء والصفات في النسخة الاحتياطية والمزامنة", sig.backup && sig.fb, JSON.stringify(sig));
+
+/* إضافة توقيع وحذفه وترتيبه (24/11/2026) */
+await ev(function () { switchSection("printSettingsSection"); });
+await page.waitForTimeout(300);
+await page.click("#addAuditSignerBtn");
+await page.fill("#acName5", "عضو سادس");
+await page.click('#auditSignersForm [data-sign-row="5"] [data-sign-move="-1"]');
+await page.click('#auditSignersForm [data-sign-row="2"] [data-sign-delete]');
+await page.waitForSelector("dialog[open]");
+await page.locator("dialog[open] .app-dialog-ok").click();
+await page.waitForTimeout(200);
+await page.click("#addAuditSignerBtn");
+await page.fill("#acTitle5", "");
+await page.click('#auditSignersForm [data-sign-row="5"] [data-sign-delete]');
+await page.waitForTimeout(200);
+check("حذف خانة فارغة تماماً بلا سؤال", await page.locator("dialog[open]").count() === 0 && await page.locator("#auditSignersForm [data-sign-row]").count() === 5);
+await page.click('#auditSignersForm [data-sign-row="0"] [data-sign-delete]');
+await page.waitForSelector("dialog[open]");
+await page.locator("dialog[open] .app-dialog-cancel").click();
+await page.waitForTimeout(200);
+check("حذف خانة فيها اسم يسأل أولاً (والإلغاء يبقيها)", (await page.inputValue("#acName0")) === "أ. خالد الرئيس");
+await page.click("#saveAuditCommitteeBtn");
+await page.waitForTimeout(300);
+const dyn = await ev(function () {
+    const st = JSON.parse(localStorage.getItem("audit_audit_committee"));
+    const html = committeeSignaturesHTML();
+    return { names: st.signers.map(function (x) { return x.name; }).join(","), n: st.signers.length, legacy: st.chair === "أ. خالد الرئيس" && st.members.length === 4, cells: (html.match(/<div><span>/g) || []).length };
+});
+check("الإضافة والترتيب والحذف تُحفظ بالترتيب", dyn.names === "أ. خالد الرئيس,عضو أول,عضو ثالث,عضو سادس," && dyn.n === 5 && dyn.legacy, JSON.stringify(dyn));
+check("التقرير يطبع الخانات بعد التعديل", dyn.cells === 5, JSON.stringify(dyn));
+const compat = await ev(function () { const c = normalizeAuditCommittee({ chair: "س", members: ["a", "b"] }); return c.signers.length === 5 && c.signers[0].name === "س" && c.signers[0].title === "رئيس لجنة التدقيق"; });
+check("الإعداد القديم يتحول إلى قائمة خمس خانات", compat);
 const viewerTabs = await ev(function () {
     const saved = currentUser; currentUser = Object.assign({}, saved, { role: "viewer" }); applyPermissions();
     switchSection("backupSection");

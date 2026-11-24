@@ -557,6 +557,8 @@
 
                 <div class="content-card">
 
+                    <div class="cf-chips no-print" id="colFilterChips" hidden></div>
+
                     <div class="table-wrapper">
 
                         <table>
@@ -570,35 +572,35 @@
                                     </th>
 
                                     <th>
-                                        رقم السجل
+                                        <span class="th-filter">رقم السجل <button type="button" class="col-filter-btn" data-col-filter="number" aria-haspopup="dialog" aria-expanded="false" aria-label="تصفية وترتيب «رقم السجل»"><i class="ti ti-chevron-down" aria-hidden="true"></i></button></span>
                                     </th>
 
                                     <th>
-                                        المكتب
+                                        <span class="th-filter">المكتب <button type="button" class="col-filter-btn" data-col-filter="office" aria-haspopup="dialog" aria-expanded="false" aria-label="تصفية وترتيب «المكتب»"><i class="ti ti-chevron-down" aria-hidden="true"></i></button></span>
                                     </th>
 
                                     <th>
-                                        المندوب
+                                        <span class="th-filter">المندوب <button type="button" class="col-filter-btn" data-col-filter="rep" aria-haspopup="dialog" aria-expanded="false" aria-label="تصفية وترتيب «المندوب»"><i class="ti ti-chevron-down" aria-hidden="true"></i></button></span>
                                     </th>
 
                                     <th class="num">
-                                        عدد الوكالات
+                                        <span class="th-filter">عدد الوكالات <button type="button" class="col-filter-btn" data-col-filter="agencies" aria-haspopup="dialog" aria-expanded="false" aria-label="تصفية وترتيب «عدد الوكالات»"><i class="ti ti-chevron-down" aria-hidden="true"></i></button></span>
                                     </th>
 
                                     <th class="num">
-                                        سعر الوكالات
+                                        <span class="th-filter">سعر الوكالات <button type="button" class="col-filter-btn" data-col-filter="base" aria-haspopup="dialog" aria-expanded="false" aria-label="تصفية وترتيب «سعر الوكالات»"><i class="ti ti-chevron-down" aria-hidden="true"></i></button></span>
                                     </th>
 
                                     <th class="num">
-                                        إجمالي السجل
+                                        <span class="th-filter">إجمالي السجل <button type="button" class="col-filter-btn" data-col-filter="total" aria-haspopup="dialog" aria-expanded="false" aria-label="تصفية وترتيب «إجمالي السجل»"><i class="ti ti-chevron-down" aria-hidden="true"></i></button></span>
                                     </th>
 
                                     <th class="num">
-                                        المطلوب من المندوب
+                                        <span class="th-filter">المطلوب من المندوب <button type="button" class="col-filter-btn" data-col-filter="due" aria-haspopup="dialog" aria-expanded="false" aria-label="تصفية وترتيب «المطلوب من المندوب»"><i class="ti ti-chevron-down" aria-hidden="true"></i></button></span>
                                     </th>
 
                                     <th>
-                                        التاريخ
+                                        <span class="th-filter">التاريخ <button type="button" class="col-filter-btn" data-col-filter="date" aria-haspopup="dialog" aria-expanded="false" aria-label="تصفية وترتيب «التاريخ»"><i class="ti ti-chevron-down" aria-hidden="true"></i></button></span>
                                     </th>
 
                                     <th>
@@ -1532,7 +1534,7 @@
                 </div>
 
                 <div class="devlog-stats">
-                    <div><b>17</b><span>مراحل</span></div>
+                    <div><b>18</b><span>مراحل</span></div>
                     <div><b>30 أيلول</b><span>مستودع Work_1</span></div>
                     <div><b>24 تشرين الثاني</b><span>آخر تحديث</span></div>
                     <div><b data-app-version></b><span>الإصدار</span></div>
@@ -1784,7 +1786,7 @@
                     <li class="devlog-stage">
                         <span class="devlog-dot" aria-hidden="true"><i class="ti ti-file-spreadsheet"></i></span>
                         <div class="content-card">
-                            <p class="devlog-date">24 تشرين الثاني 2026 · الإصدار <span data-app-version></span></p>
+                            <p class="devlog-date">24 تشرين الثاني 2026 · الإصدار 2026.11.24.2</p>
                             <h3>جدول التدقيق، وإيصال القبض، وإدخال سجلات الموقع الأصلي</h3>
                             <ul class="devlog-list">
                                 <li>إدخال سجلات الموقع الأصلي (12 سجلاً) وجدول التدقيق اليدوي (8 سجلات يدوية، وحالة القبض لـ57 سجلاً) بعد مطابقتها سجلاً سجلاً.</li>
@@ -1792,6 +1794,20 @@
                                 <li>عند تحديد السجل «مقبوضاً» يُسأل عن رقم الإيصال وتاريخ القبض، ويظهر الإيصال تحت الحالة في جدول السجلات، ويُعدَّل من قائمة ⋮ «بيانات القبض».</li>
                                 <li>البحث يوحّد الهمزات والتاء المربوطة (أحمد = احمد، إبراهيم = ابراهيم)، وكذلك كشف السجل المكرر في الاستيراد والمطابقة، والبحث برقم إيصال القبض.</li>
                                 <li>إصلاح: قائمة «استيراد ومطابقة» كانت تُغلق فور فتحها.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-filter"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">24 تشرين الثاني 2026 · الإصدار <span data-app-version></span></p>
+                            <h3>فلاتر الأعمدة مثل Excel، وتاريخ التدقيق، والتوقيعات المرنة</h3>
+                            <ul class="devlog-list">
+                                <li>سهم في رأس كل عمود من جدول السجلات: ترتيب تصاعدي وتنازلي، ومربعات اختيار للقيم (المندوب، المكتب، المدقق، المصدر، حالة القبض، رقم الإيصال…) مع بحث و«تحديد الكل»، و«من – إلى» للأرقام والمبالغ والتواريخ. الفلاتر تتجمّع مع بعضها، وتظهر شرائح يُزال كل منها بنقرة.</li>
+                                <li>«تاريخ التدقيق» (أول حفظ للسجل) تحت تاريخ كل سجل، ويُصفّى به من–إلى، وصار عموداً في التقرير المخصّص وملف جدول التدقيق.</li>
+                                <li>توقيعات التقارير: إضافة خانة وحذفها وترتيبها (الصفة والاسم، حتى 12)، والتوقيع يُطبع مرة واحدة في آخر التقرير (في آخر بيان الاستدراك عند طباعته).</li>
+                                <li>نقل أرقام إيصالات القبض وتواريخه من جدول التدقيق إلى 60 سجلاً.</li>
                             </ul>
                         </div>
                     </li>
@@ -2085,32 +2101,13 @@
                         <i class="ti ti-signature"></i> توقيعات التقارير (لجنة التدقيق)
                     </h3>
 
-                    <p class="field-hint">تُطبع في آخر كل تقارير التدقيق (المختصر والمفصل وبيان الاستدراك والتقرير المخصّص وغيرها): خمس خانات بالترتيب، لكل خانة صفة واسم. الاسم الفارغ يُطبع خطاً فارغاً للكتابة باليد، والخانة التي صفتها واسمها فارغان لا تُطبع.</p>
+                    <p class="field-hint">تُطبع مرة واحدة في آخر كل تقرير (المختصر والمفصل — وإن طُبع بيان الاستدراك ففي آخره — والتقرير المخصّص وغيرها). أضف أو احذف أو رتّب الخانات (حتى 12)، لكل خانة صفة واسم. الاسم الفارغ يُطبع خطاً فارغاً للكتابة باليد، والخانة التي صفتها واسمها فارغان لا تُطبع.</p>
 
                     <label class="input-group sign-heading"><span>عنوان قسم التوقيعات <small>(فارغ = بدون عنوان)</small></span><input type="text" id="acHeading" autocomplete="off"></label>
 
-                    <div class="audit-committee-form">
-                        <div class="sign-row"><b>1</b>
-                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle0" autocomplete="off"></label>
-                            <label class="input-group"><span>الاسم</span><input type="text" id="acName0" autocomplete="off"></label>
-                        </div>
-                        <div class="sign-row"><b>2</b>
-                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle1" autocomplete="off"></label>
-                            <label class="input-group"><span>الاسم</span><input type="text" id="acName1" autocomplete="off"></label>
-                        </div>
-                        <div class="sign-row"><b>3</b>
-                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle2" autocomplete="off"></label>
-                            <label class="input-group"><span>الاسم</span><input type="text" id="acName2" autocomplete="off"></label>
-                        </div>
-                        <div class="sign-row"><b>4</b>
-                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle3" autocomplete="off"></label>
-                            <label class="input-group"><span>الاسم</span><input type="text" id="acName3" autocomplete="off"></label>
-                        </div>
-                        <div class="sign-row"><b>5</b>
-                            <label class="input-group"><span>الصفة</span><input type="text" id="acTitle4" autocomplete="off"></label>
-                            <label class="input-group"><span>الاسم</span><input type="text" id="acName4" autocomplete="off"></label>
-                        </div>
-                    </div>
+                    <div class="audit-committee-form" id="auditSignersForm"></div>
+
+                    <button type="button" class="secondary-btn add-signer-btn" id="addAuditSignerBtn"><i class="ti ti-plus"></i> إضافة توقيع</button>
 
                     <div class="button-row">
                         <button type="button" class="primary-btn" id="saveAuditCommitteeBtn"><i class="ti ti-device-floppy"></i> حفظ التوقيعات</button>

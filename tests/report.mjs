@@ -104,6 +104,19 @@ check("المفصل يحتوي البيان أيضاً", await ev(function () {
     return buildFinalRecordReport(records.find(function (x) { return x.id === "r1"; }), "detailed", true).indexOf("doc-recovery") !== -1;
 }));
 
+/* التوقيع مرة واحدة في آخر التقرير (24/11/2026): مع البيان في آخره فقط، وبدونه في آخر التقرير */
+check("التوقيع مرة واحدة في آخر التقرير (مع بيان الاستدراك وبدونه)", await ev(function () {
+    const r = records.find(function (x) { return x.id === "r1"; });
+    const count = function (h) { return (h.match(/doc-committee-sign/g) || []).length; };
+    const withRec = buildFinalRecordReport(r, "detailed", true);
+    const okWith = count(withRec) === 1 && withRec.lastIndexOf("doc-committee-sign") > withRec.indexOf("doc-recovery");
+    saveReportPrefs({ recovery: false });
+    const without = buildFinalRecordReport(r, "summary", true);
+    const screen = buildFinalRecordReport(r, "summary", false);
+    saveReportPrefs({ recovery: true });
+    return okWith && count(without) === 1 && count(screen) === 1;
+}));
+
 /* 4) جهة رسوم قابلة للتغيير */
 await ev(function () { feeDestinations.ambulance = "branch"; saveData(FEE_DESTINATIONS_KEY, feeDestinations); showFinalRecordReport("r1", "summary"); });
 const moved = await ev(function () { return document.querySelector(".doc-recovery .recovery-body").textContent; });
