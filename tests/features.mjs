@@ -109,6 +109,7 @@ check("تنبيه عند قفز الرقم (2 ثم 4: الرقم 3 ناقص)", /
 check("الإضافة مع التنبيه لم تُمنع", await ev(function () { return pendingAgencies.length === 3; }));
 
 /* 6) ملاحظة السجل: تُحفظ وتظهر في التقرير */
+await page.click('label.reveal-toggle:has([data-reveal="recordNoteBox"])');
 await page.fill("#recordNote", "سُلّم السجل على دفعتين");
 await page.click('#recordForm button[type="submit"]');
 await page.waitForTimeout(400);

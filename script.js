@@ -1889,6 +1889,92 @@ function (button) {
 );
 
 /* =========================================================
+خيارات تُفعَّل عند الحاجة (24/11/2026): «مفتاح» يُظهر لوحة مخفية.
+<input type="checkbox" data-reveal="panelId"> + <div id="panelId" class="reveal-panel" hidden>
+اللوحة تُفتح تلقائياً إذا كان فيها قيمة (تعديل سجل، مسودة)، وإطفاء المفتاح وفيها
+قيمة يسأل ثم يمسحها (حتى لا يُحفظ شيء مخفي دون علم المستخدم).
+========================================================= */
+
+function revealFields(panel) {
+    return panel ? Array.prototype.slice.call(panel.querySelectorAll("input:not([type=file]):not([type=checkbox]), textarea, select")) : [];
+}
+
+function revealHasValue(panel) {
+    return revealFields(panel).some(function (el) { return String(el.value || "").trim() !== ""; });
+}
+
+function setReveal(panelId, open) {
+    const panel = document.getElementById(panelId);
+    const toggle = document.querySelector('[data-reveal="' + panelId + '"]');
+    if (!panel) return;
+    panel.hidden = !open;
+    if (toggle) { toggle.checked = !!open; toggle.closest(".reveal-toggle")?.classList.toggle("is-on", !!open); }
+}
+
+/* closeEmpty: عند تحميل سجل أو تفريغ النموذج تُغلق اللوحة الفارغة */
+function syncReveal(panelId, closeEmpty) {
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    if (revealHasValue(panel)) setReveal(panelId, true);
+    else if (closeEmpty) setReveal(panelId, false);
+}
+
+document.addEventListener("change", function (event) {
+    const toggle = event.target;
+    if (!toggle.matches || !toggle.matches("input[type=checkbox][data-reveal]")) return;
+    const panelId = toggle.dataset.reveal;
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    if (toggle.checked) {
+        setReveal(panelId, true);
+        const first = revealFields(panel)[0] || panel.querySelector("button");
+        if (first) setTimeout(function () { try { first.focus(); } catch (e) {} }, 30);
+        return;
+    }
+    if (!revealHasValue(panel)) { setReveal(panelId, false); return; }
+    /* فيها قيمة: إخفاؤها يعني مسحها — بعد تأكيد */
+    toggle.checked = true;
+    appConfirm({
+        title: "إطفاء «" + (panel.dataset.revealLabel || "الخيار") + "»",
+        message: "سيُمسح ما كُتب فيه ولن يُحفظ مع السجل. متابعة؟",
+        confirmText: "إطفاء ومسح",
+        cancelText: "إبقاء",
+        danger: true
+    }).then(function (ok) {
+        if (!ok) return;
+        revealFields(panel).forEach(function (el) {
+            el.value = el.tagName === "SELECT" ? (el.options[0] ? el.options[0].value : "") : "";
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        setReveal(panelId, false);
+    });
+});
+
+/* الفلاتر المطوية: تُفتح تلقائياً وتُظهر عدد ما هو مفعّل بداخلها */
+function syncFilterMore(detailsId, countId, active) {
+    const details = document.getElementById(detailsId);
+    const count = document.getElementById(countId);
+    if (!details) return;
+    if (count) { count.hidden = !active; count.textContent = active ? String(active) : ""; }
+    if (active && !details.open) details.open = true;
+}
+
+function syncRecordsFilterMore() {
+    const active = ["source", "rep", "office", "auditor"].filter(function (k) { return recordsView[k] && recordsView[k] !== "all"; }).length;
+    syncFilterMore("rfMore", "rfMoreCount", active);
+}
+
+function syncReportFilterMore() {
+    const box = document.getElementById("reportFilterMore");
+    if (!box) return;
+    let active = box.querySelectorAll('input[type="checkbox"]:checked').length;
+    const stamps = document.getElementById("filterStamps");
+    if (stamps && stamps.value) active++;
+    syncFilterMore("reportFilterMore", "reportMoreCount", active);
+}
+
+/* =========================================================
 الإدارة (23/11/2026): تبويب رئيسي واحد بدل «الحاسبة» و«المستخدمون»، فيه تبويبات فرعية
 لكل واحد قسمه (section) المعتاد بنفس معرّفه، فكل الكود القديم يعمل كما هو.
 آخر تبويب فرعي مفتوح تفضيل واجهة (audit_ui_admin_tab).
@@ -2513,6 +2599,7 @@ function renderAgencyPricePeriod() {
     select.innerHTML = pricePeriodOptionsHTML(value, type);
     select.value = pricePeriodChoices().some(function (c) { return c.value === value; }) ? value : "";
     select.closest(".price-period-group")?.classList.toggle("is-override", !!select.value);
+    syncReveal("pricePeriodBox", false);
 }
 
 function setAgencyPricePeriod(value) {
@@ -2523,6 +2610,7 @@ function setAgencyPricePeriod(value) {
     }
     select.value = value || "";
     renderAgencyPricePeriod();
+    syncReveal("pricePeriodBox", true);
 }
 
 /* تغيير فترة سعر وكالة مضافة من سطرها */
@@ -4609,14 +4697,14 @@ container.innerHTML =
 
                             <button
                                 type="button"
-                                class="secondary-btn"
+                                class="secondary-btn btn-edit"
                                 onclick="
                                     editPendingAgency(
                                         ${index}
                                     )
                                 "
                             >
-                                تعديل
+                                <i class="ti ti-edit" aria-hidden="true"></i> تعديل
                             </button>
 
 
@@ -4629,7 +4717,7 @@ container.innerHTML =
                                     )
                                 "
                             >
-                                حذف
+                                <i class="ti ti-trash" aria-hidden="true"></i> حذف
                             </button>
 
                         </div>
@@ -6015,6 +6103,7 @@ function setFormDeduction(d) {
     const r = document.getElementById("recordDeductionReason");
     if (a) a.value = d && number(d.amount) > 0 ? String(number(d.amount)) : "";
     if (r) r.value = d && number(d.amount) > 0 ? String(d.reason || "") : "";
+    syncReveal("recordDeductionBox", true);
     if (typeof updateRecordDock === "function") { try { updateRecordDock(); } catch (e) {} }
 }
 
@@ -6037,6 +6126,7 @@ function getFormRecordNote() {
 function setFormRecordNote(text) {
     const el = document.getElementById("recordNote");
     if (el) el.value = text || "";
+    syncReveal("recordNoteBox", true);
 }
 
 document.getElementById("recordNote")?.addEventListener("input", function () {
@@ -6243,6 +6333,7 @@ function syncRecordsFilters() {
     set("rfRepName", recordsView.repName);
     set("rfSource", recordsView.source);
     set("rfPaid", recordsView.paid);
+    syncRecordsFilterMore();
     set("rfOffice", recordsView.office);
     set("rfSort", recordsView.sort);
 
@@ -6343,7 +6434,7 @@ function renderRecords() {
                 '<td class="date-cell">' + formatDay(getRecordDay(record)) + "</td>" +
                 '<td><div class="action-group">' +
                     '<button type="button" class="act-btn act-primary" onclick="showRecoveredDoc(\'' + record.id + '\')"><i class="ti ti-eye" aria-hidden="true"></i> عرض</button>' +
-                    (canEdit ? '<button type="button" class="act-btn" onclick="openRecoveredForm(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                    (canEdit ? '<button type="button" class="act-btn act-edit" onclick="openRecoveredForm(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
                     '<button type="button" class="act-btn act-more" aria-haspopup="menu" aria-label="إجراءات أخرى للسجل ' + escapeHTML(record.recordNumber) + '" onclick="openRecordMenu(this, \'' + record.id + '\')"><i class="ti ti-dots-vertical" aria-hidden="true"></i></button>' +
                 "</div></td></tr>";
         }
@@ -6363,7 +6454,7 @@ function renderRecords() {
             /* الإجراءات الأكثر استخداماً ظاهرة، والباقي في قائمة ⋮ */
             '<td><div class="action-group">' +
                 '<button type="button" class="act-btn act-primary" onclick="showFinalRecordReport(\'' + record.id + '\', \'summary\')"><i class="ti ti-file-text" aria-hidden="true"></i> التقرير</button>' +
-                (canEdit ? '<button type="button" class="act-btn" onclick="editRecord(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                (canEdit ? '<button type="button" class="act-btn act-edit" onclick="editRecord(\'' + record.id + '\')"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
                 '<button type="button" class="act-btn act-more" aria-haspopup="menu" aria-label="إجراءات أخرى للسجل ' + escapeHTML(record.recordNumber) + '" onclick="openRecordMenu(this, \'' + record.id + '\')"><i class="ti ti-dots-vertical" aria-hidden="true"></i></button>' +
             "</div></td>" +
             "</tr>";
@@ -6708,7 +6799,7 @@ function showRecoveredDoc(id) {
     document.getElementById("modalContent").innerHTML =
         '<div class="report-actions no-print">' +
             '<button type="button" class="secondary-btn" onclick="openReportDocument(buildRecoveredDoc(records.find(function (r) { return r.id === \'' + escapeHTML(id) + '\'; })), \'سجل مسترد ' + escapeHTML(record.recordNumber).replace(/'/g, "") + '\')"><i class="ti ti-printer"></i> طباعة</button>' +
-            (canEdit ? '<button type="button" class="secondary-btn" onclick="openRecoveredForm(\'' + escapeHTML(id) + '\')"><i class="ti ti-edit"></i> تعديل</button>' : "") +
+            (canEdit ? '<button type="button" class="secondary-btn btn-edit" onclick="openRecoveredForm(\'' + escapeHTML(id) + '\')"><i class="ti ti-edit"></i> تعديل</button>' : "") +
             '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button>' +
         "</div>" + buildRecoveredDoc(record);
     document.getElementById("recordModal").classList.remove("hidden");
@@ -7678,7 +7769,7 @@ function openGlobalSearch() {
                 '<span class="search-icon search-icon-agency" style="--c:' + (AGENCY_TYPE_COLORS[a.type] || "#45577c") + '">' + escapeHTML(a.number) + "</span>" +
                 '<span class="search-text"><b>وكالة ' + escapeHTML(a.number) + " — " + escapeHTML(AGENCY_NAMES[a.type] || "") + "</b><small>سجل " + escapeHTML(r.recordNumber) + " — " +
                 escapeHTML(r.officeName) + " — " + getAgencyStatusName(a.status) + "</small></span>" +
-                (canEdit ? '<button type="button" class="act-btn search-edit" data-edit="' + i + '"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
+                (canEdit ? '<button type="button" class="act-btn act-edit search-edit" data-edit="' + i + '"><i class="ti ti-edit" aria-hidden="true"></i> تعديل</button>' : "") +
                 "</div>";
         }).join("");
     };
@@ -9360,7 +9451,7 @@ function buildTypeAgenciesDoc(record, type, backMode, forPrint) {
             '<td class="num">' + money(rep) + "</td>" +
             '<td class="num total-col">' + money(grand) + "</td>" +
             '<td class="small-text">' + (a.notes ? formatNotesHTML(a.notes) : "—") + "</td>" +
-            (canEdit ? '<td class="no-print"><button type="button" class="act-btn" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
+            (canEdit ? '<td class="no-print"><button type="button" class="act-btn act-edit" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
             "</tr>";
     });
 
@@ -9607,7 +9698,7 @@ function buildAgencyAuditDoc(record, filter, backMode, forPrint) {
                 '<td class="small-text">' + (stampParts.length ? stampParts.join("<br>") : "—") + "</td>" +
                 '<td class="num">' + money(a.representativeAmount) + "</td>" +
                 '<td class="small-text">' + (a.notes ? formatNotesHTML(a.notes) : "—") + "</td>" +
-                (canEdit ? '<td class="no-print"><button type="button" class="act-btn" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
+                (canEdit ? '<td class="no-print"><button type="button" class="act-btn act-edit" onclick="openAgencyForEdit(\'' + record.id + "', " + item.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
                 "</tr>";
         });
 
@@ -11756,7 +11847,7 @@ function filteredAgenciesTableHTML(matched, forPrint, limit) {
             '<td class="small-text">' + (stampParts.length ? stampParts.join("، ") : "—") + "</td>" +
             '<td class="num">' + money(rep) + "</td>" +
             '<td class="num total-col">' + money(grand) + "</td>" +
-            (canEdit ? '<td><button type="button" class="act-btn" onclick="openAgencyForEdit(\'' + m.record.id + "', " + m.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
+            (canEdit ? '<td><button type="button" class="act-btn act-edit" onclick="openAgencyForEdit(\'' + m.record.id + "', " + m.index + ')"><i class="ti ti-edit"></i> تعديل</button></td>' : "") +
             "</tr>";
     });
 
@@ -12579,6 +12670,7 @@ reportsDirty = false;
 /* التصفية: كل الأرقام أدناه تُحسب على الوكالات المطابقة فقط */
 
 fillReportFilterOptions();
+syncReportFilterMore();
 
 const reportFilter =
     getReportFilter();
@@ -17829,7 +17921,7 @@ function fbSync(reason) {
                     const num = editedRemote.record ? editedRemote.record.recordNumber : "";
                     notify("<strong>السجل " + escapeHTML(num) + " الذي تعدّله الآن عُدّل من جهاز آخر</strong>" +
                         "<span>إن حفظت الآن فستُكتب نسختك فوق تعديله. الأفضل فتح النسخة الجديدة ثم إعادة تعديلك.</span>" +
-                        (editedRemote.record ? '<span class="toast-actions"><button type="button" class="act-btn" onclick="editRecord(\'' + escapeHTML(editingId) + '\')">فتح النسخة الجديدة</button></span>' : ""),
+                        (editedRemote.record ? '<span class="toast-actions"><button type="button" class="act-btn act-edit" onclick="editRecord(\'' + escapeHTML(editingId) + '\')">فتح النسخة الجديدة</button></span>' : ""),
                         "warning", 30000, true);
                 }
 

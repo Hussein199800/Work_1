@@ -124,6 +124,7 @@ await page.fill("#representativeName", "مندوب");
 await ev(function () { const d = document.getElementById("recordDate"); d.value = "2026-03-06"; d.dispatchEvent(new Event("change", { bubbles: true })); });
 await ev(function () { const s = document.getElementById("agencyType"); s.value = "general"; s.dispatchEvent(new Event("change", { bubbles: true })); syncChoiceChips(); });
 async function addAgency(n, period) {
+    await ev(function () { setReveal("pricePeriodBox", true); });
     await page.selectOption("#agencyPricePeriod", period);
     await ev(function () { const s = document.getElementById("agencyType"); s.value = "general"; s.dispatchEvent(new Event("change", { bubbles: true })); syncChoiceChips(); });
     await page.fill("#agencyNumber", String(n));

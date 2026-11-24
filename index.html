@@ -476,16 +476,6 @@
                         </select>
                     </label>
 
-                    <label class="filter-field">
-                        <span>المصدر</span>
-                        <select id="rfSource">
-                            <option value="all">كل السجلات</option>
-                            <option value="own">تدقيق هذا الموقع</option>
-                            <option value="recovered">المستردة (كلها)</option>
-                            <option value="site">مستردة من موقع تدقيق آخر</option>
-                            <option value="manual">مستردة من تدقيق يدوي</option>
-                        </select>
-                    </label>
 
                     <label class="filter-field">
                         <span>حالة القبض</span>
@@ -496,28 +486,8 @@
                         </select>
                     </label>
 
-                    <label class="filter-field">
-                        <span>نوع المندوب</span>
-                        <select id="rfRep">
-                            <option value="all">الكل</option>
-                            <option value="internal">داخلي</option>
-                            <option value="external">خارجي</option>
-                        </select>
-                    </label>
 
-                    <label class="filter-field">
-                        <span>المكتب</span>
-                        <select id="rfOffice">
-                            <option value="all">كل المكاتب</option>
-                        </select>
-                    </label>
 
-                    <label class="filter-field">
-                        <span>المدقق</span>
-                        <select id="rfAuditor">
-                            <option value="all">كل المدققين</option>
-                        </select>
-                    </label>
 
                     <label class="filter-field">
                         <span>الترتيب</span>
@@ -535,6 +505,43 @@
                             <option value="saved">ترتيب الحفظ</option>
                         </select>
                     </label>
+
+                    <!-- فلاتر قليلة الاستعمال: مطوية، وتُفتح تلقائياً إن كان أحدها مفعّلاً -->
+                    <details class="filter-more" id="rfMore">
+                        <summary><i class="ti ti-adjustments" aria-hidden="true"></i> المزيد من الفلاتر <span class="filter-more-count" id="rfMoreCount" hidden></span></summary>
+                        <div class="filter-more-body">
+                            <label class="filter-field">
+                                <span>المصدر</span>
+                                <select id="rfSource">
+                                    <option value="all">كل السجلات</option>
+                                    <option value="own">تدقيق هذا الموقع</option>
+                                    <option value="recovered">المستردة (كلها)</option>
+                                    <option value="site">مستردة من موقع تدقيق آخر</option>
+                                    <option value="manual">مستردة من تدقيق يدوي</option>
+                                </select>
+                            </label>
+                            <label class="filter-field">
+                                <span>نوع المندوب</span>
+                                <select id="rfRep">
+                                    <option value="all">الكل</option>
+                                    <option value="internal">داخلي</option>
+                                    <option value="external">خارجي</option>
+                                </select>
+                            </label>
+                            <label class="filter-field">
+                                <span>المكتب</span>
+                                <select id="rfOffice">
+                                    <option value="all">كل المكاتب</option>
+                                </select>
+                            </label>
+                            <label class="filter-field">
+                                <span>المدقق</span>
+                                <select id="rfAuditor">
+                                    <option value="all">كل المدققين</option>
+                                </select>
+                            </label>
+                        </div>
+                    </details>
 
                     <div class="filter-summary">
                         <span id="rfCount" aria-live="polite"></span>
@@ -650,7 +657,7 @@
                     <div class="content-card">
 
                         <h3>
-                            <i class="ti ti-id"></i> بيانات السجل
+                            <span class="step-no" aria-hidden="true">1</span><i class="ti ti-id"></i> بيانات السجل
                         </h3>
 
                         <div class="form-grid">
@@ -752,21 +759,29 @@
 
                         </div>
 
-                        <!-- ملاحظة على السجل كاملاً: تظهر في مربع بالتقرير تحت بيانات السجل -->
-                        <div class="input-group record-note-group">
+                        <!-- خيارات قليلة الاستعمال: مخفية حتى تُفعَّل (تُفتح تلقائياً إن كان فيها قيمة) -->
+                        <div class="record-extras">
+                            <p class="extras-title"><i class="ti ti-adjustments-horizontal" aria-hidden="true"></i> خيارات إضافية <small>فعّل ما تحتاجه فقط</small></p>
+                            <div class="extras-toggles">
+                                <label class="reveal-toggle"><input type="checkbox" data-reveal="recordNoteBox"><span class="reveal-switch" aria-hidden="true"></span> ملاحظة على السجل كاملاً</label>
+                                <label class="reveal-toggle"><input type="checkbox" data-reveal="recordDeductionBox"><span class="reveal-switch" aria-hidden="true"></span> حسم للمندوب (مقاصة)</label>
+                                <label class="reveal-toggle"><input type="checkbox" data-reveal="importDraftBox"><span class="reveal-switch" aria-hidden="true"></span> استيراد سجل غير محفوظ من ملف</label>
+                            </div>
+                            <div id="recordNoteBox" class="reveal-panel" data-reveal-label="ملاحظة السجل" hidden>
+                                <div class="input-group record-note-group">
                             <label for="recordNote">
                                 <i class="ti ti-notes"></i> ملاحظة على السجل كاملاً
-                                <small class="label-note">(اختياري — تظهر في التقرير)</small>
+                                <small class="label-note">(تظهر في التقرير)</small>
                             </label>
                             <textarea id="recordNote" rows="2" placeholder="مثال: السجل ناقص التوقيع، أو سُلّم على دفعتين…"></textarea>
                         </div>
-
-                        <!-- المقاصة: حسم للمندوب من المطلوب منه، مع سببه (يظهر في التقرير) -->
-                        <div class="deduction-group">
+                            </div>
+                            <div id="recordDeductionBox" class="reveal-panel" data-reveal-label="الحسم وسببه" hidden>
+                                <div class="deduction-group">
                             <div class="input-group">
                                 <label for="recordDeductionAmount">
                                     <i class="ti ti-receipt-refund"></i> حسم للمندوب (مقاصة)
-                                    <small class="label-note">(اختياري — اتركه فارغاً إن لم يكن هناك حسم)</small>
+                                    <small class="label-note">(ينقص من المطلوب منه فقط)</small>
                                 </label>
                                 <div class="input-suffix">
                                     <input type="text" inputmode="numeric" data-num="dec" autocomplete="off" id="recordDeductionAmount" placeholder="0">
@@ -778,13 +793,15 @@
                                 <input type="text" id="recordDeductionReason" autocomplete="off" placeholder="مثال: مقاصة مع مبلغ دفعه المندوب عن الفرع">
                             </div>
                         </div>
-
-                        <!-- إعادة سجل غير محفوظ من ملف (مثلاً بعد امتلاء مساحة المتصفح) -->
-                        <div class="import-draft-row">
+                            </div>
+                            <div id="importDraftBox" class="reveal-panel" hidden>
+                                <div class="import-draft-row">
                             <button type="button" class="link-btn" id="importDraftBtn">
                                 <i class="ti ti-file-import" aria-hidden="true"></i> استيراد سجل غير محفوظ من ملف
                             </button>
                             <input type="file" id="importDraftInput" accept="application/json,.json" class="hidden">
+                        </div>
+                            </div>
                         </div>
 
                     </div>
@@ -794,7 +811,7 @@
                     <div class="content-card">
 
                         <h3>
-                            <i class="ti ti-file-plus"></i> إضافة وكالة
+                            <span class="step-no" aria-hidden="true">2</span><i class="ti ti-file-plus"></i> إضافة وكالة
                         </h3>
 
                         <div class="agency-layout">
@@ -889,16 +906,16 @@
 
                             </div>
 
-                            <!-- سعر الوكالة: حسب تاريخ السجل، أو فترة أخرى (السجل الواحد قد يضم سعرين أو ثلاثة) -->
+                            <!-- سعر الوكالة: حسب تاريخ السجل (الافتراضي)، أو فترة أخرى بعد تفعيل الخيار (السجل الواحد قد يضم سعرين أو ثلاثة) -->
                             <div class="input-group price-period-group">
 
-                                <label for="agencyPricePeriod">
-                                    <i class="ti ti-calendar-dollar"></i> سعر الوكالة
-                                </label>
+                                <label class="reveal-toggle compact"><input type="checkbox" data-reveal="pricePeriodBox"><span class="reveal-switch" aria-hidden="true"></span> <i class="ti ti-calendar-dollar" aria-hidden="true"></i> سعر من فترة أخرى</label>
 
-                                <select id="agencyPricePeriod">
-                                    <option value="">حسب تاريخ السجل</option>
-                                </select>
+                                <div id="pricePeriodBox" class="reveal-panel" data-reveal-label="سعر الفترة" hidden>
+                                    <select id="agencyPricePeriod" aria-label="سعر الوكالة">
+                                        <option value="">حسب تاريخ السجل</option>
+                                    </select>
+                                </div>
 
                             </div>
 
@@ -960,7 +977,7 @@
                             <button
                                 type="button"
                                 id="similarAgencyBtn"
-                                class="secondary-btn"
+                                class="secondary-btn btn-similar"
                                 onclick="addSimilarAgency()"
                                 title="نفس نوع وحالة وإضافات آخر وكالة، بالرقم التالي (Ctrl + D)"
                                 aria-keyshortcuts="Control+D"
@@ -971,7 +988,7 @@
                             <button
                                 type="button"
                                 id="clearAgencyBtn"
-                                class="secondary-btn"
+                                class="secondary-btn btn-clear"
                             >
                                 <i class="ti ti-eraser"></i> مسح بيانات الوكالة
                             </button>
@@ -1181,7 +1198,7 @@
                         <div class="section-header">
 
                             <h3>
-                                <i class="ti ti-list-details"></i> الوكالات المضافة
+                                <span class="step-no" aria-hidden="true">3</span><i class="ti ti-list-details"></i> الوكالات المضافة
                             </h3>
 
                             <span class="pending-head-actions">
@@ -1289,38 +1306,10 @@
                             <input type="date" lang="en-GB" id="filterTo" dir="ltr">
                         </div>
 
-                        <div class="input-group filter-wide">
-                            <label><i class="ti ti-file-certificate"></i> نوع الوكالة</label>
-                            <div id="filterTypes" class="chip-list"></div>
-                        </div>
 
-                        <div class="input-group filter-wide">
-                            <label><i class="ti ti-circle-check"></i> حالة الوكالة</label>
-                            <div id="filterStatuses" class="chip-list"></div>
-                        </div>
 
-                        <div class="input-group filter-wide">
-                            <label><i class="ti ti-circle-plus"></i> الإضافات</label>
-                            <div id="filterAdditions" class="chip-list"></div>
-                        </div>
 
-                        <div class="input-group">
-                            <label for="filterAddMode"><i class="ti ti-adjustments"></i> طريقة مطابقة الإضافات</label>
-                            <select id="filterAddMode">
-                                <option value="all">تحتوي على كل الإضافات المختارة</option>
-                                <option value="any">تحتوي على أيٍّ منها</option>
-                                <option value="exact">هذه الإضافات فقط بالضبط</option>
-                            </select>
-                        </div>
 
-                        <div class="input-group">
-                            <label for="filterStamps"><i class="ti ti-receipt"></i> الطوابع الناقصة</label>
-                            <select id="filterStamps">
-                                <option value="">الكل</option>
-                                <option value="with">فيها نقص طوابع</option>
-                                <option value="without">بدون نقص</option>
-                            </select>
-                        </div>
 
                         <div class="input-group">
                             <label for="filterSort"><i class="ti ti-arrows-sort"></i> الفرز</label>
@@ -1336,6 +1325,41 @@
                         </div>
 
                     </div>
+
+                    <!-- تصفية متقدمة: النوع والحالة والإضافات والطوابع (مطوية، تُفتح تلقائياً إن كان فيها اختيار) -->
+                    <details class="filter-more" id="reportFilterMore">
+                        <summary><i class="ti ti-adjustments" aria-hidden="true"></i> تصفية متقدمة: النوع، الحالة، الإضافات، الطوابع <span class="filter-more-count" id="reportMoreCount" hidden></span></summary>
+                        <div class="filter-grid">
+                        <div class="input-group filter-wide">
+                            <label><i class="ti ti-file-certificate"></i> نوع الوكالة</label>
+                            <div id="filterTypes" class="chip-list"></div>
+                        </div>
+                        <div class="input-group filter-wide">
+                            <label><i class="ti ti-circle-check"></i> حالة الوكالة</label>
+                            <div id="filterStatuses" class="chip-list"></div>
+                        </div>
+                        <div class="input-group filter-wide">
+                            <label><i class="ti ti-circle-plus"></i> الإضافات</label>
+                            <div id="filterAdditions" class="chip-list"></div>
+                        </div>
+                        <div class="input-group">
+                            <label for="filterAddMode"><i class="ti ti-adjustments"></i> طريقة مطابقة الإضافات</label>
+                            <select id="filterAddMode">
+                                <option value="all">تحتوي على كل الإضافات المختارة</option>
+                                <option value="any">تحتوي على أيٍّ منها</option>
+                                <option value="exact">هذه الإضافات فقط بالضبط</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label for="filterStamps"><i class="ti ti-receipt"></i> الطوابع الناقصة</label>
+                            <select id="filterStamps">
+                                <option value="">الكل</option>
+                                <option value="with">فيها نقص طوابع</option>
+                                <option value="without">بدون نقص</option>
+                            </select>
+                        </div>
+                        </div>
+                    </details>
 
                     <div class="button-row">
                         <button type="button" class="secondary-btn" onclick="resetReportFilters()">
@@ -1743,6 +1767,8 @@
                                 <li>إصلاح: السجلات المستردة كانت تدخل في «أعلى المندوبين» و«آخر السجلات» وفلاتر حصص اللجان والتقارير وعدد التقرير العام وملف Excel لكل السجلات؛ وإجمالي ورقة المندوبين في Excel صار الصافي بعد المقاصة مثل أسطرها.</li>
                                 <li>حالة القبض لكل سجل (مقبوض / غير مقبوض) من قائمة منسدلة في جدول السجلات، مع فلتر «حالة القبض» وعدد ومبلغ غير المقبوض في لوحة التحكم.</li>
                                 <li>«سجل التعديلات» لكل سجل (من قائمة ⋮): الإنشاء وكل تعديل وما تغيّر فيه، و«صار مقبوضاً بتاريخ …»، وإيصالات الاستدراك وتغييرات السعر، مع اسم المستخدم والوقت.</li>
+                                <li>تنظيم الصفحات: الخيارات قليلة الاستعمال مخفية حتى تُفعَّل بمفتاح (ملاحظة السجل، الحسم، استيراد سجل غير محفوظ، سعر من فترة أخرى) وتُفتح وحدها إن كان فيها قيمة؛ «المزيد من الفلاتر» في السجلات و«تصفية متقدمة» في التقارير؛ أرقام خطوات في إنشاء سجل.</li>
+                                <li>ألوان الأزرار حسب وظيفتها: الإضافة نحاسي، «وكالة مماثلة» أزرق مخضر، التعديل كهرماني، الحذف أحمر.</li>
                             </ul>
                         </div>
                     </li>

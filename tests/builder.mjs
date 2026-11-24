@@ -81,6 +81,7 @@ await page.selectOption("#rfRepName", "all");
 const before = await ev(function () { const r = records.find(function (x) { return x.id === "b1"; }); return { due: getRecordRepresentativeTotal(r), grand: getRecordGrandTotal(r), amb: getRecordFinalStats(r).committees.ambulance, ag: JSON.stringify(r.agencies) }; });
 await ev(function () { editRecord("b1"); });
 await page.waitForTimeout(400);
+await ev(function () { setReveal("recordDeductionBox", true); });
 await page.fill("#recordDeductionAmount", "700");
 await page.click('#recordForm button[type="submit"]');
 await page.waitForTimeout(400);
@@ -113,6 +114,7 @@ check("جدول السجلات يعرض «بعد حسم»", /بعد حسم/.test
 /* حسم أكبر من المطلوب يحتاج تأكيداً */
 await ev(function () { editRecord("b2"); });
 await page.waitForTimeout(400);
+await ev(function () { setReveal("recordDeductionBox", true); });
 await page.fill("#recordDeductionAmount", "999999");
 await page.fill("#recordDeductionReason", "اختبار");
 await page.click('#recordForm button[type="submit"]');

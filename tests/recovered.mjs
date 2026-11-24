@@ -100,6 +100,7 @@ await ev(function () { closeRecordModal(true); });
 await ev(function () { renderRecords(); });
 const row = await ev(function () { const tr = Array.from(document.querySelectorAll("#recordsTableBody tr")).find(function (t) { return /101/.test(t.textContent); }); return tr ? { cls: tr.className, text: tr.textContent } : null; });
 check("الجدول: شارة «مسترد» وصف مميز", row && /is-recovered/.test(row.cls) && /مسترد/.test(row.text) && /تدقيق يدوي/.test(row.text), JSON.stringify(row));
+await ev(function () { document.getElementById("rfMore").open = true; });
 await page.selectOption("#rfSource", "own");
 await page.waitForTimeout(150);
 const ownOnly = await ev(function () { return getVisibleRecords().map(function (r) { return r.recordNumber; }).join(","); });
