@@ -115,6 +115,27 @@ const colors = await ev(function () {
 });
 check("زر «وكالة مماثلة» ملوّن مختلف، و«تعديل» كهرماني لا أبيض", colors.similar && colors.edit && colors.edit !== colors.plain && colors.edit !== "rgb(255, 255, 255)", JSON.stringify(colors));
 
+/* القوالب الجاهزة المثبتة في التقرير المخصّص */
+const tpl = await ev(function () {
+    const bad = CR_BUILTIN.filter(function (t) {
+        const valid = CR_COLUMNS[t.level].map(function (c) { return c.key; });
+        return t.columns.some(function (k) { return valid.indexOf(k) === -1; }) || !t.icon || !t.desc;
+    }).map(function (t) { return t.id; });
+    const docs = CR_BUILTIN.every(function (t) { crRecordIds = records.map(function (r) { return r.id; }); return buildCustomReportDoc(crNormalize(t)).indexOf(t.title) !== -1; });
+    return { count: CR_BUILTIN.length, bad: bad, docs: docs };
+});
+check("القوالب الجاهزة (10) كل أعمدتها صحيحة وكلها تبني تقريراً", tpl.count >= 10 && tpl.bad.length === 0 && tpl.docs, JSON.stringify(tpl));
+await ev(function () { selectedRecordIds.clear(); switchSection("recordsSection"); openCustomReport(); });
+await page.waitForTimeout(400);
+await page.click('[data-cr-template="builtin-paid"]');
+await page.waitForTimeout(300);
+const applied = await ev(function () { return { id: crState.templateId, cols: crState.columns.join(","), active: !!document.querySelector('.cr-pin.is-active[data-cr-template="builtin-paid"]') }; });
+check("الضغط على بطاقة «المقبوض وغير المقبوض» يطبّقها ويميّزها", applied.id === "builtin-paid" && /paid,paidAt/.test(applied.cols) && applied.active, JSON.stringify(applied));
+await page.click('[data-cr="delete-template"]');
+await page.waitForTimeout(300);
+check("القالب الجاهز لا يُحذف", await ev(function () { return CR_BUILTIN.some(function (t) { return t.id === "builtin-paid"; }) && /لا تُحذف/.test(document.getElementById("appToast").textContent); }));
+await ev(function () { closeRecordModal(true); });
+
 check("لا أخطاء JavaScript", errors.length === 0, errors.join(" | "));
 await browser.close();
 server.close();

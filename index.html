@@ -1769,6 +1769,9 @@
                                 <li>«سجل التعديلات» لكل سجل (من قائمة ⋮): الإنشاء وكل تعديل وما تغيّر فيه، و«صار مقبوضاً بتاريخ …»، وإيصالات الاستدراك وتغييرات السعر، مع اسم المستخدم والوقت.</li>
                                 <li>تنظيم الصفحات: الخيارات قليلة الاستعمال مخفية حتى تُفعَّل بمفتاح (ملاحظة السجل، الحسم، استيراد سجل غير محفوظ، سعر من فترة أخرى) وتُفتح وحدها إن كان فيها قيمة؛ «المزيد من الفلاتر» في السجلات و«تصفية متقدمة» في التقارير؛ أرقام خطوات في إنشاء سجل.</li>
                                 <li>ألوان الأزرار حسب وظيفتها: الإضافة نحاسي، «وكالة مماثلة» أزرق مخضر، التعديل كهرماني، الحذف أحمر.</li>
+                                <li>عشرة قوالب جاهزة مثبتة للتقارير المخصّصة (المطلوب، ملخص السجلات، حسب المندوب، كشف القبض، حصص اللجان، النقص وإيصالاته، بدل الانتقال، القائمة الكاملة، الملخص المالي، تفاصيل الوكالات)، مع بقاء القوالب الخاصة قابلة للحفظ والتعديل.</li>
+                                <li>«تخصيص الواجهة» في الإدارة لكل مستخدم: الوضع، حجم الخط، كثافة الجداول، الصفحة عند الفتح، والإعداد الافتراضي للتقارير.</li>
+                                <li>النص لا يُقصّ بـ«…» أبداً؛ الطويل يُطوى بـ«عرض المزيد»، والمراحل القديمة هنا تحت «عرض المراحل السابقة».</li>
                             </ul>
                         </div>
                     </li>
@@ -2050,8 +2053,8 @@
                 <div class="page-title">
                     <span class="page-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></svg></span>
                     <div class="page-title-text">
-                        <h2>الطباعة والتخصيص</h2>
-                        <p>توقيعات التقارير وخيارات العمل</p>
+                        <h2>التوقيعات والطباعة</h2>
+                        <p>من يوقّع في آخر التقارير: الصفات والأسماء</p>
                     </div>
                 </div>
 
@@ -2096,6 +2099,80 @@
 
                 </div>
 
+            </section>
+
+            <!-- ================= ADMIN: تخصيص الواجهة (لكل مستخدم، لهذا الجهاز) ================= -->
+
+            <section
+                id="personalizeSection"
+                class="section"
+                data-admin
+            >
+
+                <div class="page-title">
+                    <span class="page-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>
+                    <div class="page-title-text">
+                        <h2>تخصيص الواجهة</h2>
+                        <p>كيف يبدو البرنامج ويعمل على هذا الجهاز — لا يغيّر أي بيانات</p>
+                    </div>
+                </div>
+
+                <div class="content-card" id="personalizeCard">
+
+                    <h3><i class="ti ti-device-desktop"></i> العرض</h3>
+
+                    <div class="pref-list">
+                        <div class="pref-row">
+                            <div class="pref-text"><b>الوضع</b><small>فاتح أو ليلي</small></div>
+                            <div class="pref-seg" role="radiogroup" aria-label="الوضع"><label><input type="radio" name="prefTheme" value="light"> فاتح</label><label><input type="radio" name="prefTheme" value="dark"> ليلي</label></div>
+                        </div>
+                        <div class="pref-row">
+                            <div class="pref-text"><b>حجم خط الموقع</b><small>لا يغيّر حجم خط التقارير المطبوعة</small></div>
+                            <div class="pref-stepper" role="group" aria-label="حجم خط الموقع">
+                                <button type="button" onclick="changeUiFontScale(-1); syncPersonalize()" aria-label="تصغير">A−</button>
+                                <output id="prefFontValue">100%</output>
+                                <button type="button" onclick="changeUiFontScale(1); syncPersonalize()" aria-label="تكبير">A+</button>
+                            </div>
+                        </div>
+                        <div class="pref-row">
+                            <div class="pref-text"><b>كثافة الجداول</b><small>«مضغوطة» تعرض أسطراً أكثر في الشاشة</small></div>
+                            <div class="pref-seg" role="radiogroup" aria-label="كثافة الجداول"><label><input type="radio" name="prefDensity" value="comfortable"> مريحة</label><label><input type="radio" name="prefDensity" value="compact"> مضغوطة</label></div>
+                        </div>
+                        <div class="pref-row">
+                            <div class="pref-text"><b>الصفحة عند فتح البرنامج</b><small>آخر صفحة كنت فيها، أو صفحة ثابتة</small></div>
+                            <select id="prefStart" aria-label="الصفحة عند فتح البرنامج">
+                                <option value="last">آخر صفحة مفتوحة</option>
+                                <option value="dashboardSection">الرئيسية</option>
+                                <option value="newRecordSection">إنشاء سجل</option>
+                                <option value="recordsSection">السجلات</option>
+                                <option value="reportsSection">التقارير</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <h3 class="pref-sub"><i class="ti ti-printer"></i> التقارير (الإعداد الافتراضي)</h3>
+
+                    <div class="pref-list">
+                        <div class="pref-row">
+                            <div class="pref-text"><b>حجم خط التقرير</b><small>يتغيّر أيضاً من أزرار A− / A+ في نافذة التقرير</small></div>
+                            <div class="pref-stepper" role="group" aria-label="حجم خط التقرير">
+                                <button type="button" data-pref-report-scale="-1" aria-label="تصغير">A−</button>
+                                <output id="prefReportScale">100%</output>
+                                <button type="button" data-pref-report-scale="1" aria-label="تكبير">A+</button>
+                            </div>
+                        </div>
+                        <label class="pref-row pref-switch-row">
+                            <span class="pref-text"><b>مع بيان استدراك النقص</b><small>صفحة الإيصالات بعد التقرير عندما يكون في السجل نقص</small></span>
+                            <span class="reveal-toggle compact"><input type="checkbox" id="prefRecovery"><span class="reveal-switch" aria-hidden="true"></span></span>
+                        </label>
+                        <label class="pref-row pref-switch-row">
+                            <span class="pref-text"><b>مع توقيعات لجنة التدقيق</b><small>في التقرير المختصر والمفصل</small></span>
+                            <span class="reveal-toggle compact"><input type="checkbox" id="prefSignatures"><span class="reveal-switch" aria-hidden="true"></span></span>
+                        </label>
+                    </div>
+
+                </div>
+
                 <div class="content-card" id="workOptionsCard">
 
                     <h3>
@@ -2109,7 +2186,9 @@
 
                 </div>
 
+
             </section>
+
 
             <!-- ================= ADMIN: النسخ الاحتياطي ================= -->
 

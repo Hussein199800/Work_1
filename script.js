@@ -1889,6 +1889,123 @@ function (button) {
 );
 
 /* =========================================================
+تخصيص الواجهة (24/11/2026): تفضيلات لهذا الجهاز فقط (audit_ui_*)، لا بيانات.
+الوضع، حجم الخط، كثافة الجداول (audit_ui_density)، صفحة البداية (audit_ui_start_section)،
+والإعداد الافتراضي للتقارير (audit_ui_report).
+========================================================= */
+
+const DENSITY_KEY = "audit_ui_density";
+const START_SECTION_KEY = "audit_ui_start_section";
+
+function readUiPref(key, fallback) {
+    try { const v = localStorage.getItem(key); return v === null ? fallback : v; } catch (e) { return fallback; }
+}
+
+function writeUiPref(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) {}
+}
+
+function applyDensity() {
+    document.documentElement.setAttribute("data-density", readUiPref(DENSITY_KEY, "comfortable") === "compact" ? "compact" : "comfortable");
+}
+applyDensity();
+
+function startSectionPref() {
+    return readUiPref(START_SECTION_KEY, "last");
+}
+
+function syncPersonalize() {
+    const box = document.getElementById("personalizeCard");
+    if (!box) return;
+    const check = function (name, value) {
+        box.querySelectorAll('input[name="' + name + '"]').forEach(function (r) {
+            r.checked = r.value === value;
+            r.closest("label")?.classList.toggle("is-on", r.checked);
+        });
+    };
+    check("prefTheme", currentTheme());
+    check("prefDensity", readUiPref(DENSITY_KEY, "comfortable"));
+    const start = document.getElementById("prefStart");
+    if (start) start.value = startSectionPref();
+    const font = document.getElementById("prefFontValue");
+    if (font) font.textContent = Math.round(currentUiFontScale() * 100) + "%";
+    const rp = reportPrefs();
+    const rs = document.getElementById("prefReportScale");
+    if (rs) rs.textContent = Math.round(rp.scale * 100) + "%";
+    const rec = document.getElementById("prefRecovery");
+    if (rec) rec.checked = rp.recovery;
+    const sig = document.getElementById("prefSignatures");
+    if (sig) sig.checked = rp.signatures;
+    syncUiFontScaleLabel();
+}
+
+document.getElementById("personalizeCard")?.addEventListener("change", function (event) {
+    const t = event.target;
+    if (t.name === "prefTheme" && t.value !== currentTheme()) toggleTheme();
+    if (t.name === "prefDensity") { writeUiPref(DENSITY_KEY, t.value); applyDensity(); }
+    if (t.id === "prefStart") writeUiPref(START_SECTION_KEY, t.value);
+    if (t.id === "prefRecovery") saveReportPrefs({ recovery: t.checked });
+    if (t.id === "prefSignatures") saveReportPrefs({ signatures: t.checked });
+    syncPersonalize();
+});
+
+document.getElementById("personalizeCard")?.addEventListener("click", function (event) {
+    const b = event.target.closest("[data-pref-report-scale]");
+    if (!b) return;
+    const step = Number(b.dataset.prefReportScale);
+    const next = Math.min(REPORT_SCALE_MAX, Math.max(REPORT_SCALE_MIN, Math.round((reportPrefs().scale + step * 0.1) * 10) / 10));
+    saveReportPrefs({ scale: next });
+    syncPersonalize();
+});
+
+window.syncPersonalize = syncPersonalize;
+
+/* =========================================================
+«عرض المزيد / عرض أقل» (24/11/2026): أي عنصر .expandable يُطوى إلى أسطر قليلة،
+ويظهر الزر فقط إن كان النص أطول فعلاً. لا قصّ للنص بـ«…» في أي مكان.
+========================================================= */
+
+function applyExpandables(root) {
+    (root || document).querySelectorAll(".expandable:not([data-exp])").forEach(function (el) {
+        el.dataset.exp = "1";
+        el.classList.add("is-clamped");
+        if (el.scrollHeight <= el.clientHeight + 2) { el.classList.remove("is-clamped"); return; }
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "expand-toggle no-print";
+        btn.textContent = "عرض المزيد";
+        btn.setAttribute("aria-expanded", "false");
+        btn.addEventListener("click", function () {
+            const open = el.classList.toggle("is-clamped") === false;
+            btn.textContent = open ? "عرض أقل" : "عرض المزيد";
+            btn.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+        el.insertAdjacentElement("afterend", btn);
+    });
+}
+
+/* «حول الموقع»: آخر 4 مراحل ظاهرة، والأقدم تحت «عرض المراحل السابقة» */
+const DEVLOG_VISIBLE = 4;
+function setupDevlogStages() {
+    const list = document.querySelector("#devlogSection .devlog-timeline");
+    if (!list || list.dataset.folded) return;
+    const stages = Array.prototype.slice.call(list.querySelectorAll(":scope > .devlog-stage"));
+    if (stages.length <= DEVLOG_VISIBLE) return;
+    list.dataset.folded = "1";
+    const older = stages.slice(0, stages.length - DEVLOG_VISIBLE);
+    older.forEach(function (li) { li.classList.add("is-older-hidden"); });
+    const box = document.createElement("div");
+    box.className = "devlog-more no-print";
+    box.innerHTML = '<button type="button" class="secondary-btn"><i class="ti ti-history" aria-hidden="true"></i> عرض المراحل السابقة (' + older.length + ")</button>";
+    box.querySelector("button").addEventListener("click", function () {
+        const hidden = older[0].classList.contains("is-older-hidden");
+        older.forEach(function (li) { li.classList.toggle("is-older-hidden", !hidden); });
+        this.innerHTML = hidden ? '<i class="ti ti-chevron-up" aria-hidden="true"></i> إخفاء المراحل السابقة' : '<i class="ti ti-history" aria-hidden="true"></i> عرض المراحل السابقة (' + older.length + ")";
+    });
+    list.parentNode.insertBefore(box, list);
+}
+
+/* =========================================================
 خيارات تُفعَّل عند الحاجة (24/11/2026): «مفتاح» يُظهر لوحة مخفية.
 <input type="checkbox" data-reveal="panelId"> + <div id="panelId" class="reveal-panel" hidden>
 اللوحة تُفتح تلقائياً إذا كان فيها قيمة (تعديل سجل، مسودة)، وإطفاء المفتاح وفيها
@@ -1983,7 +2100,8 @@ function syncReportFilterMore() {
 const ADMIN_TABS = [
     { id: "calculatorSection", icon: "ti-calculator", text: "الحاسبة" },
     { id: "guideSection", icon: "ti-book-2", text: "شرح النظام" },
-    { id: "printSettingsSection", icon: "ti-printer", text: "الطباعة والتخصيص", manager: true },
+    { id: "personalizeSection", icon: "ti-adjustments-horizontal", text: "تخصيص الواجهة" },
+    { id: "printSettingsSection", icon: "ti-signature", text: "التوقيعات والطباعة", manager: true },
     { id: "usersSection", icon: "ti-users", text: "المستخدمون", manager: true },
     { id: "backupSection", icon: "ti-database", text: "النسخ الاحتياطي", manager: true },
     { id: "devlogSection", icon: "ti-timeline-event", text: "حول الموقع" }
@@ -2199,6 +2317,20 @@ if (
 if (id === "backupSection" || id === "usersSection") {
 
     if (typeof renderStorageInfo === "function") renderStorageInfo();
+
+}
+
+
+if (id === "personalizeSection") {
+
+    syncPersonalize();
+
+}
+
+
+if (id === "devlogSection") {
+
+    setupDevlogStages();
 
 }
 
@@ -6603,7 +6735,7 @@ function showRecordHistory(id) {
         const a = HISTORY_ACTIONS[h.action] || [h.action || "—", "ti-point"];
         return '<li class="history-item is-' + escapeHTML(h.action || "") + '"><span class="history-icon"><i class="ti ' + a[1] + '" aria-hidden="true"></i></span>' +
             '<div><p class="history-head"><b>' + escapeHTML(a[0]) + "</b><time>" + escapeHTML(formatDateTime(h.at)) + "</time>" + (h.by ? "<span>" + escapeHTML(h.by) + "</span>" : "") + "</p>" +
-            (h.detail ? '<p class="history-detail">' + escapeHTML(h.detail) + "</p>" : "") + "</div></li>";
+            (h.detail ? '<p class="history-detail expandable">' + escapeHTML(h.detail) + "</p>" : "") + "</div></li>";
     }).join("");
     const older = '<li class="history-item is-legacy"><span class="history-icon"><i class="ti ti-history" aria-hidden="true"></i></span><div><p class="history-head"><b>قبل تفعيل سجل التعديلات</b>' +
         (record.createdAt ? "<time>أُنشئ " + escapeHTML(formatDateTime(record.createdAt)) + "</time>" : "") + "</p></div></li>";
@@ -6613,6 +6745,7 @@ function showRecordHistory(id) {
         '<p class="history-sub">' + escapeHTML(record.representativeName || "") + " — " + escapeHTML(record.officeName || "") + " — الحالة: <b>" + (isRecordPaid(record) ? "مقبوض منذ " + escapeHTML(formatDateTime(record.payment.at)) : "غير مقبوض") + "</b></p>" +
         '<ol class="history-list">' + rows + (list.length && list[list.length - 1].action === "create" ? "" : older) + "</ol></div>";
     document.getElementById("recordModal").classList.remove("hidden");
+    requestAnimationFrame(function () { applyExpandables(document.getElementById("modalContent")); });
 }
 
 window.setRecordPaid = setRecordPaid;
@@ -7215,12 +7348,23 @@ const CR_COLUMNS = {
 };
 
 /* قوالب جاهزة (لا تُحذف) + قوالب المستخدم المحفوظة */
+/* قوالب جاهزة مثبتة (لا تُحذف): icon + desc للبطاقات أعلى نافذة البناء. المعرّفات القديمة باقية كما هي. */
 const CR_BUILTIN = [
-    { id: "builtin-4", name: "المطلوب من المندوبين (4 أعمدة)", level: "record", columns: ["rep", "recordNumber", "date", "net"], title: "المطلوب من المندوبين", sort: "rep", group: false, totals: true, signatures: true, orientation: "auto" },
-    { id: "builtin-7", name: "ملخص السجلات (7 أعمدة)", level: "record", columns: ["recordNumber", "date", "office", "rep", "agencies", "grand", "net"], title: "ملخص السجلات", sort: "date", group: false, totals: true, signatures: true, orientation: "auto" },
-    { id: "builtin-rep", name: "حسب المندوب مع المقاصة", level: "record", columns: ["rep", "recordNumber", "date", "due", "deduction", "deductionReason", "net"], title: "المطلوب من المندوبين بعد المقاصة", sort: "rep", group: true, totals: true, signatures: true, orientation: "auto" },
-    { id: "builtin-agencies", name: "تفاصيل الوكالات", level: "agency", columns: ["recordNumber", "rep", "number", "type", "status", "price", "missingValue", "due", "grand"], title: "تفاصيل الوكالات", sort: "record", group: false, totals: true, signatures: false, orientation: "auto" }
+    { id: "builtin-4", name: "المطلوب من المندوبين (4 أعمدة)", icon: "ti-list-numbers", desc: "المندوب، رقم السجل، التاريخ، الصافي", level: "record", columns: ["rep", "recordNumber", "date", "net"], title: "المطلوب من المندوبين", sort: "rep", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-7", name: "ملخص السجلات (7 أعمدة)", icon: "ti-table", desc: "الرقم والتاريخ والمكتب والمندوب والوكالات والإجمالي والصافي", level: "record", columns: ["recordNumber", "date", "office", "rep", "agencies", "grand", "net"], title: "ملخص السجلات", sort: "date", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-rep", name: "حسب المندوب مع المقاصة", icon: "ti-users-group", desc: "مجموع لكل مندوب: المطلوب والحسم وسببه والصافي", level: "record", columns: ["rep", "recordNumber", "date", "due", "deduction", "deductionReason", "net"], title: "المطلوب من المندوبين بعد المقاصة", sort: "rep", group: true, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-paid", name: "المقبوض وغير المقبوض", icon: "ti-cash", desc: "حالة القبض وتاريخه لكل سجل، مجمّعة حسب المندوب", level: "record", columns: ["rep", "recordNumber", "office", "date", "net", "paid", "paidAt"], title: "كشف القبض", sort: "rep", group: true, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-committees", name: "حصص اللجان", icon: "ti-heart-handshake", desc: "حصة الإسعاف وحصة التعاون لكل سجل مع الإجمالي", level: "record", columns: ["recordNumber", "date", "rep", "agencies", "ambulance", "cooperation"], title: "حصص لجنة الإسعاف ولجنة التعاون", sort: "date", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-missing", name: "النقص وإيصالات الاستدراك", icon: "ti-receipt", desc: "عدد النقص وقيمته وإيصالا المركزية والفرع", level: "record", columns: ["recordNumber", "date", "rep", "missingCount", "missingValue", "centralReceipt", "branchReceipt"], title: "النقص وإيصالات استدراكه", sort: "date", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-transport", name: "بدل الانتقال", icon: "ti-route", desc: "البدل الكامل وحصة المندوب منه، حسب المندوب", level: "record", columns: ["rep", "repType", "recordNumber", "date", "transport", "transportShare"], title: "بدل الانتقال", sort: "rep", group: true, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-sources", name: "القائمة الكاملة لسجلات الفرع", icon: "ti-list-check", desc: "المدقّقة هنا والمستردة مع مصدر كل سجل", level: "record", columns: ["recordNumber", "rep", "office", "date", "source", "agencies", "net"], title: "القائمة الكاملة لسجلات الفرع", sort: "rep", group: false, totals: true, signatures: true, orientation: "auto" },
+    { id: "builtin-finance", name: "الملخص المالي الكامل", icon: "ti-report-money", desc: "كل مبالغ السجل من السعر إلى الصافي (صفحة أفقية)", level: "record", columns: ["recordNumber", "date", "rep", "agencies", "base", "additions", "missingValue", "transport", "grand", "due", "deduction", "net"], title: "الملخص المالي للسجلات", sort: "date", group: false, totals: true, signatures: true, orientation: "landscape" },
+    { id: "builtin-agencies", name: "تفاصيل الوكالات", icon: "ti-file-certificate", desc: "سطر لكل وكالة: النوع والحالة والسعر والنقص والمطلوب", level: "agency", columns: ["recordNumber", "rep", "number", "type", "status", "price", "missingValue", "due", "grand"], title: "تفاصيل الوكالات", sort: "record", group: false, totals: true, signatures: false, orientation: "auto" }
 ];
+
+function crBuiltin(id) {
+    return CR_BUILTIN.find(function (t) { return t.id === id; });
+}
 
 function crLoadPrefs() {
     let p = null;
@@ -7234,7 +7378,7 @@ function crSavePrefs(prefs) {
 }
 
 function crNormalize(state) {
-    const base = Object.assign({}, CR_BUILTIN[1], state || {});
+    const base = Object.assign({}, crBuiltin("builtin-7"), state || {});
     const valid = CR_COLUMNS[base.level === "agency" ? "agency" : "record"].map(function (c) { return c.key; });
     base.level = base.level === "agency" ? "agency" : "record";
     base.columns = (Array.isArray(base.columns) ? base.columns : []).filter(function (k) { return valid.indexOf(k) !== -1; });
@@ -7295,7 +7439,7 @@ function openCustomReport() {
         return;
     }
     const prefs = crLoadPrefs();
-    crState = crNormalize(prefs.last || CR_BUILTIN[1]);
+    crState = crNormalize(prefs.last || crBuiltin("builtin-7"));
     renderCustomReportBuilder();
 }
 
@@ -7434,10 +7578,18 @@ function renderCustomReportBuilder() {
     let html = '<div class="cr-builder">' +
         '<div class="cr-head"><h2><i class="ti ti-table-options" aria-hidden="true"></i> تقرير مخصّص</h2>' +
         "<p>" + crRecordIds.length + " سجل " + (selectedRecordIds.size ? "محدد" : "(كل الظاهر حسب الفلترة الحالية)") + "</p></div>" +
+        /* القوالب الجاهزة المثبتة: بطاقة لكل قالب، ضغطة واحدة تطبّقه ثم يمكن تعديله */
+        '<section class="cr-pinned" aria-label="قوالب جاهزة"><h3><i class="ti ti-pin" aria-hidden="true"></i> قوالب جاهزة <small>اختر واحداً ثم عدّل الأعمدة إن احتجت</small></h3><div class="cr-pinned-grid">' +
+            CR_BUILTIN.map(function (t) {
+                return '<button type="button" class="cr-pin' + (s.templateId === t.id ? " is-active" : "") + '" data-cr-template="' + t.id + '" aria-pressed="' + (s.templateId === t.id) + '">' +
+                    '<i class="ti ' + (t.icon || "ti-table") + '" aria-hidden="true"></i><b>' + escapeHTML(t.name) + "</b><small>" + escapeHTML(t.desc || "") + "</small></button>";
+            }).join("") +
+        "</div></section>" +
         '<div class="cr-grid">' +
         '<div class="cr-panel">' +
-            '<label class="input-group"><span>قالب</span><select id="crTemplate"><option value="">— اختر قالباً —</option>' +
-                templates.map(function (t) { return '<option value="' + escapeHTML(t.id) + '">' + escapeHTML(t.name) + (String(t.id).indexOf("builtin") === 0 ? "" : " (محفوظ)") + "</option>"; }).join("") +
+            '<label class="input-group"><span>كل القوالب <small>(الجاهزة وقوالبك المحفوظة)</small></span><select id="crTemplate"><option value="">— اختر قالباً —</option>' +
+                '<optgroup label="قوالب جاهزة">' + CR_BUILTIN.map(function (t) { return '<option value="' + escapeHTML(t.id) + '">' + escapeHTML(t.name) + "</option>"; }).join("") + "</optgroup>" +
+                (prefs.templates.length ? '<optgroup label="قوالبي">' + prefs.templates.map(function (t) { return '<option value="' + escapeHTML(t.id) + '">' + escapeHTML(t.name) + "</option>"; }).join("") + "</optgroup>" : "") +
             "</select></label>" +
             '<div class="cr-row"><button type="button" class="secondary-btn" data-cr="save-template"><i class="ti ti-device-floppy"></i> حفظ كقالب</button>' +
             '<button type="button" class="secondary-btn" data-cr="delete-template"><i class="ti ti-trash"></i> حذف القالب</button></div>' +
@@ -7500,7 +7652,7 @@ document.getElementById("modalContent")?.addEventListener("change", function (ev
     if (!crState || !event.target.closest(".cr-builder")) return;
     const t = event.target;
     if (t.name === "crLevel") {
-        crState = crNormalize(Object.assign(crStatePublic(), { level: t.value, columns: t.value === "agency" ? CR_BUILTIN[3].columns : CR_BUILTIN[1].columns }));
+        crState = crNormalize(Object.assign(crStatePublic(), { level: t.value, columns: t.value === "agency" ? crBuiltin("builtin-agencies").columns : crBuiltin("builtin-7").columns }));
         renderCustomReportBuilder();
         return;
     }
@@ -7550,6 +7702,12 @@ document.getElementById("modalContent")?.addEventListener("click", function (eve
         crState.columns.sort(function (a, b) { return crState.order.indexOf(a) - crState.order.indexOf(b); });
         renderCustomReportBuilder();
         document.querySelector('[data-cr-' + (up ? "up" : "down") + '="' + k + '"]')?.focus();
+        return;
+    }
+    const pin = event.target.closest("[data-cr-template]");
+    if (pin) {
+        const tpl = crBuiltin(pin.dataset.crTemplate);
+        if (tpl) { crState = crNormalize(tpl); crState.templateId = tpl.id; renderCustomReportBuilder(); const sel = document.getElementById("crTemplate"); if (sel) sel.value = tpl.id; }
         return;
     }
     const btn = event.target.closest("[data-cr]");
@@ -16402,7 +16560,10 @@ function () {
 
             updateAll();
 
+            /* صفحة البداية: آخر صفحة (الافتراضي) أو صفحة يختارها المستخدم في «تخصيص الواجهة» */
+            const startPref = startSectionPref();
             const savedSection =
+                (startPref !== "last" ? startPref : "") ||
                 localStorage.getItem("activeSection") ||
                 sessionStorage.getItem("activeSection") ||
                 "dashboardSection";
