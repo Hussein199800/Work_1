@@ -643,6 +643,10 @@
                     </p>
                     </div>
 
+                    <button type="button" class="secondary-btn small-btn page-title-action qs-open-btn" onclick="openRecordQuickStart()" title="البيانات الأساسية وتذكير بالأسعار والتقرير في شاشة واحدة">
+                        <i class="ti ti-bolt"></i> <span>الشاشة السريعة</span>
+                    </button>
+
                     <button type="button" class="recovered-add-btn page-title-action" onclick="openRecoveredForm()" title="سجل دُقّق في موقع تدقيق آخر أو يدوياً: يُضاف ملخّصاً للمطابقة بدون وكالات">
                         <i class="ti ti-file-import"></i> <span>سجل مسترد؟</span>
                     </button>
@@ -693,6 +697,14 @@
                                     id="recordDate"
                                     dir="ltr"
                                 >
+
+                                <!-- ضبط التاريخ (27/11/2026): أزرار سريعة، والتاريخ مكتوباً، وفترة الأسعار التي تُطبَّق -->
+                                <div class="date-quick no-print">
+                                    <button type="button" class="date-chip" data-date-shift="0">اليوم</button>
+                                    <button type="button" class="date-chip" data-date-shift="-1">أمس</button>
+                                    <button type="button" class="date-chip" data-date-shift="-2">قبل يومين</button>
+                                </div>
+                                <small class="field-hint date-hint" id="recordDateHint" aria-live="polite"></small>
 
                             </div>
 
@@ -1843,6 +1855,8 @@
                                 <li>التقرير العام: «بدل الانتقال حسب السجل» و«الإضافات حسب السجل» و«الطوابع الناقصة حسب السجل»، لمعرفة من أي سجلات جاء كل مبلغ وكم من كل سجل.</li>
                                 <li>«نصوص التقارير والترويسة» في الإدارة ← التوقيعات والطباعة: اسم الجهة وسطر الترويسة الثاني، والمرسل إليه، والتحية، والجهة المدقّقة، وعنوانا البيان، والخاتمة، والجهة المُصدِرة؛ مع «معاينة البيان»، ومرسل إليه مختلف لسجل واحد من نافذة تقريره.</li>
                                 <li>شعار الترويسة: شعار البرنامج، أو صورة من الجهاز (تُصغَّر تلقائياً)، أو بدون شعار، في كل التقارير.</li>
+                                <li>شاشة «سجل جديد» سريعة: رقم السجل والتاريخ والمندوب (يملأ مكتبه ونوعه من آخر سجل له) والمكتب والنوع الغالب، مع تذكير بأسعار ذلك التاريخ وبتخصيص التقرير، و«تخطي» و«لا تعرض مرة أخرى».</li>
+                                <li>ضبط التاريخ: أزرار اليوم / أمس / قبل يومين، والتاريخ مكتوباً بالعربية مع فترة الأسعار التي تُطبَّق عليه، وتنبيه للتاريخ في المستقبل.</li>
                                 <li>«النوع الغالب في هذا السجل» في بيانات السجل: كل وكالة جديدة تأخذه (عامة أو شرعية مثلاً)، ونوع السجل الجديد الافتراضي من «تخصيص الواجهة».</li>
                             </ul>
                         </div>
@@ -2238,6 +2252,10 @@
                             <div class="pref-text"><b>كثافة الجداول</b><small>«مضغوطة» تعرض أسطراً أكثر في الشاشة</small></div>
                             <div class="pref-seg" role="radiogroup" aria-label="كثافة الجداول"><label><input type="radio" name="prefDensity" value="comfortable"> مريحة</label><label><input type="radio" name="prefDensity" value="compact"> مضغوطة</label></div>
                         </div>
+                        <label class="pref-row pref-switch-row">
+                            <span class="pref-text"><b>الشاشة السريعة عند إنشاء سجل جديد</b><small>البيانات الأساسية وتذكير بالأسعار والتقرير، مع «تخطي»</small></span>
+                            <span class="reveal-toggle compact"><input type="checkbox" id="prefQuickStart"><span class="reveal-switch" aria-hidden="true"></span></span>
+                        </label>
                         <div class="pref-row">
                             <div class="pref-text"><b>النوع الغالب للسجل الجديد</b><small>يبدأ به كل سجل جديد، ويُغيَّر لكل سجل من «بيانات السجل»</small></div>
                             <select id="prefDefaultType" aria-label="النوع الغالب للسجل الجديد"><option value="general">وكالة عامة</option><option value="special">وكالة خاصة</option><option value="legal">وكالة شرعية</option><option value="executive">وكالة تنفيذية</option><option value="certified_general_special">صورة مصدقة عامة/خاصة</option><option value="certified_legal">صورة مصدقة شرعية</option></select>

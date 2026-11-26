@@ -80,6 +80,12 @@ node tests/payment.mjs
 node tests/organize.mjs
 ```
 
+## الشاشة السريعة وضبط التاريخ (`tests/quickstart.mjs`)
+الشاشة لا تُفتح تلقائياً تحت الاختبار الآلي (`navigator.webdriver`)، فالاختبار يفتحها بـ `openRecordQuickStart()`:
+```bash
+node tests/quickstart.mjs
+```
+
 ## الأداء ببيانات كبيرة (`tests/perf.mjs`)
 40 سجلاً × 100 وكالة (~5 ملايين حرف، قريب من بيانات المستخدم الحقيقية): يقيس فتح صفحة التقارير (يجب أن تعرض 200 صف فقط) والمزامنة الدورية مع خادم Firebase وهمي (يجب أن تكون شبه مجانية بلا تغيير):
 ```bash
