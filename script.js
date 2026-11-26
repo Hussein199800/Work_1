@@ -81,7 +81,7 @@ function isTransportEligible(type) {
 const NUMBER_LOCALE = "ar-SY-u-nu-latn";
 
 /* رقم الإصدار (24/11/2026): يزداد مع كل نشر على main؛ يظهر في «حول الموقع» ونافذة «ما الجديد» */
-const APP_VERSION = "2026.11.26.1";
+const APP_VERSION = "2026.11.26.2";
 const APP_VERSION_SEEN_KEY = "audit_ui_seen_version";
 
 /* =========================================================
@@ -274,7 +274,7 @@ const DATA_SETTINGS_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations", "audit_audit_committee"
+    "audit_fee_destinations", "audit_audit_committee", "audit_report_texts"
 ];
 let settingsLoadFailed = [];
 const settingsCorruptRaw = {};
@@ -348,7 +348,7 @@ if ([
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_records", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations", "audit_audit_committee"
+    "audit_fee_destinations", "audit_audit_committee", "audit_report_texts"
 ].indexOf(key) !== -1) {
     try { markDataChanged(); } catch (e) {}
     /* قبل تحميل قسم Firebase يرمي (منطقة TDZ) ويُتجاهل: حفظ الإعدادات عند فتح الصفحة ليس تعديلاً */
@@ -477,6 +477,41 @@ function auditSigners(c) {
 }
 
 let auditCommittee = normalizeAuditCommittee(loadData(AUDIT_COMMITTEE_KEY, null));
+
+/*
+    نصوص التقارير والترويسة (27/11/2026، بطلب حسين: «التخصيص حتى للترويسات، والتقرير في أريحية بكل شيء»).
+    إعداد مشترك (نسخة احتياطية + مزامنة)، إضافي؛ الغائب = الافتراضي.
+    الحقل الفارغ في سطر اختياري (المرسل إليه، التحية، الخاتمة، الجهة المُصدِرة) = السطر لا يُطبع؛
+    والعنوان الفارغ يعود إلى الافتراضي.
+*/
+const REPORT_TEXTS_KEY = "audit_report_texts";
+const DEFAULT_REPORT_TEXTS = {
+    org: "نقابة المحامين",
+    unit: "فرع إدلب — مكتب المحاسبة",
+    to: "السادة مجلس النقابة المركزية للمحامين المحترمين،",
+    greeting: "تحية طيبة وبعد،",
+    auditor: "مكتب المحاسبة في الفرع",
+    shortageTitle: "بيان استدراك النقص",
+    cleanTitle: "بيان خلوّ السجل من النقص",
+    addressedTo: "مرفوع إلى النقابة المركزية",
+    closing: "وتفضّلوا بقبول فائق الاحترام والتقدير.",
+    from: "فرع إدلب — مكتب المحاسبة"
+};
+/* الحقول التي يعود فارغها إلى الافتراضي (لا يصح أن تكون فارغة) */
+const REPORT_TEXTS_REQUIRED = ["org", "auditor", "shortageTitle", "cleanTitle"];
+
+function normalizeReportTexts(value) {
+    const v = value && typeof value === "object" ? value : {};
+    const out = {};
+    Object.keys(DEFAULT_REPORT_TEXTS).forEach(function (k) {
+        const has = typeof v[k] === "string";
+        const t = has ? v[k].trim() : DEFAULT_REPORT_TEXTS[k];
+        out[k] = (!t && REPORT_TEXTS_REQUIRED.indexOf(k) !== -1) ? DEFAULT_REPORT_TEXTS[k] : t;
+    });
+    return out;
+}
+
+let reportTexts = normalizeReportTexts(loadData(REPORT_TEXTS_KEY, null));
 
 let feeDestinations = (function () {
     const saved = loadData(FEE_DESTINATIONS_KEY, null);
@@ -2387,6 +2422,7 @@ if (id === "devlogSection") {
 if (id === "printSettingsSection") {
 
     renderAuditCommitteeForm();
+    renderReportTextsForm();
 
 }
 
@@ -9492,7 +9528,7 @@ function todayArabic() {
 function docLetterhead(title, subtitle) {
     return '<header class="doc-head">' +
         sealSVG() +
-        '<div class="doc-org"><strong>نقابة المحامين</strong><span>فرع إدلب — مكتب المحاسبة</span></div>' +
+        '<div class="doc-org"><strong>' + escapeHTML(reportTexts.org) + "</strong>" + (reportTexts.unit ? "<span>" + escapeHTML(reportTexts.unit) + "</span>" : "") + "</div>" +
         '<div class="doc-title"><h2>' + title + "</h2><span>" + (subtitle || ("تاريخ الإصدار: " + todayArabic())) + "</span></div>" +
         "</header>";
 }
@@ -9678,7 +9714,9 @@ function getRecordRecovery(record) {
     return {
         centralReceipt: str(r.centralReceipt), centralDate: str(r.centralDate),
         branchReceipt: str(r.branchReceipt), branchDate: str(r.branchDate),
-        text: str(r.text)
+        text: str(r.text),
+        /* المرسل إليه لهذا السجل فقط (27/11/2026، إضافي): الفارغ = النص من «نصوص التقارير» */
+        to: str(r.to)
     };
 }
 
@@ -9742,7 +9780,12 @@ function recoveryEditorHTML(record, mode, groups, rec) {
             '<input type="' + (type || "text") + '" id="rcv_' + key + '" value="' + escapeHTML(value) + '"' +
             (type === "date" ? ' lang="en-GB" dir="ltr"' : ' autocomplete="off"') + "></label>";
     };
-    let html = '<div class="recovery-editor no-print" data-record-id="' + id + '"><h4><i class="ti ti-receipt" aria-hidden="true"></i> بيانات الإيصالات لبيان استدراك النقص</h4><div class="recovery-fields">';
+    const shortage = groups.central.value + groups.branch.value + groups.unknown.value > 0;
+    let html = '<div class="recovery-editor no-print" data-record-id="' + id + '"><h4><i class="ti ti-receipt" aria-hidden="true"></i> ' +
+        (shortage ? "بيانات البيان: الإيصالات والمرسل إليه" : "بيانات البيان: المرسل إليه والفقرة الإضافية") + "</h4>" +
+        '<label class="input-group"><span>المرسل إليه لهذا السجل <small>(فارغ = «' + escapeHTML(reportTexts.to || "بدون مرسل إليه") + '» من نصوص التقارير)</small></span>' +
+        '<input type="text" id="rcv_to" autocomplete="off" value="' + escapeHTML(rec.to || "") + '" placeholder="' + escapeHTML(reportTexts.to) + '"></label>' +
+        '<div class="recovery-fields">';
     if (groups.central.value > 0) {
         html += field("centralReceipt", "إيصال النقابة المركزية — الرقم", rec.centralReceipt) + field("centralDate", "تاريخه", rec.centralDate, "date");
     }
@@ -9751,7 +9794,7 @@ function recoveryEditorHTML(record, mode, groups, rec) {
     }
     html += '</div><label class="input-group"><span>فقرة إضافية (اختياري — تظهر في البيان)</span><textarea id="rcv_text" rows="2">' + escapeHTML(rec.text) + "</textarea></label>" +
         '<button type="button" class="primary-btn" onclick="saveRecordRecovery(\'' + id + "', '" + mode + '\')"><i class="ti ti-device-floppy"></i> حفظ بيانات البيان</button>' +
-        '<small class="field-hint">الخانات الفارغة تُطبع نقاطاً لتُكتب باليد.</small></div>';
+        (shortage ? '<small class="field-hint">خانات الإيصالات الفارغة تُطبع نقاطاً لتُكتب باليد.</small>' : "") + "</div>";
     return html;
 }
 
@@ -9780,20 +9823,22 @@ function recoveryPageHTML(record, stats, mode, forPrint) {
     const pleadingRequired = stats.active.reduce(function (sum, a) { return sum + number(a.pleadingRequired); }, 0);
 
     let html = "";
-    if (canEdit && hasShortage) html += recoveryEditorHTML(record, mode, groups, rec);
+    if (canEdit) html += recoveryEditorHTML(record, mode, groups, rec);
+    const T = reportTexts;
+    const toLine = rec.to || T.to;
 
     html += '<section class="doc-recovery doc-statement' + (hasShortage ? " has-shortage" : " no-shortage") + (included ? "" : " is-excluded no-print") + '">';
     if (!included) {
         html += '<p class="recovery-excluded no-print"><i class="ti ti-eye-off" aria-hidden="true"></i> هذا البيان لن يُطبع ولن يدخل في ملف PDF (فعّله من «الأقسام المطبوعة»).</p>';
     }
 
-    html += docLetterhead(hasShortage ? "بيان استدراك النقص" : "بيان خلوّ السجل من النقص",
-        "مرفوع إلى النقابة المركزية — ملحق بالسجل رقم " + escapeHTML(record.recordNumber) + " — تاريخ الإصدار: " + todayArabic());
+    html += docLetterhead(escapeHTML(hasShortage ? T.shortageTitle : T.cleanTitle),
+        (T.addressedTo ? escapeHTML(T.addressedTo) + " — " : "") + "ملحق بالسجل رقم " + escapeHTML(record.recordNumber) + " — تاريخ الإصدار: " + todayArabic());
 
-    const intro = "<p class=\"statement-to\">السادة مجلس النقابة المركزية للمحامين المحترمين،</p><p>تحية طيبة وبعد،</p>" +
+    const intro = (toLine ? '<p class="statement-to">' + escapeHTML(toLine) + "</p>" : "") + (T.greeting ? "<p>" + escapeHTML(T.greeting) + "</p>" : "") +
         "<p>بالإشارة إلى السجل رقم (<b>" + escapeHTML(record.recordNumber) + "</b>) العائد لمكتب «<b>" + escapeHTML(record.officeName) + "</b>»، " +
         "والمقدَّم من المندوب «<b>" + repName + "</b>» بتاريخ <b>" + formatDay(getRecordDay(record)) + "</b>، والمتضمّن (<b>" + activeCount + "</b>) وكالة غير ملغاة، " +
-        "نفيدكم بأن مكتب المحاسبة في الفرع قد أتمّ تدقيق السجل المذكور، ";
+        "نفيدكم بأن " + escapeHTML(T.auditor) + " قد أتمّ تدقيق السجل المذكور، ";
 
     html += '<div class="recovery-body">';
 
@@ -9842,8 +9887,8 @@ function recoveryPageHTML(record, stats, mode, forPrint) {
         html += "<p>وقد نُظِّم هذا البيان للعلم والاعتماد لدى أي تدقيق لاحق.</p>";
     }
 
-    html += '<p class="statement-close">وتفضّلوا بقبول فائق الاحترام والتقدير.</p>' +
-        '<p class="statement-from">فرع إدلب — مكتب المحاسبة</p></div>';
+    html += (T.closing ? '<p class="statement-close">' + escapeHTML(T.closing) + "</p>" : "") +
+        (T.from ? '<p class="statement-from">' + escapeHTML(T.from) + "</p>" : "") + "</div>";
 
     html += "</section>";
     return html;
@@ -9867,7 +9912,7 @@ function saveRecordRecovery(id, mode) {
 
     const before = record.recovery;
     const next = getRecordRecovery(record);
-    ["centralReceipt", "centralDate", "branchReceipt", "branchDate", "text"].forEach(function (k) {
+    ["centralReceipt", "centralDate", "branchReceipt", "branchDate", "text", "to"].forEach(function (k) {
         const v = get(k);
         /* أرقام الإيصالات بالأرقام الغربية مثل بقية النظام */
         if (v !== null) next[k] = k === "text" ? v : normalizeDigits(v);
@@ -10676,6 +10721,7 @@ function settingMemoryValue(key) {
         case "audit_council_saved": return councilSaved;
         case "audit_fee_destinations": return feeDestinations;
         case "audit_audit_committee": return auditCommittee;
+        case "audit_report_texts": return reportTexts;
         default: return undefined;
     }
 }
@@ -11395,6 +11441,69 @@ function exportReportsToPDF() {
         { pdf: true, landscape: filtered }
     );
 }
+
+/* =========================================================
+نصوص التقارير والترويسة في «التوقيعات والطباعة» (27/11/2026)
+========================================================= */
+
+function renderReportTextsForm(source) {
+    const t = source || reportTexts;
+    Object.keys(DEFAULT_REPORT_TEXTS).forEach(function (k) {
+        const el = document.getElementById("rt_" + k);
+        if (el) { el.value = t[k] || ""; el.placeholder = DEFAULT_REPORT_TEXTS[k]; }
+    });
+}
+
+function readReportTextsForm() {
+    const v = {};
+    Object.keys(DEFAULT_REPORT_TEXTS).forEach(function (k) {
+        const el = document.getElementById("rt_" + k);
+        v[k] = el ? el.value : reportTexts[k];
+    });
+    return normalizeReportTexts(v);
+}
+
+document.getElementById("saveReportTextsBtn")?.addEventListener("click", function () {
+    if (!currentUser || currentUser.role !== "manager") { notify("حفظ النصوص للمدير فقط.", "error"); return; }
+    const next = readReportTextsForm();
+    try {
+        saveData(REPORT_TEXTS_KEY, next);
+    } catch (error) {
+        notify("<strong>لم تُحفظ النصوص</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        return;
+    }
+    reportTexts = next;
+    renderReportTextsForm();
+    notify("حُفظت نصوص التقارير والترويسة.", "success");
+});
+
+/* الافتراضية في النموذج فقط؛ لا تُحفظ إلا بزر الحفظ */
+document.getElementById("resetReportTextsBtn")?.addEventListener("click", function () {
+    renderReportTextsForm(DEFAULT_REPORT_TEXTS);
+    notify("أُعيدت النصوص الافتراضية في النموذج — اضغط «حفظ النصوص» لاعتمادها.", "info");
+});
+
+/* معاينة البيان بالنصوص المكتوبة الآن (قبل الحفظ) على أحدث سجل مدقّق */
+document.getElementById("previewReportTextsBtn")?.addEventListener("click", function () {
+    const list = auditedRecords();
+    if (!list.length) { notify("لا توجد سجلات للمعاينة بعد.", "info"); return; }
+    const saved = reportTexts;
+    reportTexts = readReportTextsForm();
+    try {
+        const r = list[list.length - 1];
+        const stats = getRecordFinalStats(r);
+        document.getElementById("modalContent").innerHTML =
+            '<div class="report-actions no-print"><span class="field-hint">معاينة بالنصوص المكتوبة (لم تُحفظ بعد) — السجل ' + escapeHTML(r.recordNumber) + '</span>' +
+            '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button></div>' +
+            '<div class="final-report doc doc-summary">' + (recoveryPageHTML(r, stats, "summary", true) ||
+                '<p class="doc-empty">البيان مطفأ من «الأقسام المطبوعة» في نافذة التقرير، فلا يُطبع. فعّله هناك لتراه.</p>') + "</div>";
+        document.getElementById("recordModal").classList.remove("hidden");
+    } finally {
+        reportTexts = saved;
+    }
+});
+
+onReady(function () { renderReportTextsForm(); });
 
 /* =========================================================
 نافذة حصص اللجان
@@ -17440,6 +17549,7 @@ function downloadBackup() {
         councilSaved: councilSaved,
         feeDestinations: feeDestinations,
         auditCommittee: auditCommittee,
+        reportTexts: reportTexts,
         records: records
     };
 
@@ -17533,6 +17643,7 @@ function buildBackupJSON() {
         councilSaved: councilSaved,
         feeDestinations: feeDestinations,
         auditCommittee: auditCommittee,
+        reportTexts: reportTexts,
         records: records
     }, null, 2);
 }
@@ -18199,7 +18310,7 @@ function backupDataProblem(data) {
         if (badUser) return "في قائمة المستخدمين حساب تالف.";
         if (!data.users.some(function (u) { return u.role === "manager"; })) return "لا يوجد مدير في قائمة المستخدمين.";
     }
-    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations", "auditCommittee"];
+    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations", "auditCommittee", "reportTexts"];
     for (let i = 0; i < objects.length; i++) {
         const v = data[objects[i]];
         if (v !== undefined && (!v || typeof v !== "object" || Array.isArray(v))) return "الإعداد " + objects[i] + " تالف.";
@@ -18220,7 +18331,7 @@ function backupDataProblem(data) {
 const RESTORE_SETTING_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_committee_shares",
-    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations", "audit_audit_committee"
+    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations", "audit_audit_committee", "audit_report_texts"
 ];
 
 function applyBackupData(data) {
@@ -18324,6 +18435,11 @@ function writeBackupSettings(data) {
     /* لجنة التدقيق (أسماء التوقيعات): من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
     if (data.auditCommittee && typeof data.auditCommittee === "object") {
         write(AUDIT_COMMITTEE_KEY, normalizeAuditCommittee(data.auditCommittee), true);
+    }
+
+    /* نصوص التقارير والترويسة: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+    if (data.reportTexts && typeof data.reportTexts === "object") {
+        write(REPORT_TEXTS_KEY, normalizeReportTexts(data.reportTexts), true);
     }
 
     /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
@@ -18438,7 +18554,7 @@ const FB_SETTINGS_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations", "audit_audit_committee"
+    "audit_fee_destinations", "audit_audit_committee", "audit_report_texts"
 ];
 
 let fbState = loadData(FB_STATE_KEY, null);
@@ -19740,7 +19856,7 @@ onReady(function () {
     const seen = readUiPref(APP_VERSION_SEEN_KEY, "");
     writeUiPref(APP_VERSION_SEEN_KEY, APP_VERSION);
     if (!seen || seen === APP_VERSION || !currentUser) return;
-    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>تقرير السجل يبدأ ببيان رسمي مرفوع إلى النقابة المركزية (استدراك النقص، أو خلوّ السجل من النقص)، و«الأقسام المطبوعة» لاختيار ما يُطبع من تقرير السجل والتقرير العام، وفي التقرير العام: بدل الانتقال والإضافات والطوابع الناقصة حسب السجل. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
+    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>تقرير السجل يبدأ ببيان رسمي (استدراك النقص، أو خلوّ السجل من النقص) بنصوص وترويسة تُعدَّل من «التوقيعات والطباعة» ومرسل إليه لكل سجل، و«الأقسام المطبوعة» لاختيار ما يُطبع من تقرير السجل والتقرير العام، وفي التقرير العام: بدل الانتقال والإضافات والطوابع الناقصة حسب السجل. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
 });
 
 window.exportAuditTable = exportAuditTable;

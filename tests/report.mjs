@@ -220,6 +220,29 @@ check("التقرير العام: جداول حسب السجل، ويمكن طب
     return ok1 && ok2;
 }));
 
+/* 7د) نصوص التقارير والترويسة قابلة للتخصيص (27/11/2026)، ومرسل إليه لسجل واحد */
+check("نصوص الترويسة والبيان من الإعدادات، والسطر الفارغ لا يُطبع، والمرسل إليه لسجل واحد", await ev(function () {
+    const r = records.find(function (x) { return x.id === "r1"; });
+    saveData(REPORT_TEXTS_KEY, normalizeReportTexts({ org: "نقابة اختبار", unit: "", to: "السيد رئيس الفرع المحترم،", greeting: "", auditor: "لجنة التدقيق", shortageTitle: "", closing: "مع التقدير." }));
+    reportTexts = normalizeReportTexts(loadData(REPORT_TEXTS_KEY, null));
+    const a = buildFinalRecordReport(r, "summary", true);
+    const okA = a.indexOf("<strong>نقابة اختبار</strong>") !== -1 && a.indexOf("فرع إدلب — مكتب المحاسبة</span>") === -1 &&
+        a.indexOf("السيد رئيس الفرع المحترم،") !== -1 && a.indexOf("تحية طيبة") === -1 && a.indexOf("نفيدكم بأن لجنة التدقيق") !== -1 &&
+        a.indexOf("بيان استدراك النقص") !== -1 /* العنوان الفارغ يعود للافتراضي */ && a.indexOf("مع التقدير.") !== -1 &&
+        a.indexOf("السادة مجلس النقابة المركزية") === -1;
+    r.recovery = Object.assign({}, r.recovery, { to: "السادة الهيئة العامة المحترمين،" });
+    const b = buildFinalRecordReport(r, "summary", true);
+    const okB = b.indexOf("السادة الهيئة العامة المحترمين،") !== -1 && b.indexOf("السيد رئيس الفرع المحترم،") === -1;
+    delete r.recovery.to;
+    const backup = JSON.parse(buildBackupJSON());
+    const okC = backup.reportTexts && backup.reportTexts.org === "نقابة اختبار" && FB_SETTINGS_KEYS.indexOf("audit_report_texts") !== -1 &&
+        DATA_SETTINGS_KEYS.indexOf("audit_report_texts") !== -1 && RESTORE_SETTING_KEYS.indexOf("audit_report_texts") !== -1;
+    saveData(REPORT_TEXTS_KEY, normalizeReportTexts(DEFAULT_REPORT_TEXTS));
+    reportTexts = normalizeReportTexts(DEFAULT_REPORT_TEXTS);
+    const okD = normalizeReportTexts(null).to === DEFAULT_REPORT_TEXTS.to && normalizeReportTexts({ org: "" }).org === "نقابة المحامين";
+    return okA && okB && okC && okD;
+}));
+
 /* 8) تنزيل PDF مباشر (يحتاج الإنترنت لتحميل المكتبات) */
 const online = await ev(function () { return fetch(PDF_LIBS[0], { method: "HEAD" }).then(function (r) { return r.ok; }, function () { return false; }); });
 if (online) {

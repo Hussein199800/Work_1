@@ -8870,3 +8870,18 @@ tr.is-recovered.is-selected td {
 .by-record-table td:first-child,
 .by-record-table th:first-child { white-space: nowrap; }
 .by-record-table { font-size: var(--fs-sm); }
+
+/* نصوص التقارير والترويسة */
+.report-texts-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+    margin: 12px 0 14px;
+}
+
+.report-texts-form .input-group > span { font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
+.report-texts-form .input-group small { font-weight: 400; }
+
+@media (max-width: 640px) {
+    .report-texts-form { grid-template-columns: minmax(0, 1fr); }
+}
