@@ -81,7 +81,7 @@ function isTransportEligible(type) {
 const NUMBER_LOCALE = "ar-SY-u-nu-latn";
 
 /* رقم الإصدار (24/11/2026): يزداد مع كل نشر على main؛ يظهر في «حول الموقع» ونافذة «ما الجديد» */
-const APP_VERSION = "2026.11.27.1";
+const APP_VERSION = "2026.11.27.2";
 const APP_VERSION_SEEN_KEY = "audit_ui_seen_version";
 
 /* =========================================================
@@ -2028,6 +2028,8 @@ function syncPersonalize() {
     if (start) start.value = startSectionPref();
     const defType = document.getElementById("prefDefaultType");
     if (defType) defType.value = preferredNewRecordType();
+    const qsPref = document.getElementById("prefQuickStart");
+    if (qsPref) qsPref.checked = quickStartEnabled();
     const font = document.getElementById("prefFontValue");
     if (font) font.textContent = Math.round(currentUiFontScale() * 100) + "%";
     const rp = reportPrefs();
@@ -2046,6 +2048,7 @@ document.getElementById("personalizeCard")?.addEventListener("change", function 
     if (t.name === "prefTheme" && t.value !== currentTheme()) toggleTheme();
     if (t.name === "prefDensity") { writeUiPref(DENSITY_KEY, t.value); applyDensity(); }
     if (t.id === "prefStart") writeUiPref(START_SECTION_KEY, t.value);
+    if (t.id === "prefQuickStart") writeUiPref(QUICKSTART_PREF_KEY, t.checked ? "on" : "off");
     if (t.id === "prefDefaultType") {
         writeUiPref(DEFAULT_TYPE_PREF_KEY, t.value);
         /* سجل جديد فارغ مفتوح الآن: يأخذ الاختيار مباشرة */
@@ -2460,6 +2463,9 @@ if (
     prepareNewAgency();
 
     updateRepresentativeTypeHint();
+
+    renderRecordDateHint();
+    setTimeout(maybeOpenRecordQuickStart, 120);
 
 }
 
@@ -11517,6 +11523,227 @@ function exportReportsToPDF() {
 }
 
 /* =========================================================
+ضبط التاريخ والشاشة السريعة للسجل الجديد (27/11/2026)
+- تحت «تاريخ السجل»: أزرار اليوم / أمس / قبل يومين، والتاريخ مكتوباً بالعربية،
+  وفترة الأسعار التي تُطبَّق عليه، وتنبيه للتاريخ في المستقبل أو قبل كل الجداول.
+- شاشة «سجل جديد» سريعة عند فتح صفحة إنشاء سجل فارغة: البيانات الأساسية،
+  وتذكير بأسعار ذلك التاريخ وبتخصيص التقرير، مع «تخطي». تُطفأ من «تخصيص الواجهة»
+  (audit_ui_quickstart). لا تُفتح تلقائياً تحت أدوات الاختبار الآلي (navigator.webdriver).
+========================================================= */
+
+const QUICKSTART_PREF_KEY = "audit_ui_quickstart";
+
+function shiftDay(day, delta) {
+    const p = String(day || todayDay()).split("-").map(Number);
+    const d = new Date(p[0], p[1] - 1, p[2] + delta);
+    return toDayString(d);
+}
+
+function longArabicDay(day) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day || "")) return "";
+    const p = day.split("-").map(Number);
+    try { return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString(NUMBER_LOCALE, { weekday: "long", year: "numeric", month: "long", day: "numeric" }); }
+    catch (e) { return formatDay(day); }
+}
+
+/* وصف التاريخ: مكتوباً + فترة الأسعار + تنبيه (كهرماني، لا يمنع) */
+function dayPriceInfo(day) {
+    const t = priceTableForDay(day);
+    const firstEntry = priceSchedule.filter(function (e) { return e && e.from; }).map(function (e) { return scheduleStart(e.from); }).sort()[0];
+    const info = {
+        text: longArabicDay(day),
+        period: t.month ? "أسعار الفترة من " + formatDay(t.month) : "الأسعار الأساسية (لا توجد فترة لهذا التاريخ)",
+        warn: ""
+    };
+    if (day > todayDay()) info.warn = "التاريخ في المستقبل — تأكد منه.";
+    else if (firstEntry && day < firstEntry) info.warn = "التاريخ قبل أول جدول أسعار (" + formatDay(firstEntry) + ").";
+    return info;
+}
+
+function renderRecordDateHint() {
+    const el = document.getElementById("recordDateHint");
+    const input = document.getElementById("recordDate");
+    if (!el || !input) return;
+    const day = input.value;
+    if (!day) { el.textContent = ""; return; }
+    const info = dayPriceInfo(day);
+    el.innerHTML = escapeHTML(info.text) + " · " + escapeHTML(info.period) + (info.warn ? '<b class="date-warn"> ' + escapeHTML(info.warn) + "</b>" : "");
+    document.querySelectorAll(".date-quick .date-chip").forEach(function (b) {
+        b.classList.toggle("is-on", shiftDay(todayDay(), Number(b.dataset.dateShift)) === day);
+    });
+}
+
+document.getElementById("recordDate")?.addEventListener("change", renderRecordDateHint);
+document.getElementById("recordDate")?.addEventListener("input", renderRecordDateHint);
+
+document.addEventListener("click", function (event) {
+    const chip = event.target.closest && event.target.closest(".date-quick .date-chip");
+    if (!chip) return;
+    const input = chip.closest(".input-group, .qs-date")?.querySelector('input[type="date"]');
+    if (!input) return;
+    input.value = shiftDay(todayDay(), Number(chip.dataset.dateShift));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+});
+
+onReady(renderRecordDateHint);
+
+function quickStartEnabled() {
+    try { return localStorage.getItem(QUICKSTART_PREF_KEY) !== "off"; } catch (e) { return true; }
+}
+
+/* آخر مكتب ونوع لكل مندوب (لملء المكتب ونوع المندوب تلقائياً عند اختيار اسمه) */
+function repDefaults() {
+    const map = {};
+    auditedRecords().slice().sort(function (a, b) { return getRecordDay(a).localeCompare(getRecordDay(b)); }).forEach(function (r) {
+        const name = String(r.representativeName || "").trim();
+        if (name) map[name] = { office: r.officeName || "", type: r.representativeType === "external" ? "external" : "internal", defType: r.defaultAgencyType || "" };
+    });
+    return map;
+}
+
+/* تذكير التخصيص: هل التوقيعات والترويسة مضبوطة؟ */
+function reportReadinessHTML() {
+    const signers = auditSigners().filter(function (x) { return x.name; }).length;
+    const customLetter = reportTexts.org !== DEFAULT_REPORT_TEXTS.org || reportTexts.unit !== DEFAULT_REPORT_TEXTS.unit || reportTexts.logoMode !== "default";
+    const isManager = currentUser && currentUser.role === "manager";
+    return '<ul class="qs-checks">' +
+        "<li class=\"" + (signers ? "ok" : "todo") + "\"><i class=\"ti " + (signers ? "ti-circle-check" : "ti-alert-circle") + "\" aria-hidden=\"true\"></i> " +
+            (signers ? "أسماء التوقيعات مضبوطة (" + signers + ")" : "أسماء لجنة التدقيق فارغة — تُطبع خطوطاً للكتابة باليد") + "</li>" +
+        "<li class=\"" + (customLetter ? "ok" : "info") + "\"><i class=\"ti " + (customLetter ? "ti-circle-check" : "ti-info-circle") + "\" aria-hidden=\"true\"></i> " +
+            (customLetter ? "الترويسة مخصّصة: " + escapeHTML(reportTexts.org) : "الترويسة بالنص الافتراضي: " + escapeHTML(reportTexts.org) + (reportTexts.unit ? " — " + escapeHTML(reportTexts.unit) : "")) + "</li>" +
+        "</ul>" +
+        (isManager ? '<button type="button" class="link-btn" data-qs-go="printSettingsSection"><i class="ti ti-adjustments" aria-hidden="true"></i> تخصيص التقرير</button>' : "");
+}
+
+function quickStartPricesHTML(day) {
+    const info = dayPriceInfo(day);
+    const rows = [["general", "عامة / خاصة"], ["legal", "شرعية"], ["certified_general_special", "مصدقة عامة/خاصة"], ["executive", "تنفيذية"]].map(function (x) {
+        const p = getPricingForType(x[0], day);
+        return "<tr><td>" + x[1] + '</td><td class="num">' + money(p.agency) + '</td><td class="num">' + money(p.representative) + "</td></tr>";
+    }).join("");
+    const isManager = currentUser && currentUser.role === "manager";
+    return '<p class="qs-day"><b>' + escapeHTML(info.text) + "</b><span>" + escapeHTML(info.period) + "</span>" + (info.warn ? '<em class="date-warn">' + escapeHTML(info.warn) + "</em>" : "") + "</p>" +
+        '<table class="qs-prices"><thead><tr><th>النوع</th><th class="num">سعر الوكالة</th><th class="num">حصة الفرع</th></tr></thead><tbody>' + rows + "</tbody></table>" +
+        (isManager ? '<button type="button" class="link-btn" data-qs-go="pricesSection"><i class="ti ti-tag" aria-hidden="true"></i> مراجعة الأسعار</button>' : "");
+}
+
+function openRecordQuickStart() {
+    const modal = document.getElementById("recordModal");
+    const box = document.getElementById("modalContent");
+    if (!modal || !box) return;
+    const val = function (id) { return document.getElementById(id)?.value || ""; };
+    const day = val("recordDate") || todayDay();
+    const reps = repDefaults();
+    const offices = Array.from(new Set(auditedRecords().map(function (r) { return String(r.officeName || "").trim(); }).filter(Boolean))).sort(function (a, b) { return a.localeCompare(b, "ar"); });
+    const typeOpts = Object.keys(AGENCY_NAMES).map(function (t) { return '<option value="' + t + '"' + (t === recordDefaultType() ? " selected" : "") + ">" + AGENCY_NAMES[t] + "</option>"; }).join("");
+    box.innerHTML =
+        '<div class="quickstart" data-quickstart>' +
+        '<header class="qs-head"><span class="qs-icon"><i class="ti ti-file-plus" aria-hidden="true"></i></span><div><h2>سجل جديد</h2><p>البيانات الأساسية في خطوة واحدة، ثم تبدأ إدخال الوكالات مباشرة.</p></div></header>' +
+        '<div class="qs-grid">' +
+            '<section class="qs-main">' +
+                '<label class="input-group"><span>رقم السجل</span><input type="text" inputmode="numeric" data-num="int" id="qsNumber" autocomplete="off" value="' + escapeHTML(val("recordNumber")) + '"></label>' +
+                '<div class="input-group qs-date"><span>تاريخ السجل</span><input type="date" lang="en-GB" dir="ltr" id="qsDate" value="' + escapeHTML(day) + '">' +
+                    '<div class="date-quick"><button type="button" class="date-chip" data-date-shift="0">اليوم</button><button type="button" class="date-chip" data-date-shift="-1">أمس</button><button type="button" class="date-chip" data-date-shift="-2">قبل يومين</button></div></div>' +
+                '<label class="input-group"><span>المندوب</span><input type="text" id="qsRep" list="qsReps" autocomplete="off" value="' + escapeHTML(val("representativeName")) + '"><datalist id="qsReps">' +
+                    Object.keys(reps).sort(function (a, b) { return a.localeCompare(b, "ar"); }).map(function (n) { return '<option value="' + escapeHTML(n) + '">'; }).join("") + "</datalist></label>" +
+                '<label class="input-group"><span>المكتب</span><input type="text" id="qsOffice" list="qsOffices" autocomplete="off" value="' + escapeHTML(val("officeName")) + '"><datalist id="qsOffices">' +
+                    offices.map(function (n) { return '<option value="' + escapeHTML(n) + '">'; }).join("") + "</datalist></label>" +
+                '<div class="qs-row2">' +
+                    '<label class="input-group"><span>نوع المندوب</span><select id="qsRepType"><option value="internal">داخلي</option><option value="external"' + (val("representativeType") === "external" ? " selected" : "") + ">خارجي (مع بدل انتقال)</option></select></label>" +
+                    '<label class="input-group"><span>النوع الغالب في السجل</span><select id="qsDefType">' + typeOpts + "</select></label>" +
+                "</div>" +
+                '<p class="qs-autofill field-hint" id="qsAutofill" hidden></p>' +
+            "</section>" +
+            '<aside class="qs-side">' +
+                '<h3><i class="ti ti-calendar-dollar" aria-hidden="true"></i> الأسعار لهذا التاريخ</h3><div id="qsPrices">' + quickStartPricesHTML(day) + "</div>" +
+                '<h3><i class="ti ti-printer" aria-hidden="true"></i> التقرير</h3>' + reportReadinessHTML() +
+            "</aside>" +
+        "</div>" +
+        '<footer class="qs-foot">' +
+            '<label class="cr-check"><input type="checkbox" id="qsDontShow"> لا تعرض هذه الشاشة عند كل سجل جديد</label>' +
+            '<span class="qs-actions"><button type="button" class="secondary-btn" data-qs="skip">تخطي</button>' +
+            '<button type="button" class="primary-btn" data-qs="start"><i class="ti ti-arrow-left" aria-hidden="true"></i> ابدأ إدخال الوكالات <kbd class="kbd-hint">Ctrl + Enter</kbd></button></span>' +
+        "</footer></div>";
+    modal.classList.remove("hidden");
+    document.querySelectorAll("[data-quickstart] .date-chip").forEach(function (b) { b.classList.toggle("is-on", shiftDay(todayDay(), Number(b.dataset.dateShift)) === day); });
+    setTimeout(function () { (document.getElementById(val("recordNumber") ? "qsRep" : "qsNumber"))?.focus(); }, 50);
+}
+
+/* تطبيق الشاشة السريعة على النموذج */
+function applyRecordQuickStart(skip) {
+    if (document.getElementById("qsDontShow")?.checked) {
+        try { localStorage.setItem(QUICKSTART_PREF_KEY, "off"); } catch (e) {}
+        notify("لن تظهر الشاشة السريعة مرة أخرى — تُفعَّل من «الإدارة ← تخصيص الواجهة».", "info", 5000);
+    }
+    if (!skip) {
+        const set = function (id, v, ev) { const el = document.getElementById(id); if (!el || v === undefined) return; el.value = v; el.dispatchEvent(new Event(ev || "input", { bubbles: true })); };
+        const q = function (id) { return (document.getElementById(id)?.value || "").trim(); };
+        set("recordNumber", normalizeDigits(q("qsNumber")));
+        if (q("qsDate")) set("recordDate", q("qsDate"), "change");
+        set("officeName", q("qsOffice"));
+        set("representativeName", q("qsRep"));
+        set("representativeType", q("qsRepType") || "internal", "change");
+        set("recordDefaultType", q("qsDefType"), "change");
+        if (typeof saveRecordDraft === "function") saveRecordDraft();
+    }
+    closeRecordModal(true);
+    setTimeout(function () {
+        const target = skip ? "recordNumber" : "agencyNumber";
+        const el = document.getElementById(target);
+        if (el) { el.focus(); try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) {} }
+    }, 80);
+}
+
+document.addEventListener("click", function (event) {
+    const qs = event.target.closest && event.target.closest("[data-quickstart]");
+    if (!qs) return;
+    const btn = event.target.closest("[data-qs]");
+    if (btn) { applyRecordQuickStart(btn.dataset.qs === "skip"); return; }
+    const go = event.target.closest("[data-qs-go]");
+    if (go) { closeRecordModal(true); switchSection(go.dataset.qsGo); }
+});
+
+document.addEventListener("input", function (event) {
+    if (!event.target.closest || !event.target.closest("[data-quickstart]")) return;
+    if (event.target.id === "qsDate") {
+        const box = document.getElementById("qsPrices");
+        if (box && event.target.value) box.innerHTML = quickStartPricesHTML(event.target.value);
+        document.querySelectorAll("[data-quickstart] .date-chip").forEach(function (b) { b.classList.toggle("is-on", shiftDay(todayDay(), Number(b.dataset.dateShift)) === event.target.value); });
+    }
+    /* اختيار مندوب معروف: يُملأ مكتبه ونوعه من آخر سجل له (يمكن تعديلهما) */
+    if (event.target.id === "qsRep") {
+        const d = repDefaults()[event.target.value.trim()];
+        const note = document.getElementById("qsAutofill");
+        if (d) {
+            const office = document.getElementById("qsOffice");
+            if (office && !office.value.trim()) office.value = d.office;
+            const type = document.getElementById("qsRepType");
+            if (type) type.value = d.type;
+            if (d.defType && AGENCY_NAMES[d.defType]) { const dt = document.getElementById("qsDefType"); if (dt) dt.value = d.defType; }
+            if (note) { note.hidden = false; note.textContent = "مُلئ المكتب ونوع المندوب من آخر سجل لـ «" + event.target.value.trim() + "» — عدّلهما إن لزم."; }
+        } else if (note) note.hidden = true;
+    }
+});
+
+document.addEventListener("keydown", function (event) {
+    if (!document.querySelector("#modalContent [data-quickstart]") || document.getElementById("recordModal")?.classList.contains("hidden")) return;
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); applyRecordQuickStart(false); }
+}, true);
+
+/* فتحها تلقائياً: صفحة إنشاء سجل، نموذج فارغ تماماً، ليس تعديلاً */
+function maybeOpenRecordQuickStart() {
+    if (!quickStartEnabled() || navigator.webdriver) return;
+    if (!currentUser || currentUser.role === "viewer") return;
+    if (document.getElementById("editingRecordId")?.value || pendingAgencies.length) return;
+    if ((document.getElementById("recordNumber")?.value || "").trim() || (document.getElementById("representativeName")?.value || "").trim()) return;
+    if (!document.getElementById("recordModal")?.classList.contains("hidden")) return;
+    openRecordQuickStart();
+}
+
+window.openRecordQuickStart = openRecordQuickStart;
+
+/* =========================================================
 نصوص التقارير والترويسة في «التوقيعات والطباعة» (27/11/2026)
 ========================================================= */
 
@@ -19996,7 +20223,7 @@ onReady(function () {
     const seen = readUiPref(APP_VERSION_SEEN_KEY, "");
     writeUiPref(APP_VERSION_SEEN_KEY, APP_VERSION);
     if (!seen || seen === APP_VERSION || !currentUser) return;
-    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>تقرير السجل يبدأ ببيان رسمي (استدراك النقص، أو خلوّ السجل من النقص) بنصوص وترويسة وشعار تُعدَّل من «التوقيعات والطباعة» ومرسل إليه لكل سجل، و«النوع الغالب في السجل» لكل سجل جديد، و«الأقسام المطبوعة» لاختيار ما يُطبع من تقرير السجل والتقرير العام، وفي التقرير العام: بدل الانتقال والإضافات والطوابع الناقصة حسب السجل. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
+    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>تقرير السجل يبدأ ببيان رسمي (استدراك النقص، أو خلوّ السجل من النقص) بنصوص وترويسة وشعار تُعدَّل من «التوقيعات والطباعة» ومرسل إليه لكل سجل، و«النوع الغالب في السجل» لكل سجل جديد، وشاشة سريعة عند إنشاء سجل (مع «تخطي») وأزرار التاريخ اليوم / أمس، و«الأقسام المطبوعة» لاختيار ما يُطبع من تقرير السجل والتقرير العام، وفي التقرير العام: بدل الانتقال والإضافات والطوابع الناقصة حسب السجل. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
 });
 
 window.exportAuditTable = exportAuditTable;

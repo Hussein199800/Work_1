@@ -8929,3 +8929,109 @@ tr.is-recovered.is-selected td {
 .logo-controls b { color: var(--heading); }
 #rtLogoPick[hidden] { display: none; }
 #rtLogoPick { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ================= ضبط التاريخ والشاشة السريعة (27/11/2026) ================= */
+.date-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+.date-chip {
+    min-height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.date-chip:hover { border-color: var(--accent); color: var(--heading); }
+.date-chip.is-on { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.date-chip:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.date-hint { display: block; margin-top: 4px; line-height: 1.6; }
+.date-warn { color: #b7791f; font-weight: 700; font-style: normal; }
+[data-theme="dark"] .date-warn { color: #f2c879; }
+
+.page-title .qs-open-btn { margin-inline-start: auto; align-self: center; }
+.page-title .qs-open-btn + .recovered-add-btn.page-title-action { margin-inline-start: 8px; }
+
+/* الشاشة السريعة: بطاقة هادئة بأسلوب Apple */
+.quickstart { display: grid; gap: 16px; }
+
+.qs-head { display: flex; align-items: center; gap: 14px; }
+.qs-head h2 { font-size: var(--fs-2xl, 1.6rem); color: var(--heading); line-height: 1.3; }
+.qs-head p { color: var(--text-2); font-size: var(--fs-sm); }
+
+.qs-icon {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    border-radius: 14px;
+    background: var(--grad-primary, var(--accent));
+    color: #ffffff;
+    font-size: 1.4rem;
+    flex-shrink: 0;
+}
+
+.qs-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; }
+.qs-main { display: grid; gap: 10px; align-content: start; }
+.qs-row2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.qs-main .input-group > span { font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
+
+.qs-side {
+    padding: 14px;
+    border-radius: var(--r-lg);
+    border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--panel) 4%, var(--surface));
+    display: grid;
+    gap: 8px;
+    align-content: start;
+}
+
+.qs-side h3 { display: flex; align-items: center; gap: 6px; font-size: var(--fs-md); color: var(--heading); margin-top: 4px; }
+.qs-day { display: grid; gap: 2px; font-size: var(--fs-sm); }
+.qs-day span { color: var(--text-2); font-size: var(--fs-xs); }
+
+.qs-prices { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); }
+.qs-prices th, .qs-prices td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: start; }
+.qs-prices th { color: var(--text-2); font-weight: 600; }
+.qs-prices .num { text-align: left; direction: ltr; font-weight: 700; color: var(--heading); }
+
+.qs-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--fs-xs); }
+.qs-checks li { display: flex; gap: 6px; align-items: flex-start; line-height: 1.5; }
+.qs-checks li.ok .ti { color: #2e8b57; }
+.qs-checks li.todo .ti { color: #b7791f; }
+.qs-checks li.info .ti { color: var(--text-2); }
+
+.qs-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+}
+
+.qs-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.qs-autofill { color: #2e6b4f; }
+
+@media screen and (prefers-reduced-motion: no-preference) {
+    .quickstart { animation: qsIn 0.28s var(--ease, ease-out); }
+    @keyframes qsIn { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: none; } }
+}
+
+@media (max-width: 1024px) {
+    .qs-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+    .qs-row2 { grid-template-columns: minmax(0, 1fr); }
+    .qs-actions { width: 100%; }
+    .qs-actions button { flex: 1; }
+    .page-title .qs-open-btn span { display: none; }
+}
