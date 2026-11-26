@@ -8885,3 +8885,47 @@ tr.is-recovered.is-selected td {
 @media (max-width: 640px) {
     .report-texts-form { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* الشعار في ترويسة التقارير (27/11/2026) */
+.doc-head .doc-logo {
+    width: 56px;
+    height: 56px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.doc-head.no-logo { grid-template-columns: 1fr auto; }
+@media (max-width: 640px) { .doc-head.no-logo { grid-template-columns: 1fr; } }
+@media print { #printRoot .doc-head .doc-logo { width: 52px; height: 52px; } }
+
+.logo-setting {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: 12px 0 6px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+
+.logo-preview {
+    width: 72px;
+    height: 72px;
+    display: grid;
+    place-items: center;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-md);
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.logo-preview img,
+.logo-preview svg { max-width: 64px; max-height: 64px; width: 64px; height: 64px; object-fit: contain; }
+.logo-preview .logo-none { font-size: var(--fs-xs); color: var(--text-2); text-align: center; }
+
+.logo-controls { display: grid; gap: 8px; }
+.logo-controls b { color: var(--heading); }
+#rtLogoPick[hidden] { display: none; }
+#rtLogoPick { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }

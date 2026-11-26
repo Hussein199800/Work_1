@@ -81,7 +81,7 @@ function isTransportEligible(type) {
 const NUMBER_LOCALE = "ar-SY-u-nu-latn";
 
 /* رقم الإصدار (24/11/2026): يزداد مع كل نشر على main؛ يظهر في «حول الموقع» ونافذة «ما الجديد» */
-const APP_VERSION = "2026.11.26.2";
+const APP_VERSION = "2026.11.27.1";
 const APP_VERSION_SEEN_KEY = "audit_ui_seen_version";
 
 /* =========================================================
@@ -500,6 +500,11 @@ const DEFAULT_REPORT_TEXTS = {
 /* الحقول التي يعود فارغها إلى الافتراضي (لا يصح أن تكون فارغة) */
 const REPORT_TEXTS_REQUIRED = ["org", "auditor", "shortageTitle", "cleanTitle"];
 
+/* الشعار في ترويسة التقارير (27/11/2026، إضافي): logoMode = "default" (شعار البرنامج) | "custom" (صورة من الجهاز) | "none";
+   logo = صورة مصغّرة (data:image/…) بحد أقصى LOGO_MAX_CHARS حتى تبقى خفيفة في النسخ الاحتياطية والمزامنة */
+const LOGO_MODES = ["default", "custom", "none"];
+const LOGO_MAX_CHARS = 400000;
+
 function normalizeReportTexts(value) {
     const v = value && typeof value === "object" ? value : {};
     const out = {};
@@ -508,7 +513,18 @@ function normalizeReportTexts(value) {
         const t = has ? v[k].trim() : DEFAULT_REPORT_TEXTS[k];
         out[k] = (!t && REPORT_TEXTS_REQUIRED.indexOf(k) !== -1) ? DEFAULT_REPORT_TEXTS[k] : t;
     });
+    const logo = typeof v.logo === "string" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(v.logo) && v.logo.length <= LOGO_MAX_CHARS ? v.logo : "";
+    out.logo = logo;
+    out.logoMode = LOGO_MODES.indexOf(v.logoMode) !== -1 ? v.logoMode : "default";
+    if (out.logoMode === "custom" && !logo) out.logoMode = "default";
     return out;
+}
+
+/* شعار الترويسة حسب الإعداد */
+function reportLogoHTML() {
+    if (reportTexts.logoMode === "none") return "";
+    if (reportTexts.logoMode === "custom" && reportTexts.logo) return '<img class="doc-logo" src="' + reportTexts.logo + '" alt="الشعار">';
+    return sealSVG();
 }
 
 let reportTexts = normalizeReportTexts(loadData(REPORT_TEXTS_KEY, null));
@@ -2010,6 +2026,8 @@ function syncPersonalize() {
     check("prefDensity", readUiPref(DENSITY_KEY, "comfortable"));
     const start = document.getElementById("prefStart");
     if (start) start.value = startSectionPref();
+    const defType = document.getElementById("prefDefaultType");
+    if (defType) defType.value = preferredNewRecordType();
     const font = document.getElementById("prefFontValue");
     if (font) font.textContent = Math.round(currentUiFontScale() * 100) + "%";
     const rp = reportPrefs();
@@ -2028,6 +2046,14 @@ document.getElementById("personalizeCard")?.addEventListener("change", function 
     if (t.name === "prefTheme" && t.value !== currentTheme()) toggleTheme();
     if (t.name === "prefDensity") { writeUiPref(DENSITY_KEY, t.value); applyDensity(); }
     if (t.id === "prefStart") writeUiPref(START_SECTION_KEY, t.value);
+    if (t.id === "prefDefaultType") {
+        writeUiPref(DEFAULT_TYPE_PREF_KEY, t.value);
+        /* سجل جديد فارغ مفتوح الآن: يأخذ الاختيار مباشرة */
+        if (!document.getElementById("editingRecordId")?.value && !pendingAgencies.length) {
+            setFormDefaultType(t.value);
+            document.getElementById("recordDefaultType")?.dispatchEvent(new Event("change"));
+        }
+    }
     if (t.id === "prefRecovery") saveReportPrefs({ recovery: t.checked });
     if (t.id === "prefSignatures") saveReportPrefs({ signatures: t.checked });
     syncPersonalize();
@@ -5372,8 +5398,9 @@ const typeInput =
 
 if (typeInput) {
 
+    /* النوع الغالب في السجل (بدل «خاصة» الثابت) */
     typeInput.value =
-        DEFAULT_AGENCY_TYPE;
+        recordDefaultType();
 
 }
 
@@ -6015,6 +6042,10 @@ recordForm.addEventListener(
             deduction:
                 getFormDeduction().amount > 0 ? getFormDeduction() : undefined,
 
+            /* النوع الغالب في السجل (إضافي، 27/11/2026): للرجوع إليه عند إضافة وكالات لاحقاً */
+            defaultAgencyType:
+                recordDefaultType(),
+
             createdAt:
                 oldRecord
                     ? oldRecord.createdAt
@@ -6250,6 +6281,7 @@ if (recordDateField) {
 setFormAuditors(lastAuditors());
 
 setFormRecordNote("");
+setFormDefaultType(preferredNewRecordType());
 
 setFormDeduction(null);
 
@@ -6339,6 +6371,47 @@ function getRecordNote(record) {
 function getFormRecordNote() {
     return (document.getElementById("recordNote")?.value || "").trim();
 }
+
+/*
+    النوع الغالب في السجل (27/11/2026، بطلب حسين: «السجل غالبيته عام أو ممكن شرعي»):
+    كل وكالة جديدة في النموذج تأخذه بدل «خاصة» الثابت. يُحفظ مع السجل كحقل إضافي
+    record.defaultAgencyType (للرجوع إليه عند تعديل السجل)، ولا يغيّر أي حساب.
+    السجل الجديد يبدأ بالنوع المختار في «تخصيص الواجهة» (audit_ui_default_agency_type).
+    ملاحظة: DEFAULT_AGENCY_TYPE يبقى كما هو لقراءة الوكالات القديمة بلا نوع.
+*/
+const DEFAULT_TYPE_PREF_KEY = "audit_ui_default_agency_type";
+
+function preferredNewRecordType() {
+    let v = "";
+    try { v = localStorage.getItem(DEFAULT_TYPE_PREF_KEY) || ""; } catch (e) {}
+    return AGENCY_NAMES[v] ? v : DEFAULT_AGENCY_TYPE;
+}
+
+function recordDefaultType() {
+    const v = document.getElementById("recordDefaultType")?.value;
+    return AGENCY_NAMES[v] ? v : preferredNewRecordType();
+}
+
+function setFormDefaultType(value) {
+    const el = document.getElementById("recordDefaultType");
+    if (el) el.value = AGENCY_NAMES[value] ? value : preferredNewRecordType();
+}
+
+/* تغيير النوع الغالب: الوكالة الجديدة في النموذج تأخذه فوراً (ما لم تكن وكالة مفتوحة للتعديل) */
+document.getElementById("recordDefaultType")?.addEventListener("change", function () {
+    if (!editingAgency) {
+        const typeInput = document.getElementById("agencyType");
+        if (typeInput) {
+            typeInput.value = recordDefaultType();
+            try { syncTransportField(); } catch (e) { try { syncChoiceChips(); } catch (e2) {} }
+            try { renderAgencyPricePeriod(); } catch (e) {}
+            try { updatePreview(); } catch (e) {}
+        }
+    }
+    if (typeof saveRecordDraft === "function") saveRecordDraft();
+});
+
+onReady(function () { const el = document.getElementById("recordDefaultType"); if (el && !document.getElementById("editingRecordId")?.value) setFormDefaultType(preferredNewRecordType()); });
 
 function setFormRecordNote(text) {
     const el = document.getElementById("recordNote");
@@ -8914,6 +8987,7 @@ if (recordDateInput) {
 setFormAuditors(getRecordAuditors(record));
 
 setFormRecordNote(getRecordNote(record));
+setFormDefaultType(record.defaultAgencyType);
 
 setFormDeduction(record.deduction);
 
@@ -9526,8 +9600,8 @@ function todayArabic() {
 }
 
 function docLetterhead(title, subtitle) {
-    return '<header class="doc-head">' +
-        sealSVG() +
+    return '<header class="doc-head' + (reportTexts.logoMode === "none" ? " no-logo" : "") + '">' +
+        reportLogoHTML() +
         '<div class="doc-org"><strong>' + escapeHTML(reportTexts.org) + "</strong>" + (reportTexts.unit ? "<span>" + escapeHTML(reportTexts.unit) + "</span>" : "") + "</div>" +
         '<div class="doc-title"><h2>' + title + "</h2><span>" + (subtitle || ("تاريخ الإصدار: " + todayArabic())) + "</span></div>" +
         "</header>";
@@ -11446,12 +11520,29 @@ function exportReportsToPDF() {
 نصوص التقارير والترويسة في «التوقيعات والطباعة» (27/11/2026)
 ========================================================= */
 
+/* الشعار المختار في النموذج قبل الحفظ */
+let reportLogoDraft = null;
+
 function renderReportTextsForm(source) {
     const t = source || reportTexts;
     Object.keys(DEFAULT_REPORT_TEXTS).forEach(function (k) {
         const el = document.getElementById("rt_" + k);
         if (el) { el.value = t[k] || ""; el.placeholder = DEFAULT_REPORT_TEXTS[k]; }
     });
+    reportLogoDraft = { mode: t.logoMode || "default", logo: t.logo || "" };
+    syncLogoForm();
+}
+
+function syncLogoForm() {
+    const d = reportLogoDraft || { mode: "default", logo: "" };
+    document.querySelectorAll('input[name="rtLogoMode"]').forEach(function (r) { r.checked = r.value === d.mode; });
+    const prev = document.getElementById("rtLogoPreview");
+    if (prev) {
+        prev.innerHTML = d.mode === "none" ? '<span class="logo-none">بدون شعار</span>'
+            : d.mode === "custom" && d.logo ? '<img src="' + d.logo + '" alt="الشعار المختار">'
+            : sealSVG();
+    }
+    document.getElementById("rtLogoPick")?.toggleAttribute("hidden", d.mode !== "custom");
 }
 
 function readReportTextsForm() {
@@ -11460,8 +11551,57 @@ function readReportTextsForm() {
         const el = document.getElementById("rt_" + k);
         v[k] = el ? el.value : reportTexts[k];
     });
+    const d = reportLogoDraft || { mode: reportTexts.logoMode, logo: reportTexts.logo };
+    v.logoMode = d.mode;
+    v.logo = d.logo;
     return normalizeReportTexts(v);
 }
+
+/* تصغير الصورة المختارة إلى 320 بكسل كحد أقصى (PNG للشفافية، وJPEG إن بقيت كبيرة) */
+function shrinkLogo(file) {
+    return new Promise(function (resolve, reject) {
+        if (!file || !/^image\//.test(file.type)) { reject(new Error("اختر ملف صورة (PNG أو JPG).")); return; }
+        const reader = new FileReader();
+        reader.onerror = function () { reject(new Error("تعذرت قراءة الملف.")); };
+        reader.onload = function () {
+            const img = new Image();
+            img.onerror = function () { reject(new Error("الملف ليس صورة صالحة.")); };
+            img.onload = function () {
+                const max = 320;
+                const k = Math.min(1, max / Math.max(img.width, img.height));
+                const c = document.createElement("canvas");
+                c.width = Math.max(1, Math.round(img.width * k));
+                c.height = Math.max(1, Math.round(img.height * k));
+                c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+                let url = c.toDataURL("image/png");
+                if (url.length > 150000) url = c.toDataURL("image/jpeg", 0.85);
+                if (url.length > LOGO_MAX_CHARS) { reject(new Error("الصورة كبيرة جداً حتى بعد التصغير.")); return; }
+                resolve(url);
+            };
+            img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+document.getElementById("reportTextsCard")?.addEventListener("change", function (event) {
+    const t = event.target;
+    if (t.name === "rtLogoMode") {
+        reportLogoDraft = Object.assign({}, reportLogoDraft, { mode: t.value });
+        syncLogoForm();
+        if (t.value === "custom" && !reportLogoDraft.logo) document.getElementById("rtLogoFile")?.click();
+    }
+    if (t.id === "rtLogoFile" && t.files && t.files[0]) {
+        shrinkLogo(t.files[0]).then(function (url) {
+            reportLogoDraft = { mode: "custom", logo: url };
+            syncLogoForm();
+            notify("اختير الشعار — اضغط «حفظ النصوص» لاعتماده.", "info");
+        }, function (error) {
+            notify(escapeHTML(error.message || error), "error");
+        });
+        t.value = "";
+    }
+});
 
 document.getElementById("saveReportTextsBtn")?.addEventListener("click", function () {
     if (!currentUser || currentUser.role !== "manager") { notify("حفظ النصوص للمدير فقط.", "error"); return; }
@@ -19856,7 +19996,7 @@ onReady(function () {
     const seen = readUiPref(APP_VERSION_SEEN_KEY, "");
     writeUiPref(APP_VERSION_SEEN_KEY, APP_VERSION);
     if (!seen || seen === APP_VERSION || !currentUser) return;
-    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>تقرير السجل يبدأ ببيان رسمي (استدراك النقص، أو خلوّ السجل من النقص) بنصوص وترويسة تُعدَّل من «التوقيعات والطباعة» ومرسل إليه لكل سجل، و«الأقسام المطبوعة» لاختيار ما يُطبع من تقرير السجل والتقرير العام، وفي التقرير العام: بدل الانتقال والإضافات والطوابع الناقصة حسب السجل. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
+    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>تقرير السجل يبدأ ببيان رسمي (استدراك النقص، أو خلوّ السجل من النقص) بنصوص وترويسة وشعار تُعدَّل من «التوقيعات والطباعة» ومرسل إليه لكل سجل، و«النوع الغالب في السجل» لكل سجل جديد، و«الأقسام المطبوعة» لاختيار ما يُطبع من تقرير السجل والتقرير العام، وفي التقرير العام: بدل الانتقال والإضافات والطوابع الناقصة حسب السجل. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
 });
 
 window.exportAuditTable = exportAuditTable;
@@ -19895,6 +20035,7 @@ function saveRecordDraft() {
             auditors: getFormAuditors(),
             recordNote: getFormRecordNote(),
             deduction: getFormDeduction(),
+            defaultAgencyType: recordDefaultType(),
             pendingAgencies: pendingAgencies,
             savedAt: new Date().toISOString()
         };
@@ -19992,6 +20133,7 @@ function importRecordDraftFromFile(file) {
             setValue("recordDate", data.recordDate || todayDay());
             if (Array.isArray(data.auditors)) setFormAuditors(data.auditors);
             setFormRecordNote(data.recordNote || "");
+            setFormDefaultType(data.defaultAgencyType);
             setFormDeduction(data.deduction || null);
             updateRepresentativeTypeHint();
 
@@ -20108,6 +20250,7 @@ function applyRecordDraft(draft) {
     setValue("recordDate", draft.recordDate || todayDay());
     if (Array.isArray(draft.auditors)) setFormAuditors(draft.auditors);
     setFormRecordNote(draft.recordNote || "");
+    setFormDefaultType(draft.defaultAgencyType);
     setFormDeduction(draft.deduction || null);
     updateRepresentativeTypeHint();
 
