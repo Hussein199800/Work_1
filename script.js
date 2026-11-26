@@ -81,7 +81,7 @@ function isTransportEligible(type) {
 const NUMBER_LOCALE = "ar-SY-u-nu-latn";
 
 /* رقم الإصدار (24/11/2026): يزداد مع كل نشر على main؛ يظهر في «حول الموقع» ونافذة «ما الجديد» */
-const APP_VERSION = "2026.11.24.3";
+const APP_VERSION = "2026.11.26.2";
 const APP_VERSION_SEEN_KEY = "audit_ui_seen_version";
 
 /* =========================================================
@@ -274,7 +274,7 @@ const DATA_SETTINGS_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations", "audit_audit_committee"
+    "audit_fee_destinations", "audit_audit_committee", "audit_report_texts"
 ];
 let settingsLoadFailed = [];
 const settingsCorruptRaw = {};
@@ -348,7 +348,7 @@ if ([
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_records", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations", "audit_audit_committee"
+    "audit_fee_destinations", "audit_audit_committee", "audit_report_texts"
 ].indexOf(key) !== -1) {
     try { markDataChanged(); } catch (e) {}
     /* قبل تحميل قسم Firebase يرمي (منطقة TDZ) ويُتجاهل: حفظ الإعدادات عند فتح الصفحة ليس تعديلاً */
@@ -477,6 +477,41 @@ function auditSigners(c) {
 }
 
 let auditCommittee = normalizeAuditCommittee(loadData(AUDIT_COMMITTEE_KEY, null));
+
+/*
+    نصوص التقارير والترويسة (27/11/2026، بطلب حسين: «التخصيص حتى للترويسات، والتقرير في أريحية بكل شيء»).
+    إعداد مشترك (نسخة احتياطية + مزامنة)، إضافي؛ الغائب = الافتراضي.
+    الحقل الفارغ في سطر اختياري (المرسل إليه، التحية، الخاتمة، الجهة المُصدِرة) = السطر لا يُطبع؛
+    والعنوان الفارغ يعود إلى الافتراضي.
+*/
+const REPORT_TEXTS_KEY = "audit_report_texts";
+const DEFAULT_REPORT_TEXTS = {
+    org: "نقابة المحامين",
+    unit: "فرع إدلب — مكتب المحاسبة",
+    to: "السادة مجلس النقابة المركزية للمحامين المحترمين،",
+    greeting: "تحية طيبة وبعد،",
+    auditor: "مكتب المحاسبة في الفرع",
+    shortageTitle: "بيان استدراك النقص",
+    cleanTitle: "بيان خلوّ السجل من النقص",
+    addressedTo: "مرفوع إلى النقابة المركزية",
+    closing: "وتفضّلوا بقبول فائق الاحترام والتقدير.",
+    from: "فرع إدلب — مكتب المحاسبة"
+};
+/* الحقول التي يعود فارغها إلى الافتراضي (لا يصح أن تكون فارغة) */
+const REPORT_TEXTS_REQUIRED = ["org", "auditor", "shortageTitle", "cleanTitle"];
+
+function normalizeReportTexts(value) {
+    const v = value && typeof value === "object" ? value : {};
+    const out = {};
+    Object.keys(DEFAULT_REPORT_TEXTS).forEach(function (k) {
+        const has = typeof v[k] === "string";
+        const t = has ? v[k].trim() : DEFAULT_REPORT_TEXTS[k];
+        out[k] = (!t && REPORT_TEXTS_REQUIRED.indexOf(k) !== -1) ? DEFAULT_REPORT_TEXTS[k] : t;
+    });
+    return out;
+}
+
+let reportTexts = normalizeReportTexts(loadData(REPORT_TEXTS_KEY, null));
 
 let feeDestinations = (function () {
     const saved = loadData(FEE_DESTINATIONS_KEY, null);
@@ -2387,6 +2422,7 @@ if (id === "devlogSection") {
 if (id === "printSettingsSection") {
 
     renderAuditCommitteeForm();
+    renderReportTextsForm();
 
 }
 
@@ -9492,7 +9528,7 @@ function todayArabic() {
 function docLetterhead(title, subtitle) {
     return '<header class="doc-head">' +
         sealSVG() +
-        '<div class="doc-org"><strong>نقابة المحامين</strong><span>فرع إدلب — مكتب المحاسبة</span></div>' +
+        '<div class="doc-org"><strong>' + escapeHTML(reportTexts.org) + "</strong>" + (reportTexts.unit ? "<span>" + escapeHTML(reportTexts.unit) + "</span>" : "") + "</div>" +
         '<div class="doc-title"><h2>' + title + "</h2><span>" + (subtitle || ("تاريخ الإصدار: " + todayArabic())) + "</span></div>" +
         "</header>";
 }
@@ -9539,9 +9575,90 @@ function reportPrefs() {
         recovery: p.recovery !== false,
         /* التوقيعات (لجنة التدقيق) في التقرير المختصر والمفصل: تُختار وقت الطباعة (ظاهرة افتراضياً).
            committeeSign القديم لم يعد مستعملاً */
-        signatures: p.signatures !== false
+        signatures: p.signatures !== false,
+        /* أقسام التقرير المطبوعة (26/11/2026، بطلب حسين): { record: {key: bool}, general: {key: bool} } — الغائب = يُطبع */
+        sections: p.sections && typeof p.sections === "object" ? p.sections : {}
     };
 }
+
+/* أقسام تقرير السجل والتقرير العام: المفتاح، الاسم، وفي أي نمط يظهر */
+const REPORT_SECTIONS = {
+    record: [
+        { key: "statement", name: "البيان المرفوع إلى النقابة المركزية" },
+        { key: "summary", name: "الملخص والمبالغ" },
+        { key: "types", name: "الوكالات حسب النوع" },
+        { key: "transport", name: "بدل الانتقال" },
+        { key: "agencies", name: "تفاصيل الوكالات", mode: "detailed" },
+        { key: "missing", name: "الطوابع الناقصة", mode: "summary" },
+        { key: "additions", name: "الإضافات", mode: "summary" },
+        { key: "notes", name: "ملاحظات الوكالات", mode: "summary" },
+        { key: "committees", name: "حصص لجنتي الإسعاف والتعاون" },
+        { key: "signatures", name: "توقيعات لجنة التدقيق" }
+    ],
+    general: [
+        { key: "summary", name: "الملخص والمبالغ" },
+        { key: "types", name: "الوكالات حسب النوع" },
+        { key: "missing", name: "الطوابع الناقصة (المجموع)" },
+        { key: "missingByRecord", name: "الطوابع الناقصة حسب السجل" },
+        { key: "transport", name: "بدل الانتقال (المجموع)" },
+        { key: "transportByRecord", name: "بدل الانتقال حسب السجل" },
+        { key: "additionsByRecord", name: "الإضافات حسب السجل" },
+        { key: "committees", name: "حصص لجنتي الإسعاف والتعاون" },
+        { key: "reps", name: "المطلوب من كل مندوب" },
+        { key: "matched", name: "الوكالات المطابقة للتصفية" },
+        { key: "signatures", name: "توقيعات لجنة التدقيق" }
+    ]
+};
+
+/* هل القسم مختار للطباعة؟ البيان والتوقيعات في تقرير السجل يتبعان التفضيلين القديمين recovery / signatures */
+function reportSectionOn(scope, key) {
+    const prefs = reportPrefs();
+    if (scope === "record" && key === "statement") return prefs.recovery;
+    if (scope === "record" && key === "signatures") return prefs.signatures;
+    const sc = prefs.sections[scope] || {};
+    return sc[key] !== false;
+}
+
+function setReportSection(scope, key, on) {
+    if (scope === "record" && key === "statement") { saveReportPrefs({ recovery: !!on }); return; }
+    if (scope === "record" && key === "signatures") { saveReportPrefs({ signatures: !!on }); return; }
+    const prefs = reportPrefs();
+    const sections = JSON.parse(JSON.stringify(prefs.sections || {}));
+    sections[scope] = sections[scope] || {};
+    sections[scope][key] = !!on;
+    saveReportPrefs({ sections: sections });
+}
+
+/* لوحة «الأقسام المطبوعة»: مربعات اختيار، وكل تغيير يعيد رسم التقرير */
+function reportSectionsPanelHTML(scope, mode, onchangeJS) {
+    const list = REPORT_SECTIONS[scope].filter(function (s) { return !s.mode || !mode || s.mode === mode; });
+    const onCount = list.filter(function (s) { return reportSectionOn(scope, s.key); }).length;
+    return '<details class="report-sections no-print"><summary><i class="ti ti-checklist" aria-hidden="true"></i> الأقسام المطبوعة <b>' + onCount + " من " + list.length + "</b></summary>" +
+        '<div class="report-sections-body">' +
+        list.map(function (s) {
+            return '<label class="cr-check"><input type="checkbox" data-report-section="' + s.key + '"' + (reportSectionOn(scope, s.key) ? " checked" : "") +
+                ' onchange="' + onchangeJS.replace(/__KEY__/g, s.key) + '"> ' + s.name + "</label>";
+        }).join("") +
+        '<div class="report-sections-actions"><button type="button" class="act-btn" onclick="' + onchangeJS.replace(/__KEY__/g, "__all__").replace("this.checked", "true") + '">الكل</button>' +
+        '<button type="button" class="act-btn" onclick="' + onchangeJS.replace(/__KEY__/g, "__all__").replace("this.checked", "false") + '">لا شيء</button></div>' +
+        "</div></details>";
+}
+
+function toggleRecordSection(id, mode, key, on) {
+    if (key === "__all__") REPORT_SECTIONS.record.forEach(function (s) { setReportSection("record", s.key, on); });
+    else setReportSection("record", key, on);
+    showFinalRecordReport(id, mode, true);
+}
+
+function toggleGeneralSection(key, on) {
+    if (key === "__all__") REPORT_SECTIONS.general.forEach(function (s) { setReportSection("general", s.key, on); });
+    else setReportSection("general", key, on);
+    const box = document.getElementById("generalSectionsBox");
+    if (box) { const open = box.querySelector("details")?.open; box.innerHTML = reportSectionsPanelHTML("general", "", "toggleGeneralSection('__KEY__', this.checked)"); if (open) box.querySelector("details").open = true; }
+}
+
+window.toggleRecordSection = toggleRecordSection;
+window.toggleGeneralSection = toggleGeneralSection;
 
 function saveReportPrefs(changes) {
     try { localStorage.setItem(REPORT_PREFS_KEY, JSON.stringify(Object.assign(reportPrefs(), changes))); } catch (e) {}
@@ -9580,12 +9697,7 @@ function reportToolsHTML(record, mode, hasRecovery) {
             '<button type="button" class="secondary-btn" title="تكبير الخط" aria-label="تكبير الخط"' + (prefs.scale >= REPORT_SCALE_MAX ? " disabled" : "") +
                 " onclick=\"changeReportScale(1, '" + id + "', '" + mode + "')\">A+</button>" +
         "</span>" +
-        (hasRecovery
-            ? '<label class="report-toggle"><input type="checkbox"' + (prefs.recovery ? " checked" : "") +
-                " onchange=\"toggleReportRecovery('" + id + "', '" + mode + "', this.checked)\"> مع بيان استدراك النقص</label>"
-            : "") +
-        '<label class="report-toggle"><input type="checkbox"' + (prefs.signatures ? " checked" : "") +
-            " onchange=\"toggleCommitteeSign('" + id + "', '" + mode + "', this.checked)\"> مع توقيعات لجنة التدقيق</label>" +
+        reportSectionsPanelHTML("record", mode, "toggleRecordSection('" + id + "', '" + mode + "', '__KEY__', this.checked)") +
         "</span>";
 }
 
@@ -9602,7 +9714,9 @@ function getRecordRecovery(record) {
     return {
         centralReceipt: str(r.centralReceipt), centralDate: str(r.centralDate),
         branchReceipt: str(r.branchReceipt), branchDate: str(r.branchDate),
-        text: str(r.text)
+        text: str(r.text),
+        /* المرسل إليه لهذا السجل فقط (27/11/2026، إضافي): الفارغ = النص من «نصوص التقارير» */
+        to: str(r.to)
     };
 }
 
@@ -9666,7 +9780,12 @@ function recoveryEditorHTML(record, mode, groups, rec) {
             '<input type="' + (type || "text") + '" id="rcv_' + key + '" value="' + escapeHTML(value) + '"' +
             (type === "date" ? ' lang="en-GB" dir="ltr"' : ' autocomplete="off"') + "></label>";
     };
-    let html = '<div class="recovery-editor no-print" data-record-id="' + id + '"><h4><i class="ti ti-receipt" aria-hidden="true"></i> بيانات الإيصالات لبيان استدراك النقص</h4><div class="recovery-fields">';
+    const shortage = groups.central.value + groups.branch.value + groups.unknown.value > 0;
+    let html = '<div class="recovery-editor no-print" data-record-id="' + id + '"><h4><i class="ti ti-receipt" aria-hidden="true"></i> ' +
+        (shortage ? "بيانات البيان: الإيصالات والمرسل إليه" : "بيانات البيان: المرسل إليه والفقرة الإضافية") + "</h4>" +
+        '<label class="input-group"><span>المرسل إليه لهذا السجل <small>(فارغ = «' + escapeHTML(reportTexts.to || "بدون مرسل إليه") + '» من نصوص التقارير)</small></span>' +
+        '<input type="text" id="rcv_to" autocomplete="off" value="' + escapeHTML(rec.to || "") + '" placeholder="' + escapeHTML(reportTexts.to) + '"></label>' +
+        '<div class="recovery-fields">';
     if (groups.central.value > 0) {
         html += field("centralReceipt", "إيصال النقابة المركزية — الرقم", rec.centralReceipt) + field("centralDate", "تاريخه", rec.centralDate, "date");
     }
@@ -9675,75 +9794,102 @@ function recoveryEditorHTML(record, mode, groups, rec) {
     }
     html += '</div><label class="input-group"><span>فقرة إضافية (اختياري — تظهر في البيان)</span><textarea id="rcv_text" rows="2">' + escapeHTML(rec.text) + "</textarea></label>" +
         '<button type="button" class="primary-btn" onclick="saveRecordRecovery(\'' + id + "', '" + mode + '\')"><i class="ti ti-device-floppy"></i> حفظ بيانات البيان</button>' +
-        '<small class="field-hint">الخانات الفارغة تُطبع نقاطاً لتُكتب باليد.</small></div>';
+        (shortage ? '<small class="field-hint">خانات الإيصالات الفارغة تُطبع نقاطاً لتُكتب باليد.</small>' : "") + "</div>";
     return html;
 }
 
+/*
+    البيان المرفوع إلى النقابة المركزية (26/11/2026، بطلب حسين): الصفحة الأولى من تقرير السجل،
+    سواء وُجد نقص أم لا، لأن النقابة المركزية تحتاج أن تعرف في الحالتين:
+    - فيه نقص: «بيان استدراك النقص» — قيمة النقص وتفصيله حسب الجهة، واستيفاؤه من المندوب وسداده بإيصال.
+    - لا نقص: «بيان خلوّ السجل من النقص» — الوكالات مستوفية للطوابع والرسوم.
+    يُطبع حسب «الأقسام المطبوعة» (التفضيل القديم recovery). التوقيعات في آخر التقرير مرة واحدة.
+*/
 function recoveryPageHTML(record, stats, mode, forPrint) {
 
     const groups = recoveryGroups(stats);
     const total = groups.central.value + groups.branch.value + groups.unknown.value;
-    if (total <= 0) return "";
+    const hasShortage = total > 0;
 
-    const included = reportPrefs().recovery;
+    const included = reportSectionOn("record", "statement");
     if (forPrint && !included) return "";
 
     const rec = getRecordRecovery(record);
     const canEdit = !forPrint && currentUser && currentUser.role !== "viewer";
     const blank = "(....................)";
     const val = function (v, date) { return v ? "<b>" + escapeHTML(date ? formatDay(v) : v) + "</b>" : blank; };
+    const repName = escapeHTML(String(record.representativeName || "").trim());
+    const activeCount = stats.active.length;
+    const pleadingRequired = stats.active.reduce(function (sum, a) { return sum + number(a.pleadingRequired); }, 0);
 
     let html = "";
     if (canEdit) html += recoveryEditorHTML(record, mode, groups, rec);
+    const T = reportTexts;
+    const toLine = rec.to || T.to;
 
-    html += '<section class="doc-recovery' + (included ? "" : " is-excluded no-print") + '">';
+    html += '<section class="doc-recovery doc-statement' + (hasShortage ? " has-shortage" : " no-shortage") + (included ? "" : " is-excluded no-print") + '">';
     if (!included) {
-        html += '<p class="recovery-excluded no-print"><i class="ti ti-eye-off" aria-hidden="true"></i> هذه الصفحة لن تُطبع ولن تدخل في ملف PDF (فعّل «مع بيان استدراك النقص» أعلاه).</p>';
+        html += '<p class="recovery-excluded no-print"><i class="ti ti-eye-off" aria-hidden="true"></i> هذا البيان لن يُطبع ولن يدخل في ملف PDF (فعّله من «الأقسام المطبوعة»).</p>';
     }
 
-    html += docLetterhead("بيان استدراك النقص", "ملحق بالسجل رقم " + escapeHTML(record.recordNumber) + " — تاريخ الإصدار: " + todayArabic());
+    html += docLetterhead(escapeHTML(hasShortage ? T.shortageTitle : T.cleanTitle),
+        (T.addressedTo ? escapeHTML(T.addressedTo) + " — " : "") + "ملحق بالسجل رقم " + escapeHTML(record.recordNumber) + " — تاريخ الإصدار: " + todayArabic());
 
-    html += '<div class="recovery-body">' +
+    const intro = (toLine ? '<p class="statement-to">' + escapeHTML(toLine) + "</p>" : "") + (T.greeting ? "<p>" + escapeHTML(T.greeting) + "</p>" : "") +
         "<p>بالإشارة إلى السجل رقم (<b>" + escapeHTML(record.recordNumber) + "</b>) العائد لمكتب «<b>" + escapeHTML(record.officeName) + "</b>»، " +
-        "المندوب «<b>" + escapeHTML(String(record.representativeName || "").trim()) + "</b>»، المؤرخ في <b>" + formatDay(getRecordDay(record)) + "</b>، " +
-        "وبعد تدقيقه من قِبل مكتب المحاسبة، تبيّن وجود نقص في الطوابع والرسوم المستحقة على وكالاته بلغت قيمته الإجمالية (<b>" + money(total) + "</b>). " +
-        "وقد استُوفيت هذه القيمة من المندوب نقداً، وسُدّدت لأصحاب الحق على النحو الآتي:</p>";
+        "والمقدَّم من المندوب «<b>" + repName + "</b>» بتاريخ <b>" + formatDay(getRecordDay(record)) + "</b>، والمتضمّن (<b>" + activeCount + "</b>) وكالة غير ملغاة، " +
+        "نفيدكم بأن " + escapeHTML(T.auditor) + " قد أتمّ تدقيق السجل المذكور، ";
 
-    const ordinals = ["أولاً", "ثانياً", "ثالثاً"];
-    let n = 0;
-    [["central", "centralReceipt", "centralDate"], ["branch", "branchReceipt", "branchDate"]].forEach(function (g) {
-        const group = groups[g[0]];
-        if (group.value <= 0) return;
-        html += "<h4>" + ordinals[n++] + " — رسوم عائدة إلى " + FEE_DESTINATION_NAMES[g[0]] + "</h4>" +
-            '<table class="doc-table recovery-table"><thead><tr><th>البند</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
-            group.items.map(function (it) {
-                return "<tr><td>" + it.name + '</td><td class="num">' + (it.key === "unallocated" ? "—" : it.count) + '</td><td class="num">' + money(it.value) + "</td></tr>";
-            }).join("") +
-            '</tbody><tfoot><tr><td>المجموع</td><td class="num">' + group.count + '</td><td class="num">' + money(group.value) + "</td></tr></tfoot></table>" +
-            '<p class="recovery-receipt">وقد سُدّد هذا المبلغ إلى ' + FEE_DESTINATION_NAMES[g[0]] + " بموجب الإيصال رقم " + val(rec[g[1]]) + " تاريخ " + val(rec[g[2]], true) + ".</p>";
-    });
+    html += '<div class="recovery-body">';
 
-    /* نقص قديم لا تُعرف جهته لأن أنواعه لجهتين مختلفتين ولا أسعار محفوظة له (C03) */
-    if (groups.unknown.value > 0) {
-        html += "<h4>" + (ordinals[n++] || "") + " — نقص قديم جهته غير محددة (يحتاج مراجعة)</h4>" +
-            '<table class="doc-table recovery-table"><tbody>' +
-            groups.unknown.items.map(function (it) {
-                return "<tr><td>" + it.name + '</td><td class="num">' + money(it.value) + "</td></tr>";
-            }).join("") +
-            "</tbody></table>" +
-            '<p class="recovery-warning">مبلغ هذا النقص محفوظ مع الوكالة كما هو، لكن السجل قديم لا يحفظ سعر كل طابع، ' +
-            "وأنواعه تعود لجهتين مختلفتين؛ فلا يُعرف كم منه للنقابة المركزية وكم للفرع. يُراجَع يدوياً قبل اعتماد البيان.</p>";
+    if (hasShortage) {
+        html += intro + "وتبيّن وجود نقص في الطوابع والرسوم المستحقة على وكالاته بلغت قيمته الإجمالية (<b>" + money(total) + "</b>)، " +
+            "وقد استُوفيت هذه القيمة من المندوب نقداً، وسُدّدت إلى الجهات المختصة على النحو المبيّن أدناه:</p>";
+
+        const ordinals = ["أولاً", "ثانياً", "ثالثاً"];
+        let n = 0;
+        [["central", "centralReceipt", "centralDate"], ["branch", "branchReceipt", "branchDate"]].forEach(function (g) {
+            const group = groups[g[0]];
+            if (group.value <= 0) return;
+            html += "<h4>" + ordinals[n++] + " — رسوم عائدة إلى " + FEE_DESTINATION_NAMES[g[0]] + "</h4>" +
+                '<table class="doc-table recovery-table"><thead><tr><th>البند</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
+                group.items.map(function (it) {
+                    return "<tr><td>" + it.name + '</td><td class="num">' + (it.key === "unallocated" ? "—" : it.count) + '</td><td class="num">' + money(it.value) + "</td></tr>";
+                }).join("") +
+                '</tbody><tfoot><tr><td>المجموع</td><td class="num">' + group.count + '</td><td class="num">' + money(group.value) + "</td></tr></tfoot></table>" +
+                '<p class="recovery-receipt">وقد سُدّد هذا المبلغ إلى ' + FEE_DESTINATION_NAMES[g[0]] + " بموجب الإيصال رقم " + val(rec[g[1]]) + " تاريخ " + val(rec[g[2]], true) + ".</p>";
+        });
+
+        /* نقص قديم لا تُعرف جهته لأن أنواعه لجهتين مختلفتين ولا أسعار محفوظة له (C03) */
+        if (groups.unknown.value > 0) {
+            html += "<h4>" + (ordinals[n++] || "") + " — نقص قديم جهته غير محددة (يحتاج مراجعة)</h4>" +
+                '<table class="doc-table recovery-table"><tbody>' +
+                groups.unknown.items.map(function (it) {
+                    return "<tr><td>" + it.name + '</td><td class="num">' + money(it.value) + "</td></tr>";
+                }).join("") +
+                "</tbody></table>" +
+                '<p class="recovery-warning">مبلغ هذا النقص محفوظ مع الوكالة كما هو، لكن السجل قديم لا يحفظ سعر كل طابع، ' +
+                "وأنواعه تعود لجهتين مختلفتين؛ فلا يُعرف كم منه للنقابة المركزية وكم للفرع. يُراجَع يدوياً قبل اعتماد البيان.</p>";
+        }
+
+        if (rec.text) html += '<p class="recovery-extra">' + formatNotesHTML(rec.text) + "</p>";
+
+        html += "<p>وعليه، يُعدّ النقص المذكور مُستدرَكاً ومُسدَّداً أصولاً، ولا تجوز المطالبة به مجدداً. " +
+            "وقد نُظِّم هذا البيان للعلم والاعتماد لدى أي تدقيق لاحق.</p>";
+    } else {
+        html += intro + "وتبيّن أن وكالاته مستوفية للطوابع والرسوم المستحقة للنقابة المركزية، ولم يُسجَّل عليها أي نقص.</p>" +
+            '<table class="doc-table recovery-table statement-facts"><tbody>' +
+                '<tr><td>عدد الوكالات المدقّقة (غير الملغاة)</td><td class="num">' + activeCount + "</td></tr>" +
+                '<tr><td>طوابع المرافعة المطلوبة</td><td class="num">' + pleadingRequired + "</td></tr>" +
+                '<tr><td>الطوابع والرسوم الناقصة</td><td class="num">لا يوجد</td></tr>' +
+            "</tbody></table>";
+        if (rec.text) html += '<p class="recovery-extra">' + formatNotesHTML(rec.text) + "</p>";
+        html += "<p>وقد نُظِّم هذا البيان للعلم والاعتماد لدى أي تدقيق لاحق.</p>";
     }
 
-    if (rec.text) {
-        html += '<p class="recovery-extra">' + formatNotesHTML(rec.text) + "</p>";
-    }
+    html += (T.closing ? '<p class="statement-close">' + escapeHTML(T.closing) + "</p>" : "") +
+        (T.from ? '<p class="statement-from">' + escapeHTML(T.from) + "</p>" : "") + "</div>";
 
-    html += "<p>وبذلك يُعدّ النقص المذكور مُستدرَكاً ومُسدّداً أصولاً، ولا تجوز المطالبة به مجدداً. " +
-        "وقد حُرّر هذا البيان للعلم والاعتماد عند أي تدقيق لاحق.</p></div>";
-
-    /* هذا آخر التقرير عند طباعته: التوقيع هنا فقط */
-    if (included) html += recordDocSignatures();
     html += "</section>";
     return html;
 }
@@ -9766,7 +9912,7 @@ function saveRecordRecovery(id, mode) {
 
     const before = record.recovery;
     const next = getRecordRecovery(record);
-    ["centralReceipt", "centralDate", "branchReceipt", "branchDate", "text"].forEach(function (k) {
+    ["centralReceipt", "centralDate", "branchReceipt", "branchDate", "text", "to"].forEach(function (k) {
         const v = get(k);
         /* أرقام الإيصالات بالأرقام الغربية مثل بقية النظام */
         if (v !== null) next[k] = k === "text" ? v : normalizeDigits(v);
@@ -9807,9 +9953,18 @@ function buildFinalRecordReport(record, mode, forPrint) {
     const createdAt = formatDay(getRecordDay(record));
 
     let sec = 0;
+    /* أقسام التقرير المختارة للطباعة (26/11/2026): غير المختار لا يُطبع، ويظهر على الشاشة باهتاً */
+    const on = function (key) { return reportSectionOn("record", key); };
+    let curKey = "";
     const secTitle = function (text) {
+        if (curKey && !on(curKey)) return "<h3>" + text + "</h3>";
         sec += 1;
         return '<h3><span class="sec-no">' + arabicDigit(sec) + "</span>" + text + "</h3>";
+    };
+    const wrap = function (key, part) {
+        if (on(key)) return part;
+        if (forPrint) return "";
+        return '<div class="doc-excluded no-print" title="لن يُطبع — فعّله من «الأقسام المطبوعة»">' + part + "</div>";
     };
 
     const reportScale = reportPrefs().scale;
@@ -9829,6 +9984,9 @@ function buildFinalRecordReport(record, mode, forPrint) {
         reportToolsHTML(record, mode, hasRecovery) +
         "</div>";
 
+    /* الصفحة الأولى: البيان المرفوع إلى النقابة المركزية (فيه نقص أو لا) */
+    html += recoveryPageHTML(record, stats, mode, forPrint);
+
     html += docLetterhead(detailed ? "التقرير المفصل للسجل" : "التقرير المختصر للسجل");
 
     html += '<table class="doc-meta"><tr>' +
@@ -9845,7 +10003,8 @@ function buildFinalRecordReport(record, mode, forPrint) {
             "<p>" + formatNotesHTML(getRecordNote(record)) + "</p></div>";
     }
 
-    html += '<div class="doc-summary-row">' +
+    let summaryHTML = '';
+    summaryHTML += '<div class="doc-summary-row">' +
         (stats.deduction > 0
             ? '<div class="doc-due"><span>الصافي المستحق على المندوب (بعد المقاصة)</span><strong>' + money(stats.netDue) + "</strong>" +
               '<small class="doc-deduction">المطلوب قبل الحسم ' + money(stats.representativeTotal) + " — حسم (مقاصة) " + money(stats.deduction) +
@@ -9873,13 +10032,15 @@ function buildFinalRecordReport(record, mode, forPrint) {
         "</dl></div>";
 
     /* أزرار التدقيق السريع: كل بند موجود في السجل بضغطة واحدة */
-    html += quickAuditHTML(record, mode);
+    summaryHTML += quickAuditHTML(record, mode);
+    html += wrap("summary", summaryHTML);
 
     /* الوكالات حسب النوع، وبدل الانتقال بجانبها في المختصر (يوفّر صفحة) */
-    const pairTypesTransport = !detailed && stats.transport.count > 0;
+    const pairTypesTransport = !detailed && stats.transport.count > 0 && on("types") && on("transport");
     if (pairTypesTransport) html += '<div class="doc-two-col">';
 
-    html += '<section class="doc-section">' + secTitle("الوكالات حسب النوع") +
+    curKey = "types";
+    let typesHTML = '<section class="doc-section">' + secTitle("الوكالات حسب النوع") +
         '<div class="table-wrapper"><table class="doc-table"><thead><tr><th>نوع الوكالة</th><th class="num">العدد</th><th class="num">إجمالي السعر</th></tr></thead><tbody>';
 
     let typeCount = 0;
@@ -9889,7 +10050,7 @@ function buildFinalRecordReport(record, mode, forPrint) {
         typeCount += item.count;
         /* الضغط على النوع يفتح وكالات هذا النوع فقط */
         const clickable = allOfType > 0;
-        html += "<tr" +
+        typesHTML += "<tr" +
             (clickable
                 ? ' class="clickable-row" tabindex="0" role="button" title="اضغط لعرض ' + AGENCY_NAMES[type] + ' فقط" onclick="showTypeAgencies(\'' + record.id + "', '" + type + "', '" + mode + '\')"'
                 : ' class="row-zero"') +
@@ -9898,13 +10059,15 @@ function buildFinalRecordReport(record, mode, forPrint) {
             '</td><td class="num">' + item.count + '</td><td class="num">' + money(item.total) + "</td></tr>";
     });
 
-    html += '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + typeCount + '</td><td class="num">' + money(baseTotal) + "</td></tr></tfoot></table></div></section>";
+    typesHTML += '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + typeCount + '</td><td class="num">' + money(baseTotal) + "</td></tr></tfoot></table></div></section>";
+    html += wrap("types", typesHTML);
 
     if (stats.transport.count > 0) {
-        html += '<section class="doc-section">' + secTitle("بدل الانتقال") +
+        curKey = "transport";
+        html += wrap("transport", '<section class="doc-section">' + secTitle("بدل الانتقال") +
             '<button type="button" class="audit-link no-print" onclick="showAgencyAudit(\'' + record.id + "', 'transport', '" + mode + '\')">' +
             '<i class="ti ti-list-search" aria-hidden="true"></i> عرض الوكالات التي عليها بدل انتقال (' + stats.transport.count + ')</button>' +
-            '<div class="table-wrapper">' + transportTableHTML(stats.transport) + "</div></section>";
+            '<div class="table-wrapper">' + transportTableHTML(stats.transport) + "</div></section>");
     }
 
     if (pairTypesTransport) html += "</div>";
@@ -9913,7 +10076,8 @@ function buildFinalRecordReport(record, mode, forPrint) {
 
         let sumBase = 0, sumTransport = 0, sumAdd = 0, sumMissing = 0, sumRep = 0, sumGrand = 0;
 
-        html += '<section class="doc-section">' + secTitle("تفاصيل الوكالات") +
+        curKey = "agencies";
+        let agHTML = '<section class="doc-section">' + secTitle("تفاصيل الوكالات") +
             '<div class="table-wrapper"><table class="doc-table detail-table"><thead><tr>' +
             "<th>رقم الوكالة</th><th>النوع</th><th>الحالة</th>" +
             '<th class="num">السعر</th><th class="num">بدل الانتقال</th><th>الإضافات</th><th class="num">قيمة الإضافات<br><small>طوابع ونقدية</small></th>' +
@@ -9942,7 +10106,7 @@ function buildFinalRecordReport(record, mode, forPrint) {
             if (number(ms.aid)) stampParts.push("معونة " + number(ms.aid));
             if (number(ms.receipt)) stampParts.push("إيصال حد أدنى " + number(ms.receipt));
 
-            html += "<tr" + agencyRowAttrs(agency, isCancelled ? "row-cancelled" : "") + ">" +
+            agHTML += "<tr" + agencyRowAttrs(agency, isCancelled ? "row-cancelled" : "") + ">" +
                 "<td><strong>" + escapeHTML(agency.number) + "</strong>" + (agency.duplicate ? ' <span class="badge badge-warning">مكررة</span>' : "") + agencyMarksHTML(agency) + "</td>" +
                 "<td>" + agencyTypeDot(agency.type) + escapeHTML(AGENCY_NAMES[agency.type] || agency.type || "-") + "</td>" +
                 '<td><span class="status-pill ' + statusClass + '">' + getAgencyStatusName(agency.status) + "</span></td>" +
@@ -9957,7 +10121,7 @@ function buildFinalRecordReport(record, mode, forPrint) {
                 "</tr>";
         });
 
-        html += "</tbody><tfoot><tr>" +
+        agHTML += "</tbody><tfoot><tr>" +
             '<td colspan="3">الإجمالي (' + stats.agencies.length + " وكالة)</td>" +
             '<td class="num">' + money(sumBase) + "</td>" +
             '<td class="num">' + money(sumTransport) + "</td><td></td>" +
@@ -9966,12 +10130,14 @@ function buildFinalRecordReport(record, mode, forPrint) {
             '<td class="num">' + money(sumRep) + "</td>" +
             '<td class="num total-col">' + money(sumGrand) + "</td><td></td>" +
             "</tr></tfoot></table></div></section>";
+        html += wrap("agencies", agHTML);
 
     } else {
 
         html += '<div class="doc-two-col">';
 
-        html += '<section class="doc-section">' + secTitle("الطوابع الناقصة") +
+        curKey = "missing";
+        html += wrap("missing", '<section class="doc-section">' + secTitle("الطوابع الناقصة") +
             '<table class="doc-table"><thead><tr><th>الطابع</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
             MISSING_KEYS.map(function (k) {
                 const names = MISSING_NAMES;
@@ -9980,9 +10146,10 @@ function buildFinalRecordReport(record, mode, forPrint) {
                     '</td><td class="num">' + stats.missing[k] + '</td><td class="num">' + money(missingStampTypeValue(stats.agencies, k)) + "</td></tr>";
             }).join("") +
             unallocatedRowHTML(missingUnallocated(stats.agencies)) +
-            '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(stats.missingValue) + "</td></tr></tfoot></table></section>";
+            '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(stats.missingValue) + "</td></tr></tfoot></table></section>");
 
-        html += '<section class="doc-section">' + secTitle("الإضافات") +
+        curKey = "additions";
+        let addHTML = '<section class="doc-section">' + secTitle("الإضافات") +
             '<table class="doc-table"><thead><tr><th>الإضافة</th><th class="num">العدد</th><th class="num">القيمة النقدية</th></tr></thead><tbody>';
 
         let addCountTotal = 0, addCashTotal = 0;
@@ -9991,37 +10158,36 @@ function buildFinalRecordReport(record, mode, forPrint) {
             const count = stats.active.reduce(function (sum, a) { return sum + number(a.additions && a.additions[key]); }, 0);
             const cash = stats.active.reduce(function (sum, a) { return sum + number(a.additionValues && a.additionValues[key]); }, 0);
             addCountTotal += count; addCashTotal += cash;
-            html += "<tr" + auditRowAttrs(record, "add:" + key, mode, count) + "><td>" + ADDITION_NAMES[key] +
+            addHTML += "<tr" + auditRowAttrs(record, "add:" + key, mode, count) + "><td>" + ADDITION_NAMES[key] +
                 (count ? ' <i class="ti ti-chevron-left row-go no-print"></i>' : "") +
                 '</td><td class="num">' + count + '</td><td class="num">' + money(cash) + "</td></tr>";
         });
 
-        html += '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + addCountTotal + '</td><td class="num">' + money(addCashTotal) + "</td></tr></tfoot></table></section>";
+        addHTML += '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + addCountTotal + '</td><td class="num">' + money(addCashTotal) + "</td></tr></tfoot></table></section>";
+        html += wrap("additions", addHTML);
 
         html += "</div>";
 
         /* الملاحظة الواحدة مرة واحدة مع أرقام وكالاتها (بدل تكرارها لكل وكالة) */
         const noteGroups = groupAgencyNotes(stats.agencies);
 
-        html += '<section class="doc-section doc-notes-section">' + secTitle("ملاحظات الوكالات") +
+        curKey = "notes";
+        html += wrap("notes", '<section class="doc-section doc-notes-section">' + secTitle("ملاحظات الوكالات") +
             (noteGroups.length === 0
                 ? '<p class="doc-empty">لا توجد ملاحظات مسجلة على وكالات هذا السجل.</p>'
                 : '<ul class="doc-notes doc-notes-grouped">' + noteGroups.map(function (g) {
                     return "<li><span>" + escapeHTML(g.text) + '</span><b class="note-agencies">' +
                         (g.numbers.length > 1 ? "الوكالات (" + g.numbers.length + "): " : "وكالة ") + g.numbers.map(escapeHTML).join("، ") + "</b></li>";
                 }).join("") + "</ul>") +
-            "</section>";
+            "</section>");
     }
 
-    html += '<section class="doc-section">' + secTitle("حصص لجنتي الإسعاف والتعاون") +
-        '<div class="table-wrapper">' + committeesByTypeTableHTML(stats.committees) + "</div></section>";
+    curKey = "committees";
+    html += wrap("committees", '<section class="doc-section">' + secTitle("حصص لجنتي الإسعاف والتعاون") +
+        '<div class="table-wrapper">' + committeesByTypeTableHTML(stats.committees) + "</div></section>");
 
-    /* التوقيع مرة واحدة في آخر التقرير (24/11/2026، بطلب حسين): إن طُبع «بيان استدراك النقص» فالتوقيع في آخره فقط */
-    const recoveryHTML = recoveryPageHTML(record, stats, mode, forPrint);
-    if (!(recoveryHTML && reportPrefs().recovery)) html += recordDocSignatures();
-
-    /* صفحة مستقلة بعد الجداول: بيان استدراك النقص */
-    html += recoveryHTML;
+    /* التوقيع مرة واحدة في آخر التقرير (البيان صار في الصفحة الأولى، 26/11/2026) */
+    html += recordDocSignatures();
 
     html += "</div>";
 
@@ -10555,6 +10721,7 @@ function settingMemoryValue(key) {
         case "audit_council_saved": return councilSaved;
         case "audit_fee_destinations": return feeDestinations;
         case "audit_audit_committee": return auditCommittee;
+        case "audit_report_texts": return reportTexts;
         default: return undefined;
     }
 }
@@ -11056,11 +11223,28 @@ function buildGeneralReportDoc() {
     const baseTotal = Object.keys(pseudo.byType).reduce(function (s, t) { return s + pseudo.byType[t].total; }, 0);
     const missingTotalCount = missingCountOf(pseudo.missing);
 
+    /* الأقسام المختارة للطباعة (26/11/2026): «الأقسام المطبوعة» بجانب «تصدير PDF» */
+    const on = function (key) { return reportSectionOn("general", key); };
     let sec = 0;
     const secTitle = function (text) {
         sec += 1;
         return '<h3><span class="sec-no">' + arabicDigit(sec) + "</span>" + text + "</h3>";
     };
+
+    /* الوكالات المطابقة مجمّعة حسب السجل (بترتيب التاريخ ثم الرقم) لجداول «حسب السجل» */
+    const byRecord = [];
+    const byRecordIndex = {};
+    matched.forEach(function (m) {
+        if (m.agency.status === "cancelled") return;
+        let row = byRecordIndex[m.record.id];
+        if (!row) { row = byRecordIndex[m.record.id] = { record: m.record, agencies: [] }; byRecord.push(row); }
+        row.agencies.push(m.agency);
+    });
+    byRecord.sort(function (a, b) { return getRecordDay(a.record).localeCompare(getRecordDay(b.record)) || compareRecordNumbers(a.record, b.record); });
+    const recCells = function (r) {
+        return "<td><strong>" + escapeHTML(r.recordNumber) + "</strong></td><td>" + escapeHTML(String(r.representativeName || "").trim()) + "</td><td>" + escapeHTML(r.officeName || "") + "</td><td>" + formatDay(getRecordDay(r)) + "</td>";
+    };
+    const recHead = "<th>السجل</th><th>المندوب</th><th>المكتب</th><th>التاريخ</th>";
 
     let html = '<div class="final-report doc doc-summary doc-general-print">';
 
@@ -11071,7 +11255,7 @@ function buildGeneralReportDoc() {
             : "كل السجلات حتى تاريخ " + todayArabic() + " — " + auditedRecords().length + " سجل"
     );
 
-    html += '<div class="doc-summary-row">' +
+    if (on("summary")) html += '<div class="doc-summary-row">' +
         '<div class="doc-due"><span>' + (filterActive ? "المطلوب (حسب التصفية)" : "المطلوب من جميع المندوبين") + (genDeductions > 0 ? " — الصافي بعد المقاصة" : "") + "</span><strong>" + money(pseudo.representativeTotal - genDeductions) + "</strong>" +
         (genDeductions > 0 ? '<small class="doc-deduction">قبل الحسم ' + money(pseudo.representativeTotal) + " — حسومات المقاصة " + money(genDeductions) + "</small>" : "") +
         "<small>عن " + pseudo.active.length + " وكالة غير ملغاة في " + recordCount + " سجل</small></div>" +
@@ -11086,7 +11270,7 @@ function buildGeneralReportDoc() {
             "<div><dt>المطلوب من بدل الانتقال</dt><dd>" + money(pseudo.transport.cash) + "</dd></div>" +
         "</dl></div>";
 
-    html += '<section class="doc-section">' + secTitle("الوكالات حسب النوع") +
+    if (on("types")) html += '<section class="doc-section">' + secTitle("الوكالات حسب النوع") +
         '<table class="doc-table"><thead><tr><th>نوع الوكالة</th><th class="num">العدد</th><th class="num">إجمالي السعر</th></tr></thead><tbody>' +
         Object.keys(AGENCY_NAMES).map(function (type) {
             const item = pseudo.byType[type] || { count: 0, total: 0 };
@@ -11094,9 +11278,10 @@ function buildGeneralReportDoc() {
         }).join("") +
         '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + pseudo.active.length + '</td><td class="num">' + money(baseTotal) + "</td></tr></tfoot></table></section>";
 
-    html += '<div class="doc-two-col">';
+    const pairMissingTransport = on("missing") && on("transport");
+    if (pairMissingTransport) html += '<div class="doc-two-col">';
 
-    html += '<section class="doc-section">' + secTitle("الطوابع الناقصة") +
+    if (on("missing")) html += '<section class="doc-section">' + secTitle("الطوابع الناقصة") +
         '<table class="doc-table"><thead><tr><th>الطابع</th><th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
         "<tr><td>مرافعة</td><td class=\"num\">" + pseudo.missing.pleading + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "pleading")) + "</td></tr>" +
         "<tr><td>إسعاف</td><td class=\"num\">" + pseudo.missing.ambulance + '</td><td class="num">' + money(missingStampTypeValue(pseudo.agencies, "ambulance")) + "</td></tr>" +
@@ -11105,11 +11290,98 @@ function buildGeneralReportDoc() {
         unallocatedRowHTML(missingUnallocated(pseudo.agencies)) +
         '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + missingTotalCount + '</td><td class="num">' + money(pseudo.missingValue) + "</td></tr></tfoot></table></section>";
 
-    html += '<section class="doc-section">' + secTitle("بدل الانتقال") + transportTableHTML(pseudo.transport) + "</section>";
+    if (on("transport")) html += '<section class="doc-section">' + secTitle("بدل الانتقال") + transportTableHTML(pseudo.transport) + "</section>";
 
-    html += "</div>";
+    if (pairMissingTransport) html += "</div>";
 
-    html += '<section class="doc-section">' + secTitle("حصص لجنتي الإسعاف والتعاون") + committeesByTypeTableHTML(pseudo.committees) + "</section>";
+    /* الطوابع الناقصة حسب السجل: من أي سجلات جاء النقص وكم من كل سجل */
+    if (on("missingByRecord")) {
+        const rows = byRecord.map(function (row) {
+            const st = getRecordFinalStats({ agencies: row.agencies });
+            return { record: row.record, missing: st.missing, count: missingCountOf(st.missing), value: st.missingValue };
+        }).filter(function (x) { return x.value > 0 || x.count > 0; });
+        const t = { count: 0, value: 0 };
+        MISSING_KEYS.forEach(function (k) { t[k] = 0; });
+        const mKeys = MISSING_KEYS.filter(function (k) { return rows.some(function (x) { return number(x.missing[k]) > 0; }); });
+        html += '<section class="doc-section doc-section-flow">' + secTitle("الطوابع الناقصة حسب السجل") +
+            (rows.length
+                ? '<div class="table-wrapper"><table class="doc-table by-record-table"><thead><tr>' + recHead +
+                  mKeys.map(function (k) { return '<th class="num">' + MISSING_NAMES[k] + "</th>"; }).join("") +
+                  '<th class="num">العدد</th><th class="num">القيمة</th></tr></thead><tbody>' +
+                  rows.map(function (x) {
+                      mKeys.forEach(function (k) { t[k] += number(x.missing[k]); });
+                      t.count += x.count; t.value += x.value;
+                      return "<tr>" + recCells(x.record) + mKeys.map(function (k) { return '<td class="num">' + (number(x.missing[k]) || "—") + "</td>"; }).join("") +
+                          '<td class="num">' + x.count + '</td><td class="num">' + money(x.value) + "</td></tr>";
+                  }).join("") +
+                  '</tbody><tfoot><tr><td colspan="4">الإجمالي (' + rows.length + " سجل)</td>" + mKeys.map(function (k) { return '<td class="num">' + t[k] + "</td>"; }).join("") +
+                  '<td class="num">' + t.count + '</td><td class="num">' + money(t.value) + "</td></tr></tfoot></table></div>"
+                : '<p class="doc-empty">لا يوجد نقص في السجلات المشمولة.</p>') + "</section>";
+    }
+
+    /* بدل الانتقال حسب السجل: من أي سجلات جاء البدل، وقيمته من كل سجل */
+    if (on("transportByRecord")) {
+        const rows = byRecord.map(function (row) {
+            const t = { count: 0, total: 0, share: 0, cash: 0, stampsValue: 0 };
+            row.agencies.forEach(function (a) {
+                const x = getAgencyTransport(a);
+                t.count += x.count; t.total += x.total; t.share += x.share; t.cash += x.cash; t.stampsValue += x.stampsValue;
+            });
+            return { record: row.record, t: t };
+        }).filter(function (x) { return x.t.count > 0; });
+        const sum = { count: 0, total: 0, share: 0, cash: 0, stampsValue: 0 };
+        html += '<section class="doc-section doc-section-flow">' + secTitle("بدل الانتقال حسب السجل") +
+            (rows.length
+                ? '<div class="table-wrapper"><table class="doc-table by-record-table"><thead><tr>' + recHead +
+                  '<th class="num">عدد البدلات</th><th class="num">القيمة الكاملة</th><th class="num">حصة المندوب</th><th class="num">طوابع المرافعة</th><th class="num">المطلوب نقداً</th></tr></thead><tbody>' +
+                  rows.map(function (x) {
+                      Object.keys(sum).forEach(function (k) { sum[k] += x.t[k]; });
+                      return "<tr>" + recCells(x.record) + '<td class="num">' + x.t.count + '</td><td class="num">' + money(x.t.total) + '</td><td class="num">' + money(x.t.share) +
+                          '</td><td class="num">' + money(x.t.stampsValue) + '</td><td class="num">' + money(x.t.cash) + "</td></tr>";
+                  }).join("") +
+                  '</tbody><tfoot><tr><td colspan="4">الإجمالي (' + rows.length + " سجل)</td><td class=\"num\">" + sum.count + '</td><td class="num">' + money(sum.total) + '</td><td class="num">' + money(sum.share) +
+                  '</td><td class="num">' + money(sum.stampsValue) + '</td><td class="num">' + money(sum.cash) + "</td></tr></tfoot></table></div>"
+                : '<p class="doc-empty">لا يوجد بدل انتقال في السجلات المشمولة.</p>') + "</section>";
+    }
+
+    /* الإضافات حسب السجل: عدد كل إضافة في كل سجل، وقيمتها النقدية وقيمة طوابعها */
+    if (on("additionsByRecord")) {
+        /* فقط أنواع الإضافات الموجودة فعلاً في السجلات المشمولة (حتى يتسع الجدول لصفحة عمودية) */
+        const keys = Object.keys(ADDITION_NAMES).filter(function (k) {
+            return k !== "transport" && byRecord.some(function (row) { return row.agencies.some(function (a) { return number(a.additions && a.additions[k]) > 0; }); });
+        });
+        const rows = byRecord.map(function (row) {
+            const c = {};
+            let count = 0, cash = 0, stamps = 0;
+            keys.forEach(function (k) {
+                c[k] = row.agencies.reduce(function (s2, a) { return s2 + number(a.additions && a.additions[k]); }, 0);
+                count += c[k];
+            });
+            row.agencies.forEach(function (a) {
+                keys.forEach(function (k) { cash += number(a.additionValues && a.additionValues[k]); });
+                stamps += getAgencyStampAdditionsValue(a);
+            });
+            return { record: row.record, c: c, count: count, cash: cash, stamps: stamps };
+        }).filter(function (x) { return x.count > 0; });
+        const sum = { count: 0, cash: 0, stamps: 0 };
+        keys.forEach(function (k) { sum[k] = 0; });
+        html += '<section class="doc-section doc-section-flow">' + secTitle("الإضافات حسب السجل") +
+            (rows.length
+                ? '<div class="table-wrapper"><table class="doc-table by-record-table"><thead><tr>' + recHead +
+                  keys.map(function (k) { return '<th class="num">' + ADDITION_NAMES[k] + "</th>"; }).join("") +
+                  '<th class="num">العدد</th><th class="num">القيمة النقدية</th><th class="num">قيمة الطوابع</th></tr></thead><tbody>' +
+                  rows.map(function (x) {
+                      keys.forEach(function (k) { sum[k] += x.c[k]; });
+                      sum.count += x.count; sum.cash += x.cash; sum.stamps += x.stamps;
+                      return "<tr>" + recCells(x.record) + keys.map(function (k) { return '<td class="num">' + (x.c[k] || "—") + "</td>"; }).join("") +
+                          '<td class="num">' + x.count + '</td><td class="num">' + money(x.cash) + '</td><td class="num">' + money(x.stamps) + "</td></tr>";
+                  }).join("") +
+                  '</tbody><tfoot><tr><td colspan="4">الإجمالي (' + rows.length + " سجل)</td>" + keys.map(function (k) { return '<td class="num">' + sum[k] + "</td>"; }).join("") +
+                  '<td class="num">' + sum.count + '</td><td class="num">' + money(sum.cash) + '</td><td class="num">' + money(sum.stamps) + "</td></tr></tfoot></table></div>"
+                : '<p class="doc-empty">لا توجد إضافات في السجلات المشمولة.</p>') + "</section>";
+    }
+
+    if (on("committees")) html += '<section class="doc-section">' + secTitle("حصص لجنتي الإسعاف والتعاون") + committeesByTypeTableHTML(pseudo.committees) + "</section>";
 
     /* حسب المندوب */
     const map = {};
@@ -11136,7 +11408,7 @@ function buildGeneralReportDoc() {
 
     const names = Object.keys(map).sort(function (a, b) { return (map[b].total - map[b].deduction) - (map[a].total - map[a].deduction); });
 
-    html += '<section class="doc-section">' + secTitle("المطلوب من كل مندوب") +
+    if (on("reps")) html += '<section class="doc-section">' + secTitle("المطلوب من كل مندوب") +
         '<table class="doc-table"><thead><tr><th>المندوب</th><th class="num">السجلات</th><th class="num">الوكالات</th><th class="num">حصته من بدل الانتقال</th><th class="num">المطلوب</th>' +
         (allDeductions > 0 ? '<th class="num">الحسم (مقاصة)</th><th class="num">الصافي</th>' : "") + "</tr></thead><tbody>" +
         (names.length === 0
@@ -11149,13 +11421,13 @@ function buildGeneralReportDoc() {
         '</tbody><tfoot><tr><td>الإجمالي</td><td class="num">' + recordCount + '</td><td class="num">' + pseudo.agencies.length + '</td><td class="num">' + money(pseudo.transport.share) + '</td><td class="num">' + money(pseudo.representativeTotal) + "</td>" +
         (allDeductions > 0 ? '<td class="num">' + money(allDeductions) + '</td><td class="num">' + money(pseudo.representativeTotal - allDeductions) + "</td>" : "") + "</tr></tfoot></table></section>";
 
-    if (filterActive) {
+    if (filterActive && on("matched")) {
         html += '<section class="doc-section doc-section-flow">' + secTitle("الوكالات المطابقة للتصفية") +
             filteredAgenciesTableHTML(matched, true) + "</section>";
     }
 
 
-    html += docSignatures();
+    if (on("signatures")) html += docSignatures();
     html += "</div>";
 
     return html;
@@ -11169,6 +11441,69 @@ function exportReportsToPDF() {
         { pdf: true, landscape: filtered }
     );
 }
+
+/* =========================================================
+نصوص التقارير والترويسة في «التوقيعات والطباعة» (27/11/2026)
+========================================================= */
+
+function renderReportTextsForm(source) {
+    const t = source || reportTexts;
+    Object.keys(DEFAULT_REPORT_TEXTS).forEach(function (k) {
+        const el = document.getElementById("rt_" + k);
+        if (el) { el.value = t[k] || ""; el.placeholder = DEFAULT_REPORT_TEXTS[k]; }
+    });
+}
+
+function readReportTextsForm() {
+    const v = {};
+    Object.keys(DEFAULT_REPORT_TEXTS).forEach(function (k) {
+        const el = document.getElementById("rt_" + k);
+        v[k] = el ? el.value : reportTexts[k];
+    });
+    return normalizeReportTexts(v);
+}
+
+document.getElementById("saveReportTextsBtn")?.addEventListener("click", function () {
+    if (!currentUser || currentUser.role !== "manager") { notify("حفظ النصوص للمدير فقط.", "error"); return; }
+    const next = readReportTextsForm();
+    try {
+        saveData(REPORT_TEXTS_KEY, next);
+    } catch (error) {
+        notify("<strong>لم تُحفظ النصوص</strong><span>" + escapeHTML(error && error.message || error) + "</span>", "error", 10000, true);
+        return;
+    }
+    reportTexts = next;
+    renderReportTextsForm();
+    notify("حُفظت نصوص التقارير والترويسة.", "success");
+});
+
+/* الافتراضية في النموذج فقط؛ لا تُحفظ إلا بزر الحفظ */
+document.getElementById("resetReportTextsBtn")?.addEventListener("click", function () {
+    renderReportTextsForm(DEFAULT_REPORT_TEXTS);
+    notify("أُعيدت النصوص الافتراضية في النموذج — اضغط «حفظ النصوص» لاعتمادها.", "info");
+});
+
+/* معاينة البيان بالنصوص المكتوبة الآن (قبل الحفظ) على أحدث سجل مدقّق */
+document.getElementById("previewReportTextsBtn")?.addEventListener("click", function () {
+    const list = auditedRecords();
+    if (!list.length) { notify("لا توجد سجلات للمعاينة بعد.", "info"); return; }
+    const saved = reportTexts;
+    reportTexts = readReportTextsForm();
+    try {
+        const r = list[list.length - 1];
+        const stats = getRecordFinalStats(r);
+        document.getElementById("modalContent").innerHTML =
+            '<div class="report-actions no-print"><span class="field-hint">معاينة بالنصوص المكتوبة (لم تُحفظ بعد) — السجل ' + escapeHTML(r.recordNumber) + '</span>' +
+            '<button type="button" class="secondary-btn" onclick="closeRecordModal()">إغلاق</button></div>' +
+            '<div class="final-report doc doc-summary">' + (recoveryPageHTML(r, stats, "summary", true) ||
+                '<p class="doc-empty">البيان مطفأ من «الأقسام المطبوعة» في نافذة التقرير، فلا يُطبع. فعّله هناك لتراه.</p>') + "</div>";
+        document.getElementById("recordModal").classList.remove("hidden");
+    } finally {
+        reportTexts = saved;
+    }
+});
+
+onReady(function () { renderReportTextsForm(); });
 
 /* =========================================================
 نافذة حصص اللجان
@@ -13514,13 +13849,14 @@ let html = `
         <button type="button" class="secondary-btn" onclick="exportReportsToPDF()">
             تصدير PDF
         </button>
+        <span id="generalSectionsBox">${reportSectionsPanelHTML("general", "", "toggleGeneralSection('__KEY__', this.checked)")}</span>
     </div>
 
     ${docLetterhead(
         filterActive ? "تقرير مصفّى" : "التقرير العام",
         filterActive
             ? escapeHTML(reportFilterLabel(reportFilter))
-            : "كل السجلات حتى تاريخ " + todayArabic() + " — " + records.length + " سجل"
+            : "كل السجلات حتى تاريخ " + todayArabic() + " — " + auditedRecords().length + " سجل"
     )}
 
     <div class="report-total">
@@ -17213,6 +17549,7 @@ function downloadBackup() {
         councilSaved: councilSaved,
         feeDestinations: feeDestinations,
         auditCommittee: auditCommittee,
+        reportTexts: reportTexts,
         records: records
     };
 
@@ -17306,6 +17643,7 @@ function buildBackupJSON() {
         councilSaved: councilSaved,
         feeDestinations: feeDestinations,
         auditCommittee: auditCommittee,
+        reportTexts: reportTexts,
         records: records
     }, null, 2);
 }
@@ -17972,7 +18310,7 @@ function backupDataProblem(data) {
         if (badUser) return "في قائمة المستخدمين حساب تالف.";
         if (!data.users.some(function (u) { return u.role === "manager"; })) return "لا يوجد مدير في قائمة المستخدمين.";
     }
-    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations", "auditCommittee"];
+    const objects = ["prices", "additionPrices", "additionStampStatus", "transportSettings", "stampPrices", "committeeShares", "feeDestinations", "auditCommittee", "reportTexts"];
     for (let i = 0; i < objects.length; i++) {
         const v = data[objects[i]];
         if (v !== undefined && (!v || typeof v !== "object" || Array.isArray(v))) return "الإعداد " + objects[i] + " تالف.";
@@ -17993,7 +18331,7 @@ function backupDataProblem(data) {
 const RESTORE_SETTING_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_committee_shares",
-    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations", "audit_audit_committee"
+    "audit_committee_rates", "audit_price_schedule", "audit_council_saved", "audit_fee_destinations", "audit_audit_committee", "audit_report_texts"
 ];
 
 function applyBackupData(data) {
@@ -18097,6 +18435,11 @@ function writeBackupSettings(data) {
     /* لجنة التدقيق (أسماء التوقيعات): من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
     if (data.auditCommittee && typeof data.auditCommittee === "object") {
         write(AUDIT_COMMITTEE_KEY, normalizeAuditCommittee(data.auditCommittee), true);
+    }
+
+    /* نصوص التقارير والترويسة: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
+    if (data.reportTexts && typeof data.reportTexts === "object") {
+        write(REPORT_TEXTS_KEY, normalizeReportTexts(data.reportTexts), true);
     }
 
     /* أسعار الأشهر: من الملف إن وُجدت (النسخ الأقدم لا تحتويها فتبقى كما هي) */
@@ -18211,7 +18554,7 @@ const FB_SETTINGS_KEYS = [
     "audit_users", "audit_prices", "audit_addition_prices", "audit_addition_stamp_status",
     "audit_transport_settings", "audit_stamp_prices", "audit_price_schedule",
     "audit_committee_shares", "audit_committee_rates", "audit_council_share", "audit_council_saved",
-    "audit_fee_destinations", "audit_audit_committee"
+    "audit_fee_destinations", "audit_audit_committee", "audit_report_texts"
 ];
 
 let fbState = loadData(FB_STATE_KEY, null);
@@ -19513,7 +19856,7 @@ onReady(function () {
     const seen = readUiPref(APP_VERSION_SEEN_KEY, "");
     writeUiPref(APP_VERSION_SEEN_KEY, APP_VERSION);
     if (!seen || seen === APP_VERSION || !currentUser) return;
-    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>فلاتر الأعمدة مثل Excel في جدول السجلات (سهم برأس كل عمود)، تاريخ التدقيق تحت تاريخ كل سجل، والتوقيعات تُضاف وتُحذف وتُرتّب وتُطبع مرة واحدة في آخر التقرير. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
+    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>تقرير السجل يبدأ ببيان رسمي (استدراك النقص، أو خلوّ السجل من النقص) بنصوص وترويسة تُعدَّل من «التوقيعات والطباعة» ومرسل إليه لكل سجل، و«الأقسام المطبوعة» لاختيار ما يُطبع من تقرير السجل والتقرير العام، وفي التقرير العام: بدل الانتقال والإضافات والطوابع الناقصة حسب السجل. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
 });
 
 window.exportAuditTable = exportAuditTable;

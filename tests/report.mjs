@@ -91,25 +91,27 @@ check("البيان يعرض رقم الإيصال والفقرة الإضافي
     return /الإيصال رقم 4521/.test(t) && /سُدّد الفرق عند استلام السجل/.test(t);
 }));
 
-/* 3) خيار الطباعة: بلا البيان لا يدخل في الطباعة */
-await page.click(".report-toggle input");
+/* 3) خيار الطباعة (26/11/2026: من «الأقسام المطبوعة»): بلا البيان لا يدخل في الطباعة */
+await page.click(".report-sections > summary");
+await page.click('.report-sections input[data-report-section="statement"]');
 await page.waitForTimeout(300);
 check("إلغاء «مع بيان استدراك النقص»: لا يُطبع، ويبقى ظاهراً باهتاً للتعديل", await ev(function () {
     const r = records.find(function (x) { return x.id === "r1"; });
     return buildFinalRecordReport(r, "summary", true).indexOf("doc-recovery") === -1 && !!document.querySelector(".doc-recovery.is-excluded.no-print");
 }));
-await page.click(".report-toggle input");
+await page.click(".report-sections > summary");
+await page.click('.report-sections input[data-report-section="statement"]');
 await page.waitForTimeout(300);
 check("المفصل يحتوي البيان أيضاً", await ev(function () {
     return buildFinalRecordReport(records.find(function (x) { return x.id === "r1"; }), "detailed", true).indexOf("doc-recovery") !== -1;
 }));
 
-/* التوقيع مرة واحدة في آخر التقرير (24/11/2026): مع البيان في آخره فقط، وبدونه في آخر التقرير */
-check("التوقيع مرة واحدة في آخر التقرير (مع بيان الاستدراك وبدونه)", await ev(function () {
+/* التوقيع مرة واحدة في آخر التقرير؛ والبيان صار الصفحة الأولى (26/11/2026) */
+check("البيان أول التقرير والتوقيع مرة واحدة في آخره (مع البيان وبدونه)", await ev(function () {
     const r = records.find(function (x) { return x.id === "r1"; });
     const count = function (h) { return (h.match(/doc-committee-sign/g) || []).length; };
     const withRec = buildFinalRecordReport(r, "detailed", true);
-    const okWith = count(withRec) === 1 && withRec.lastIndexOf("doc-committee-sign") > withRec.indexOf("doc-recovery");
+    const okWith = count(withRec) === 1 && withRec.indexOf("doc-recovery") < withRec.indexOf("التقرير المفصل للسجل") && withRec.lastIndexOf("doc-committee-sign") > withRec.indexOf("doc-recovery");
     saveReportPrefs({ recovery: false });
     const without = buildFinalRecordReport(r, "summary", true);
     const screen = buildFinalRecordReport(r, "summary", false);
@@ -182,12 +184,63 @@ check("تعديل السجل وحفظه يُبقي إيصالات البيان",
     return r.officeName === "مكتب معدّل" && r.recovery && r.recovery.centralReceipt === "4521" && r.recovery.text === "سُدّد الفرق عند استلام السجل.";
 }), await ev(function () { return JSON.stringify(records.find(function (x) { return x.id === "r1"; }).recovery || null); }));
 
-/* 7) سجل بلا نقص: لا بيان ولا خيار */
-check("سجل بلا نقص: لا بيان", await ev(function () {
+/* 7) سجل بلا نقص (26/11/2026): «بيان خلوّ السجل من النقص» في أوله بصيغة رسمية */
+check("سجل بلا نقص: بيان خلوّ من النقص في الصفحة الأولى", await ev(function () {
     const r = { id: "z", recordNumber: "1", officeName: "o", representativeName: "r", recordDate: "2026-09-12",
         agencies: [buildAgency({ number: "1", type: "special", status: "active", additions: {}, missing: { pleading: 0, ambulance: 0, aid: 0 } }, getPricingForType("special", "2026-09-12"))] };
-    const html = buildFinalRecordReport(r, "summary");
-    return html.indexOf("doc-recovery") === -1 && html.indexOf("مع بيان استدراك النقص") === -1;
+    const html = buildFinalRecordReport(r, "summary", true);
+    return html.indexOf("بيان خلوّ السجل من النقص") !== -1 && html.indexOf("لم يُسجَّل عليها أي نقص") !== -1 &&
+        html.indexOf("بيان خلوّ السجل من النقص") < html.indexOf("التقرير المختصر للسجل") && html.indexOf("بيان استدراك النقص") === -1 &&
+        html.indexOf("السادة مجلس النقابة المركزية") !== -1;
+}));
+
+/* 7ب) الأقسام المطبوعة لتقرير السجل: طباعة بدل الانتقال فقط مثلاً */
+check("الأقسام المطبوعة: غير المختار لا يُطبع، ويظهر باهتاً على الشاشة", await ev(function () {
+    const r = records.find(function (x) { return x.id === "r1"; });
+    ["statement", "summary", "types", "missing", "notes", "committees", "signatures"].forEach(function (k) { setReportSection("record", k, false); });
+    const print = buildFinalRecordReport(r, "summary", true);
+    const screen = buildFinalRecordReport(r, "summary", false);
+    /* العناوين فقط (أسماء الأقسام موجودة أيضاً في لوحة الاختيار no-print داخل شريط الأزرار) */
+    const ok = print.indexOf("</span>الإضافات") !== -1 && print.indexOf("</span>الوكالات حسب النوع") === -1 && print.indexOf("doc-recovery") === -1 &&
+        print.indexOf("doc-committee-sign") === -1 && print.indexOf("</span>حصص لجنتي") === -1 && screen.indexOf("doc-excluded") !== -1 &&
+        /sec-no">.<\/span>الإضافات/.test(print);
+    REPORT_SECTIONS.record.forEach(function (s) { setReportSection("record", s.key, true); });
+    return ok;
+}));
+
+/* 7ج) التقرير العام: بدل الانتقال والإضافات والنقص حسب السجل، وأقسامه المطبوعة */
+check("التقرير العام: جداول حسب السجل، ويمكن طباعة الطوابع الناقصة وحدها", await ev(function () {
+    const full = buildGeneralReportDoc();
+    const ok1 = full.indexOf("بدل الانتقال حسب السجل") !== -1 && full.indexOf("الإضافات حسب السجل") !== -1 && full.indexOf("الطوابع الناقصة حسب السجل") !== -1;
+    REPORT_SECTIONS.general.forEach(function (s) { setReportSection("general", s.key, s.key === "missing" || s.key === "missingByRecord"); });
+    const only = buildGeneralReportDoc();
+    const ok2 = only.indexOf("الطوابع الناقصة حسب السجل") !== -1 && only.indexOf("بدل الانتقال حسب السجل") === -1 && only.indexOf("المطلوب من كل مندوب") === -1 &&
+        only.indexOf("doc-committee-sign") === -1;
+    REPORT_SECTIONS.general.forEach(function (s) { setReportSection("general", s.key, true); });
+    return ok1 && ok2;
+}));
+
+/* 7د) نصوص التقارير والترويسة قابلة للتخصيص (27/11/2026)، ومرسل إليه لسجل واحد */
+check("نصوص الترويسة والبيان من الإعدادات، والسطر الفارغ لا يُطبع، والمرسل إليه لسجل واحد", await ev(function () {
+    const r = records.find(function (x) { return x.id === "r1"; });
+    saveData(REPORT_TEXTS_KEY, normalizeReportTexts({ org: "نقابة اختبار", unit: "", to: "السيد رئيس الفرع المحترم،", greeting: "", auditor: "لجنة التدقيق", shortageTitle: "", closing: "مع التقدير." }));
+    reportTexts = normalizeReportTexts(loadData(REPORT_TEXTS_KEY, null));
+    const a = buildFinalRecordReport(r, "summary", true);
+    const okA = a.indexOf("<strong>نقابة اختبار</strong>") !== -1 && a.indexOf("فرع إدلب — مكتب المحاسبة</span>") === -1 &&
+        a.indexOf("السيد رئيس الفرع المحترم،") !== -1 && a.indexOf("تحية طيبة") === -1 && a.indexOf("نفيدكم بأن لجنة التدقيق") !== -1 &&
+        a.indexOf("بيان استدراك النقص") !== -1 /* العنوان الفارغ يعود للافتراضي */ && a.indexOf("مع التقدير.") !== -1 &&
+        a.indexOf("السادة مجلس النقابة المركزية") === -1;
+    r.recovery = Object.assign({}, r.recovery, { to: "السادة الهيئة العامة المحترمين،" });
+    const b = buildFinalRecordReport(r, "summary", true);
+    const okB = b.indexOf("السادة الهيئة العامة المحترمين،") !== -1 && b.indexOf("السيد رئيس الفرع المحترم،") === -1;
+    delete r.recovery.to;
+    const backup = JSON.parse(buildBackupJSON());
+    const okC = backup.reportTexts && backup.reportTexts.org === "نقابة اختبار" && FB_SETTINGS_KEYS.indexOf("audit_report_texts") !== -1 &&
+        DATA_SETTINGS_KEYS.indexOf("audit_report_texts") !== -1 && RESTORE_SETTING_KEYS.indexOf("audit_report_texts") !== -1;
+    saveData(REPORT_TEXTS_KEY, normalizeReportTexts(DEFAULT_REPORT_TEXTS));
+    reportTexts = normalizeReportTexts(DEFAULT_REPORT_TEXTS);
+    const okD = normalizeReportTexts(null).to === DEFAULT_REPORT_TEXTS.to && normalizeReportTexts({ org: "" }).org === "نقابة المحامين";
+    return okA && okB && okC && okD;
 }));
 
 /* 8) تنزيل PDF مباشر (يحتاج الإنترنت لتحميل المكتبات) */

@@ -1801,13 +1801,27 @@
                     <li class="devlog-stage">
                         <span class="devlog-dot" aria-hidden="true"><i class="ti ti-filter"></i></span>
                         <div class="content-card">
-                            <p class="devlog-date">24 تشرين الثاني 2026 · الإصدار <span data-app-version></span></p>
+                            <p class="devlog-date">24 تشرين الثاني 2026 · الإصدار 2026.11.24.3</p>
                             <h3>فلاتر الأعمدة مثل Excel، وتاريخ التدقيق، والتوقيعات المرنة</h3>
                             <ul class="devlog-list">
                                 <li>سهم في رأس كل عمود من جدول السجلات: ترتيب تصاعدي وتنازلي، ومربعات اختيار للقيم (المندوب، المكتب، المدقق، المصدر، حالة القبض، رقم الإيصال…) مع بحث و«تحديد الكل»، و«من – إلى» للأرقام والمبالغ والتواريخ. الفلاتر تتجمّع مع بعضها، وتظهر شرائح يُزال كل منها بنقرة.</li>
                                 <li>«تاريخ التدقيق» (أول حفظ للسجل) تحت تاريخ كل سجل، ويُصفّى به من–إلى، وصار عموداً في التقرير المخصّص وملف جدول التدقيق.</li>
                                 <li>توقيعات التقارير: إضافة خانة وحذفها وترتيبها (الصفة والاسم، حتى 12)، والتوقيع يُطبع مرة واحدة في آخر التقرير (في آخر بيان الاستدراك عند طباعته).</li>
                                 <li>نقل أرقام إيصالات القبض وتواريخه من جدول التدقيق إلى 60 سجلاً.</li>
+                            </ul>
+                        </div>
+                    </li>
+
+                    <li class="devlog-stage">
+                        <span class="devlog-dot" aria-hidden="true"><i class="ti ti-file-certificate"></i></span>
+                        <div class="content-card">
+                            <p class="devlog-date">26 تشرين الثاني 2026 · الإصدار <span data-app-version></span></p>
+                            <h3>البيان المرفوع إلى النقابة المركزية، والأقسام المطبوعة، وجداول «حسب السجل»</h3>
+                            <ul class="devlog-list">
+                                <li>تقرير السجل يبدأ دائماً ببيان رسمي مرفوع إلى النقابة المركزية: «بيان استدراك النقص» إن وُجد نقص (قيمته وتفصيله حسب الجهة وإيصالات سداده)، أو «بيان خلوّ السجل من النقص» إن لم يوجد.</li>
+                                <li>«الأقسام المطبوعة» في تقرير السجل والتقرير العام: مربعات اختيار لكل قسم، فيُطبع ما يُختار فقط (مثلاً بدل الانتقال وحده، أو الطوابع الناقصة للفرع كله)، والقسم غير المختار يظهر باهتاً على الشاشة.</li>
+                                <li>التقرير العام: «بدل الانتقال حسب السجل» و«الإضافات حسب السجل» و«الطوابع الناقصة حسب السجل»، لمعرفة من أي سجلات جاء كل مبلغ وكم من كل سجل.</li>
+                                <li>«نصوص التقارير والترويسة» في الإدارة ← التوقيعات والطباعة: اسم الجهة وسطر الترويسة الثاني، والمرسل إليه، والتحية، والجهة المدقّقة، وعنوانا البيان، والخاتمة، والجهة المُصدِرة؛ مع «معاينة البيان»، ومرسل إليه مختلف لسجل واحد من نافذة تقريره.</li>
                             </ul>
                         </div>
                     </li>
@@ -2090,8 +2104,38 @@
                     <span class="page-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></svg></span>
                     <div class="page-title-text">
                         <h2>التوقيعات والطباعة</h2>
-                        <p>من يوقّع في آخر التقارير: الصفات والأسماء</p>
+                        <p>ترويسة التقارير ونصوص البيان، ومن يوقّع في آخرها</p>
                     </div>
+                </div>
+
+                <!-- نصوص التقارير والترويسة: كل نص ثابت في رأس التقارير وفي البيان المرفوع قابل للتعديل -->
+                <div class="content-card" id="reportTextsCard">
+
+                    <h3>
+                        <i class="ti ti-letter-case"></i> نصوص التقارير والترويسة
+                    </h3>
+
+                    <p class="field-hint">تُطبع في رأس كل التقارير وفي البيان أول تقرير السجل. القيمة الافتراضية تعود بزر «النصوص الافتراضية».</p>
+
+                    <div class="report-texts-form">
+                        <label class="input-group"><span>اسم الجهة (السطر الأول في الترويسة) <small>(يظهر في رأس كل التقارير)</small></span><input type="text" id="rt_org" autocomplete="off"></label>
+                        <label class="input-group"><span>السطر الثاني في الترويسة <small>(مثل: فرع إدلب — مكتب المحاسبة. فارغ = بدون سطر ثانٍ)</small></span><input type="text" id="rt_unit" autocomplete="off"></label>
+                        <label class="input-group"><span>المرسل إليه في البيان <small>(فارغ = بدون مرسل إليه. يمكن تغييره لسجل واحد من نافذة تقريره)</small></span><input type="text" id="rt_to" autocomplete="off"></label>
+                        <label class="input-group"><span>التحية <small>(فارغ = بدون تحية)</small></span><input type="text" id="rt_greeting" autocomplete="off"></label>
+                        <label class="input-group"><span>الجهة التي دقّقت (داخل نص البيان) <small>(«نفيدكم بأن … قد أتمّ تدقيق السجل المذكور»)</small></span><input type="text" id="rt_auditor" autocomplete="off"></label>
+                        <label class="input-group"><span>عنوان البيان عند وجود نقص</span><input type="text" id="rt_shortageTitle" autocomplete="off"></label>
+                        <label class="input-group"><span>عنوان البيان عند عدم وجود نقص</span><input type="text" id="rt_cleanTitle" autocomplete="off"></label>
+                        <label class="input-group"><span>سطر «مرفوع إلى» تحت العنوان <small>(فارغ = لا يُطبع)</small></span><input type="text" id="rt_addressedTo" autocomplete="off"></label>
+                        <label class="input-group"><span>الخاتمة <small>(فارغ = بدون خاتمة)</small></span><input type="text" id="rt_closing" autocomplete="off"></label>
+                        <label class="input-group"><span>الجهة المُصدِرة في آخر البيان <small>(فارغ = لا يُطبع)</small></span><input type="text" id="rt_from" autocomplete="off"></label>
+                    </div>
+
+                    <div class="button-row">
+                        <button type="button" class="primary-btn" id="saveReportTextsBtn"><i class="ti ti-device-floppy"></i> حفظ النصوص</button>
+                        <button type="button" class="secondary-btn" id="previewReportTextsBtn"><i class="ti ti-eye"></i> معاينة البيان</button>
+                        <button type="button" class="secondary-btn" id="resetReportTextsBtn"><i class="ti ti-restore"></i> النصوص الافتراضية</button>
+                    </div>
+
                 </div>
 
                 <!-- توقيعات التقارير: لجنة التدقيق (رئيس + 4 أعضاء)، الصفة والاسم قابلان للتعديل -->

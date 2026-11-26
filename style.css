@@ -8767,3 +8767,121 @@ tr.is-recovered.is-selected td {
 .cf-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .saved-note { display: block; margin-top: 3px; font-size: var(--fs-xs); color: var(--text-muted, var(--text-2)); white-space: normal; }
+
+/* ================= البيان أولاً + الأقسام المطبوعة (26/11/2026) ================= */
+/* البيان صار الصفحة الأولى: يبدأ التقرير بعده في صفحة جديدة */
+.doc-recovery.doc-statement {
+    margin: 0 0 28px;
+    padding: 0 0 22px;
+    border-top: 0;
+    border-bottom: 2px dashed var(--line-strong);
+    break-before: auto;
+    page-break-before: auto;
+    break-after: page;
+    page-break-after: always;
+}
+
+@media print {
+    .doc-recovery.doc-statement { margin: 0; padding: 0; border-bottom: 0; }
+    .doc-recovery.doc-statement.is-excluded { display: none; }
+}
+
+.pdf-capture .doc-recovery.doc-statement { margin: 0; padding: 0; border-bottom: 0; }
+
+.recovery-body .statement-to { font-weight: 700; color: var(--heading); margin-bottom: 4px; }
+.recovery-body .statement-close { margin-top: 18px; }
+.recovery-body .statement-from { text-align: left; font-weight: 700; color: var(--heading); }
+.statement-facts td.num { width: 30%; font-weight: 700; }
+
+/* الأقسام غير المختارة: تظهر باهتة على الشاشة ولا تُطبع */
+.doc-excluded {
+    position: relative;
+    opacity: 0.38;
+    filter: grayscale(0.6);
+}
+
+.doc-excluded::before {
+    content: "لن يُطبع";
+    position: absolute;
+    top: 6px;
+    inset-inline-start: 6px;
+    z-index: 1;
+    padding: 1px 10px;
+    border-radius: 999px;
+    background: var(--danger);
+    color: #ffffff;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+}
+
+@media print { .doc-excluded { display: none !important; } }
+
+/* لوحة «الأقسام المطبوعة» */
+.report-sections {
+    position: relative;
+    display: inline-block;
+}
+
+.report-sections > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--heading);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+}
+
+.report-sections > summary::-webkit-details-marker { display: none; }
+.report-sections > summary b { color: var(--accent); }
+.report-sections > summary:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.report-sections-body {
+    position: absolute;
+    z-index: 30;
+    inset-inline-end: 0;
+    top: calc(100% + 6px);
+    display: grid;
+    gap: 6px;
+    min-width: 260px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    box-shadow: var(--sh-lift, 0 12px 30px rgba(0, 0, 0, 0.15));
+}
+
+.report-sections-actions { display: flex; gap: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+
+#generalSectionsBox { display: inline-block; }
+#generalSectionsBox .report-sections-body { inset-inline-end: auto; inset-inline-start: 0; }
+
+@media (max-width: 640px) {
+    .report-sections-body { position: static; min-width: 0; margin-top: 6px; }
+}
+
+/* جداول «حسب السجل» في التقرير العام */
+.by-record-table td:first-child,
+.by-record-table th:first-child { white-space: nowrap; }
+.by-record-table { font-size: var(--fs-sm); }
+
+/* نصوص التقارير والترويسة */
+.report-texts-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+    margin: 12px 0 14px;
+}
+
+.report-texts-form .input-group > span { font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
+.report-texts-form .input-group small { font-weight: 400; }
+
+@media (max-width: 640px) {
+    .report-texts-form { grid-template-columns: minmax(0, 1fr); }
+}
