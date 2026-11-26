@@ -746,6 +746,26 @@
 
                             </div>
 
+                            <!-- النوع الغالب في السجل (27/11/2026): كل وكالة جديدة تأخذه تلقائياً، ويُغيَّر نوع أي وكالة بمفردها -->
+                            <div class="input-group">
+
+                                <label for="recordDefaultType">
+                                    <i class="ti ti-file-certificate"></i> النوع الغالب في هذا السجل
+                                </label>
+
+                                <select id="recordDefaultType">
+                                    <option value="general">وكالة عامة</option>
+                                    <option value="special">وكالة خاصة</option>
+                                    <option value="legal">وكالة شرعية</option>
+                                    <option value="executive">وكالة تنفيذية</option>
+                                    <option value="certified_general_special">صورة مصدقة عامة/خاصة</option>
+                                    <option value="certified_legal">صورة مصدقة شرعية</option>
+                                </select>
+
+                                <small class="field-hint">كل وكالة جديدة تأخذ هذا النوع تلقائياً، ونوع أي وكالة يتغير من بطاقتها كالعادة.</small>
+
+                            </div>
+
                             <!-- مدقق السجل: داخل البرنامج فقط، لا يظهر في التقارير -->
                             <div class="input-group auditors-group">
 
@@ -1815,13 +1835,15 @@
                     <li class="devlog-stage">
                         <span class="devlog-dot" aria-hidden="true"><i class="ti ti-file-certificate"></i></span>
                         <div class="content-card">
-                            <p class="devlog-date">26 تشرين الثاني 2026 · الإصدار <span data-app-version></span></p>
+                            <p class="devlog-date">26–27 تشرين الثاني 2026 · الإصدار <span data-app-version></span></p>
                             <h3>البيان المرفوع إلى النقابة المركزية، والأقسام المطبوعة، وجداول «حسب السجل»</h3>
                             <ul class="devlog-list">
                                 <li>تقرير السجل يبدأ دائماً ببيان رسمي مرفوع إلى النقابة المركزية: «بيان استدراك النقص» إن وُجد نقص (قيمته وتفصيله حسب الجهة وإيصالات سداده)، أو «بيان خلوّ السجل من النقص» إن لم يوجد.</li>
                                 <li>«الأقسام المطبوعة» في تقرير السجل والتقرير العام: مربعات اختيار لكل قسم، فيُطبع ما يُختار فقط (مثلاً بدل الانتقال وحده، أو الطوابع الناقصة للفرع كله)، والقسم غير المختار يظهر باهتاً على الشاشة.</li>
                                 <li>التقرير العام: «بدل الانتقال حسب السجل» و«الإضافات حسب السجل» و«الطوابع الناقصة حسب السجل»، لمعرفة من أي سجلات جاء كل مبلغ وكم من كل سجل.</li>
                                 <li>«نصوص التقارير والترويسة» في الإدارة ← التوقيعات والطباعة: اسم الجهة وسطر الترويسة الثاني، والمرسل إليه، والتحية، والجهة المدقّقة، وعنوانا البيان، والخاتمة، والجهة المُصدِرة؛ مع «معاينة البيان»، ومرسل إليه مختلف لسجل واحد من نافذة تقريره.</li>
+                                <li>شعار الترويسة: شعار البرنامج، أو صورة من الجهاز (تُصغَّر تلقائياً)، أو بدون شعار، في كل التقارير.</li>
+                                <li>«النوع الغالب في هذا السجل» في بيانات السجل: كل وكالة جديدة تأخذه (عامة أو شرعية مثلاً)، ونوع السجل الجديد الافتراضي من «تخصيص الواجهة».</li>
                             </ul>
                         </div>
                     </li>
@@ -2117,6 +2139,23 @@
 
                     <p class="field-hint">تُطبع في رأس كل التقارير وفي البيان أول تقرير السجل. القيمة الافتراضية تعود بزر «النصوص الافتراضية».</p>
 
+                    <div class="logo-setting">
+                        <div class="logo-preview" id="rtLogoPreview" aria-label="معاينة الشعار"></div>
+                        <div class="logo-controls">
+                            <b>الشعار في ترويسة التقارير</b>
+                            <div class="pref-seg" role="radiogroup" aria-label="الشعار">
+                                <label><input type="radio" name="rtLogoMode" value="default"> شعار البرنامج</label>
+                                <label><input type="radio" name="rtLogoMode" value="custom"> شعار من جهازي</label>
+                                <label><input type="radio" name="rtLogoMode" value="none"> بدون شعار</label>
+                            </div>
+                            <span id="rtLogoPick" hidden>
+                                <button type="button" class="secondary-btn small-btn" onclick="document.getElementById('rtLogoFile').click()"><i class="ti ti-photo-up"></i> اختيار صورة</button>
+                                <small class="field-hint">PNG أو JPG؛ تُصغَّر تلقائياً لتبقى خفيفة.</small>
+                            </span>
+                            <input type="file" id="rtLogoFile" accept="image/png,image/jpeg,image/webp" class="hidden">
+                        </div>
+                    </div>
+
                     <div class="report-texts-form">
                         <label class="input-group"><span>اسم الجهة (السطر الأول في الترويسة) <small>(يظهر في رأس كل التقارير)</small></span><input type="text" id="rt_org" autocomplete="off"></label>
                         <label class="input-group"><span>السطر الثاني في الترويسة <small>(مثل: فرع إدلب — مكتب المحاسبة. فارغ = بدون سطر ثانٍ)</small></span><input type="text" id="rt_unit" autocomplete="off"></label>
@@ -2198,6 +2237,10 @@
                         <div class="pref-row">
                             <div class="pref-text"><b>كثافة الجداول</b><small>«مضغوطة» تعرض أسطراً أكثر في الشاشة</small></div>
                             <div class="pref-seg" role="radiogroup" aria-label="كثافة الجداول"><label><input type="radio" name="prefDensity" value="comfortable"> مريحة</label><label><input type="radio" name="prefDensity" value="compact"> مضغوطة</label></div>
+                        </div>
+                        <div class="pref-row">
+                            <div class="pref-text"><b>النوع الغالب للسجل الجديد</b><small>يبدأ به كل سجل جديد، ويُغيَّر لكل سجل من «بيانات السجل»</small></div>
+                            <select id="prefDefaultType" aria-label="النوع الغالب للسجل الجديد"><option value="general">وكالة عامة</option><option value="special">وكالة خاصة</option><option value="legal">وكالة شرعية</option><option value="executive">وكالة تنفيذية</option><option value="certified_general_special">صورة مصدقة عامة/خاصة</option><option value="certified_legal">صورة مصدقة شرعية</option></select>
                         </div>
                         <div class="pref-row">
                             <div class="pref-text"><b>الصفحة عند فتح البرنامج</b><small>آخر صفحة كنت فيها، أو صفحة ثابتة</small></div>

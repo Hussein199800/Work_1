@@ -243,6 +243,37 @@ check("نصوص الترويسة والبيان من الإعدادات، وال
     return okA && okB && okC && okD;
 }));
 
+/* 7هـ) الشعار في الترويسة: افتراضي / من الجهاز / بدون (27/11/2026) */
+check("الشعار: صورة من الجهاز تظهر في الترويسة، و«بدون شعار» يخفيه، والصورة غير الصالحة تُرفض", await ev(function () {
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const r = records.find(function (x) { return x.id === "r1"; });
+    reportTexts = normalizeReportTexts(Object.assign({}, reportTexts, { logoMode: "custom", logo: png }));
+    const a = buildFinalRecordReport(r, "summary", true);
+    reportTexts = normalizeReportTexts(Object.assign({}, reportTexts, { logoMode: "none" }));
+    const b = buildFinalRecordReport(r, "summary", true);
+    const bad = normalizeReportTexts({ logoMode: "custom", logo: "javascript:alert(1)" });
+    reportTexts = normalizeReportTexts(DEFAULT_REPORT_TEXTS);
+    const c = buildFinalRecordReport(r, "summary", true);
+    return a.indexOf('class="doc-logo" src="data:image/png') !== -1 && b.indexOf("doc-logo") === -1 && b.indexOf("doc-head no-logo") !== -1 &&
+        bad.logo === "" && bad.logoMode === "default" && c.indexOf("doc-logo") === -1;
+}));
+
+/* 7و) النوع الغالب في السجل: الوكالة الجديدة تأخذه، ويُحفظ مع السجل */
+await ev(function () { closeRecordModal(true); switchSection("newRecordSection"); resetRecordForm(); });
+await page.waitForTimeout(300);
+await page.selectOption("#recordDefaultType", "legal");
+await page.waitForTimeout(200);
+const defType = await ev(function () {
+    const now = document.getElementById("agencyType").value;
+    clearAgencyForm();
+    const after = document.getElementById("agencyType").value;
+    return { now: now, after: after, draft: JSON.parse(localStorage.getItem("audit_record_draft") || "{}").defaultAgencyType || "" };
+});
+check("النوع الغالب «شرعية»: الوكالة الحالية والتالية شرعية", defType.now === "legal" && defType.after === "legal", JSON.stringify(defType));
+await ev(function () { localStorage.setItem("audit_ui_default_agency_type", "general"); resetRecordForm(); });
+check("السجل الجديد يبدأ بالنوع المختار في تخصيص الواجهة", await ev(function () { return document.getElementById("recordDefaultType").value === "general" && document.getElementById("agencyType").value === "general"; }));
+await ev(function () { localStorage.removeItem("audit_ui_default_agency_type"); resetRecordForm(); });
+
 /* 8) تنزيل PDF مباشر (يحتاج الإنترنت لتحميل المكتبات) */
 const online = await ev(function () { return fetch(PDF_LIBS[0], { method: "HEAD" }).then(function (r) { return r.ok; }, function () { return false; }); });
 if (online) {
