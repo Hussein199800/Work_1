@@ -336,11 +336,14 @@ async function restore(page, data) {
     const r1 = await page.evaluate(function () { return [document.getElementById("rcv_centralReceipt").value, document.getElementById("rcv_text").value].join("|"); });
     check("R01", "A+ لا يمسح الإيصال غير المحفوظ", r1 === "4521|نص لم يُحفظ", r1);
     await page.fill("#rcv_centralReceipt", "9876");
-    await page.click(".report-toggle input");
+    /* 26/11/2026: الخيار صار في لوحة «الأقسام المطبوعة» */
+    await page.click(".report-sections > summary");
+    await page.click('.report-sections input[data-report-section="statement"]');
     await page.waitForTimeout(300);
     const r1b = await page.evaluate(function () { return document.getElementById("rcv_centralReceipt").value; });
     check("R01", "تبديل «مع بيان استدراك النقص» لا يمسح الإيصال", r1b === "9876", r1b);
-    await page.click(".report-toggle input");
+    await page.click(".report-sections > summary");
+    await page.click('.report-sections input[data-report-section="statement"]');
     const saved = await page.evaluate(function () { return JSON.stringify(records[0].recovery || null); });
     check("R01", "التنسيق لا يحفظ الإيصال تلقائياً", saved === "null", saved);
 
