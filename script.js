@@ -81,7 +81,7 @@ function isTransportEligible(type) {
 const NUMBER_LOCALE = "ar-SY-u-nu-latn";
 
 /* رقم الإصدار (24/11/2026): يزداد مع كل نشر على main؛ يظهر في «حول الموقع» ونافذة «ما الجديد» */
-const APP_VERSION = "2026.11.27.2";
+const APP_VERSION = "2026.11.27.3";
 const APP_VERSION_SEEN_KEY = "audit_ui_seen_version";
 
 /* =========================================================
@@ -502,8 +502,14 @@ const REPORT_TEXTS_REQUIRED = ["org", "auditor", "shortageTitle", "cleanTitle"];
 
 /* الشعار في ترويسة التقارير (27/11/2026، إضافي): logoMode = "default" (شعار البرنامج) | "custom" (صورة من الجهاز) | "none";
    logo = صورة مصغّرة (data:image/…) بحد أقصى LOGO_MAX_CHARS حتى تبقى خفيفة في النسخ الاحتياطية والمزامنة */
-const LOGO_MODES = ["default", "custom", "none"];
+const LOGO_MODES = ["branch", "default", "custom", "none"];
 const LOGO_MAX_CHARS = 400000;
+/* شعار الفرع (27/11/2026، من المستخدم؛ أُكمل رأس الدرع المقطوع من الأسفل) — ملف ثابت في المستودع */
+const BRANCH_LOGO_SRC = "assets/idlib-bar-logo.png";
+/* أسطر الترويسة (27/11/2026، إضافي): تُضاف وتُحذف وتُرتّب. الغياب = من org/unit القديمين، أو هذه الافتراضية */
+const DEFAULT_HEAD_LINES = ["الجمهورية العربية السورية", "نقابة المحامين", "فرع إدلب", "مكتب المحاسبة"];
+const HEAD_LINES_MAX = 8;
+const HEAD_LAYOUTS = ["official", "center", "classic"];
 
 function normalizeReportTexts(value) {
     const v = value && typeof value === "object" ? value : {};
@@ -515,17 +521,35 @@ function normalizeReportTexts(value) {
     });
     const logo = typeof v.logo === "string" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(v.logo) && v.logo.length <= LOGO_MAX_CHARS ? v.logo : "";
     out.logo = logo;
-    out.logoMode = LOGO_MODES.indexOf(v.logoMode) !== -1 ? v.logoMode : "default";
-    if (out.logoMode === "custom" && !logo) out.logoMode = "default";
+    /* الغياب = شعار الفرع (طلب المستخدم للتقارير) */
+    out.logoMode = LOGO_MODES.indexOf(v.logoMode) !== -1 ? v.logoMode : "branch";
+    if (out.logoMode === "custom" && !logo) out.logoMode = "branch";
+    if (Array.isArray(v.headLines)) {
+        out.headLines = v.headLines.map(function (x) { return String(x == null ? "" : x).trim(); }).filter(Boolean).slice(0, HEAD_LINES_MAX);
+    } else {
+        const custom = out.org !== DEFAULT_REPORT_TEXTS.org || out.unit !== DEFAULT_REPORT_TEXTS.unit;
+        out.headLines = custom ? [out.org, out.unit].filter(Boolean) : DEFAULT_HEAD_LINES.slice();
+    }
+    if (!out.headLines.length) out.headLines = [out.org];
+    out.headLayout = HEAD_LAYOUTS.indexOf(v.headLayout) !== -1 ? v.headLayout : "official";
     return out;
 }
 
+function branchLogoURL() {
+    try { return new URL(BRANCH_LOGO_SRC, location.href).href; } catch (e) { return BRANCH_LOGO_SRC; }
+}
+
 /* شعار الترويسة حسب الإعداد */
-function reportLogoHTML() {
-    if (reportTexts.logoMode === "none") return "";
-    if (reportTexts.logoMode === "custom" && reportTexts.logo) return '<img class="doc-logo" src="' + reportTexts.logo + '" alt="الشعار">';
+function reportLogoHTML(t) {
+    t = t || reportTexts;
+    if (t.logoMode === "none") return "";
+    if (t.logoMode === "custom" && t.logo) return '<img class="doc-logo" src="' + t.logo + '" alt="الشعار">';
+    if (t.logoMode === "branch") return '<img class="doc-logo doc-logo-branch" src="' + branchLogoURL() + '" alt="شعار نقابة المحامين — فرع إدلب">';
     return sealSVG();
 }
+
+/* تحميل شعار الفرع مسبقاً حتى يظهر في الطباعة وملف PDF من أول مرة */
+try { const pre = new Image(); pre.src = branchLogoURL(); } catch (e) {}
 
 let reportTexts = normalizeReportTexts(loadData(REPORT_TEXTS_KEY, null));
 
@@ -1977,7 +2001,7 @@ function (button) {
             "click",
             function () {
 
-                switchSection(
+                navigateTo(
                     button.dataset.section
                 );
 
@@ -2205,6 +2229,56 @@ function syncReportFilterMore() {
 }
 
 /* =========================================================
+حركات خفيفة (27/11/2026): ومضة تأكيد على صف السجل، ودخول متدرج لأول 8 صفوف
+(لا يتكرر مع كل حرف في البحث)، وView Transitions عند النقر على التبويبات فقط
+(لا للتقارير الثقيلة)، وإزالة هيكل التحميل عند بدء البرنامج. لا تغيير في أي منطق.
+========================================================= */
+
+function prefersReducedMotion() {
+    try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; }
+}
+
+/* ومضة لونية على صف السجل + نبضة رقمه (بعد الحفظ أو تغيير الحالة) */
+function flashRecordRow(id) {
+    if (!id) return;
+    requestAnimationFrame(function () {
+        const box = document.querySelector('#recordsTableBody input[data-sel="' + String(id).replace(/"/g, "") + '"]');
+        const row = box && box.closest("tr");
+        if (!row) return;
+        row.classList.remove("row-flash");
+        void row.offsetWidth;
+        row.classList.add("row-flash");
+        setTimeout(function () { row.classList.remove("row-flash"); }, 1000);
+    });
+}
+
+/* البحث بالكتابة لا يعيد حركة الدخول مع كل حرف */
+let recordsSearchTypingAt = 0;
+document.getElementById("recordSearch")?.addEventListener("input", function () { recordsSearchTypingAt = Date.now(); });
+
+function recordsRowsShouldAnimate() {
+    return Date.now() - recordsSearchTypingAt > 600;
+}
+
+/* التنقل بالنقر على تبويب: انتقال ناعم إن دعمه المتصفح، وإلا فوري كما كان */
+function navigateTo(id) {
+    const current = document.querySelector(".section.active-section")?.id || "";
+    const heavy = id === "reportsSection" || current === "reportsSection";
+    if (!document.startViewTransition || prefersReducedMotion() || heavy || navigator.webdriver || current === id) {
+        switchSection(id);
+        return;
+    }
+    try {
+        document.startViewTransition(function () { switchSection(id); });
+    } catch (e) {
+        switchSection(id);
+    }
+}
+
+window.flashRecordRow = flashRecordRow;
+window.navigateTo = navigateTo;
+
+/* =========================================================
 الإدارة (23/11/2026): تبويب رئيسي واحد بدل «الحاسبة» و«المستخدمون»، فيه تبويبات فرعية
 لكل واحد قسمه (section) المعتاد بنفس معرّفه، فكل الكود القديم يعمل كما هو.
 آخر تبويب فرعي مفتوح تفضيل واجهة (audit_ui_admin_tab).
@@ -2248,7 +2322,7 @@ function adminTabAllowed(id) {
     });
     document.addEventListener("click", function (event) {
         const btn = event.target.closest && event.target.closest(".admin-tab[data-section]");
-        if (btn) switchSection(btn.dataset.section);
+        if (btn) navigateTo(btn.dataset.section);
     });
 })();
 
@@ -6147,6 +6221,8 @@ recordForm.addEventListener(
                     "recordsSection"
                 );
 
+                flashRecordRow(record.id);
+
             }).catch(function (error) {
 
                 records = recordsBefore;
@@ -7030,6 +7106,8 @@ function renderRecords() {
     const canEdit = currentUser && currentUser.role !== "viewer";
     const canDelete = currentUser && currentUser.role === "manager";
 
+    /* دخول متدرج لأول 8 صفوف عند التحميل والفلترة (ليس أثناء الكتابة في البحث) */
+    tbody.classList.toggle("rows-enter", recordsRowsShouldAnimate());
     tbody.innerHTML = visible.map(function (record) {
 
         const stats = getRecordFinalStats(record);
@@ -7282,6 +7360,7 @@ function setRecordPaid(id, paid, control) {
         records[index] = updated;
         return persistRecords().then(function () {
             renderRecords();
+            flashRecordRow(updated.id);
             updateDashboard();
             notify((paid ? "السجل " + escapeHTML(updated.recordNumber) + " صار <strong>مقبوضاً</strong>." : "السجل " + escapeHTML(updated.recordNumber) + " صار <strong>غير مقبوض</strong>."), "success", 3500);
         }).catch(function (error) {
@@ -7475,7 +7554,7 @@ function saveRecoveredForm(addAnother) {
         if (idx === -1) records.push(record); else records[idx] = record;
         persistRecords().then(function () {
             notify("<strong>حُفظ السجل المسترد " + escapeHTML(recordNumber) + "</strong><span>" + escapeHTML(recoveredSourceText(record)) + "</span>", "success", 3500, true);
-            try { renderRecords(); updateDashboard(); } catch (e) {}
+            try { renderRecords(); updateDashboard(); flashRecordRow(record.id); } catch (e) {}
             if (addAnother) openRecoveredForm(); else closeRecordModal(true);
         }).catch(function (error) {
             records = before;
@@ -9605,12 +9684,28 @@ function todayArabic() {
     }
 }
 
-function docLetterhead(title, subtitle) {
-    return '<header class="doc-head' + (reportTexts.logoMode === "none" ? " no-logo" : "") + '">' +
-        reportLogoHTML() +
-        '<div class="doc-org"><strong>' + escapeHTML(reportTexts.org) + "</strong>" + (reportTexts.unit ? "<span>" + escapeHTML(reportTexts.unit) + "</span>" : "") + "</div>" +
-        '<div class="doc-title"><h2>' + title + "</h2><span>" + (subtitle || ("تاريخ الإصدار: " + todayArabic())) + "</span></div>" +
-        "</header>";
+/*
+    ترويسة كل التقارير (27/11/2026): أسطر قابلة للإضافة والحذف والترتيب، والشعار، وثلاثة أشكال:
+    official = الأسطر يمين والشعار يسار والعنوان تحتهما في الوسط (مثل ورق الفرع)،
+    center = الشعار في الوسط فوق الأسطر، classic = الشكل السابق (الشعار والجهة يمين والعنوان يسار).
+*/
+function docLetterhead(title, subtitle, texts) {
+    const t = texts || reportTexts;
+    const lines = (t.headLines && t.headLines.length ? t.headLines : [t.org, t.unit]).filter(Boolean);
+    const logo = reportLogoHTML(t);
+    const sub = subtitle || ("تاريخ الإصدار: " + todayArabic());
+    const titleHTML = '<div class="doc-title"><h2>' + title + "</h2><span>" + sub + "</span></div>";
+    if (t.headLayout === "classic") {
+        return '<header class="doc-head' + (logo ? "" : " no-logo") + '">' + logo +
+            '<div class="doc-org"><strong>' + escapeHTML(lines[0] || "") + "</strong>" +
+            lines.slice(1).map(function (l) { return "<span>" + escapeHTML(l) + "</span>"; }).join("") + "</div>" +
+            titleHTML + "</header>";
+    }
+    const linesHTML = '<div class="doc-org-lines">' + lines.map(function (l) { return "<span>" + escapeHTML(l) + "</span>"; }).join("") + "</div>";
+    return '<header class="doc-head doc-head-' + t.headLayout + (logo ? "" : " no-logo") + '">' +
+        '<div class="doc-head-top">' + (t.headLayout === "center" ? (logo ? '<div class="doc-head-logo">' + logo + "</div>" : "") + linesHTML
+            : linesHTML + (logo ? '<div class="doc-head-logo">' + logo + "</div>" : "")) + "</div>" +
+        titleHTML + "</header>";
 }
 
 function docSignatures() {
@@ -10736,9 +10831,12 @@ function showToast(html, ms, variant) {
     toast.className = "app-toast no-print toast-" + variant;
     toast.style.removeProperty("--agency-color");
     toast.setAttribute("role", variant === "error" ? "alert" : "status");
+    const duration = ms || (variant === "error" ? 6000 : 4000);
     toast.innerHTML =
         '<i class="ti ' + (TOAST_ICONS[variant] || TOAST_ICONS.info) + ' toast-icon" aria-hidden="true"></i>' +
-        '<div class="toast-body">' + html + "</div>";
+        '<div class="toast-body">' + html + "</div>" +
+        /* شريط المدة (CSS فقط): يتقلّص خلال مدة ظهور الإشعار */
+        '<span class="toast-progress" aria-hidden="true" style="--toast-ms:' + duration + 'ms"></span>';
 
     /* إعادة تشغيل الحركة حتى لو كانت الرسالة السابقة ظاهرة */
     void toast.offsetWidth;
@@ -10747,7 +10845,7 @@ function showToast(html, ms, variant) {
     clearTimeout(toast._timer);
     toast._timer = setTimeout(function () {
         toast.classList.remove("show");
-    }, ms || (variant === "error" ? 6000 : 4000));
+    }, duration);
 }
 
 function notify(message, variant, ms, rich) {
@@ -11605,13 +11703,13 @@ function repDefaults() {
 /* تذكير التخصيص: هل التوقيعات والترويسة مضبوطة؟ */
 function reportReadinessHTML() {
     const signers = auditSigners().filter(function (x) { return x.name; }).length;
-    const customLetter = reportTexts.org !== DEFAULT_REPORT_TEXTS.org || reportTexts.unit !== DEFAULT_REPORT_TEXTS.unit || reportTexts.logoMode !== "default";
+    const customLetter = reportTexts.headLines.join("|") !== DEFAULT_HEAD_LINES.join("|") || reportTexts.logoMode !== "branch";
     const isManager = currentUser && currentUser.role === "manager";
     return '<ul class="qs-checks">' +
         "<li class=\"" + (signers ? "ok" : "todo") + "\"><i class=\"ti " + (signers ? "ti-circle-check" : "ti-alert-circle") + "\" aria-hidden=\"true\"></i> " +
             (signers ? "أسماء التوقيعات مضبوطة (" + signers + ")" : "أسماء لجنة التدقيق فارغة — تُطبع خطوطاً للكتابة باليد") + "</li>" +
         "<li class=\"" + (customLetter ? "ok" : "info") + "\"><i class=\"ti " + (customLetter ? "ti-circle-check" : "ti-info-circle") + "\" aria-hidden=\"true\"></i> " +
-            (customLetter ? "الترويسة مخصّصة: " + escapeHTML(reportTexts.org) : "الترويسة بالنص الافتراضي: " + escapeHTML(reportTexts.org) + (reportTexts.unit ? " — " + escapeHTML(reportTexts.unit) : "")) + "</li>" +
+            (customLetter ? "الترويسة مخصّصة: " : "الترويسة الافتراضية: ") + escapeHTML(reportTexts.headLines.join(" — ")) + "</li>" +
         "</ul>" +
         (isManager ? '<button type="button" class="link-btn" data-qs-go="printSettingsSection"><i class="ti ti-adjustments" aria-hidden="true"></i> تخصيص التقرير</button>' : "");
 }
@@ -11749,6 +11847,8 @@ window.openRecordQuickStart = openRecordQuickStart;
 
 /* الشعار المختار في النموذج قبل الحفظ */
 let reportLogoDraft = null;
+/* أسطر الترويسة وشكلها في النموذج قبل الحفظ */
+let reportHeadDraft = null;
 
 function renderReportTextsForm(source) {
     const t = source || reportTexts;
@@ -11756,20 +11856,47 @@ function renderReportTextsForm(source) {
         const el = document.getElementById("rt_" + k);
         if (el) { el.value = t[k] || ""; el.placeholder = DEFAULT_REPORT_TEXTS[k]; }
     });
-    reportLogoDraft = { mode: t.logoMode || "default", logo: t.logo || "" };
+    reportLogoDraft = { mode: t.logoMode || "branch", logo: t.logo || "" };
+    reportHeadDraft = { lines: (t.headLines || DEFAULT_HEAD_LINES).slice(), layout: t.headLayout || "official" };
     syncLogoForm();
+    renderHeadEditor();
 }
 
 function syncLogoForm() {
-    const d = reportLogoDraft || { mode: "default", logo: "" };
+    const d = reportLogoDraft || { mode: "branch", logo: "" };
     document.querySelectorAll('input[name="rtLogoMode"]').forEach(function (r) { r.checked = r.value === d.mode; });
     const prev = document.getElementById("rtLogoPreview");
     if (prev) {
         prev.innerHTML = d.mode === "none" ? '<span class="logo-none">بدون شعار</span>'
             : d.mode === "custom" && d.logo ? '<img src="' + d.logo + '" alt="الشعار المختار">'
+            : d.mode === "branch" ? '<img src="' + branchLogoURL() + '" alt="شعار الفرع">'
             : sealSVG();
     }
     document.getElementById("rtLogoPick")?.toggleAttribute("hidden", d.mode !== "custom");
+    renderHeadPreview();
+}
+
+function renderHeadEditor() {
+    const list = document.getElementById("rtHeadLines");
+    if (!list || !reportHeadDraft) return;
+    const lines = reportHeadDraft.lines;
+    list.innerHTML = lines.map(function (l, i) {
+        return '<li><input type="text" data-head-line="' + i + '" value="' + escapeHTML(l) + '" aria-label="سطر الترويسة ' + (i + 1) + '">' +
+            '<span class="head-line-actions">' +
+            '<button type="button" class="icon-btn" data-head-up="' + i + '"' + (i === 0 ? " disabled" : "") + ' aria-label="تقديم السطر"><i class="ti ti-chevron-up"></i></button>' +
+            '<button type="button" class="icon-btn" data-head-down="' + i + '"' + (i === lines.length - 1 ? " disabled" : "") + ' aria-label="تأخير السطر"><i class="ti ti-chevron-down"></i></button>' +
+            '<button type="button" class="icon-btn act-danger" data-head-del="' + i + '"' + (lines.length <= 1 ? " disabled" : "") + ' aria-label="حذف السطر"><i class="ti ti-trash"></i></button>' +
+            "</span></li>";
+    }).join("");
+    document.getElementById("rtAddHeadLine")?.toggleAttribute("disabled", lines.length >= HEAD_LINES_MAX);
+    document.querySelectorAll('input[name="rtHeadLayout"]').forEach(function (r) { r.checked = r.value === reportHeadDraft.layout; });
+    renderHeadPreview();
+}
+
+function renderHeadPreview() {
+    const box = document.getElementById("rtHeadPreview");
+    if (!box) return;
+    box.innerHTML = docLetterhead("التقرير المختصر للسجل", "تاريخ الإصدار: " + todayArabic(), readReportTextsForm());
 }
 
 function readReportTextsForm() {
@@ -11781,8 +11908,35 @@ function readReportTextsForm() {
     const d = reportLogoDraft || { mode: reportTexts.logoMode, logo: reportTexts.logo };
     v.logoMode = d.mode;
     v.logo = d.logo;
+    const hd = reportHeadDraft || { lines: reportTexts.headLines, layout: reportTexts.headLayout };
+    v.headLines = hd.lines;
+    v.headLayout = hd.layout;
     return normalizeReportTexts(v);
 }
+
+document.getElementById("reportTextsCard")?.addEventListener("input", function (event) {
+    const t = event.target;
+    if (t.dataset && t.dataset.headLine !== undefined && reportHeadDraft) {
+        reportHeadDraft.lines[Number(t.dataset.headLine)] = t.value;
+    }
+    renderHeadPreview();
+});
+
+document.getElementById("reportTextsCard")?.addEventListener("click", function (event) {
+    if (!reportHeadDraft) return;
+    const lines = reportHeadDraft.lines;
+    const b = event.target.closest && event.target.closest("[data-head-up],[data-head-down],[data-head-del],#rtAddHeadLine");
+    if (!b) return;
+    if (b.id === "rtAddHeadLine") {
+        if (lines.length < HEAD_LINES_MAX) { lines.push(""); renderHeadEditor(); const inputs = document.querySelectorAll("#rtHeadLines input"); inputs[inputs.length - 1]?.focus(); }
+        return;
+    }
+    const i = Number(b.dataset.headUp !== undefined ? b.dataset.headUp : b.dataset.headDown !== undefined ? b.dataset.headDown : b.dataset.headDel);
+    if (b.dataset.headUp !== undefined && i > 0) { const x = lines[i]; lines[i] = lines[i - 1]; lines[i - 1] = x; }
+    if (b.dataset.headDown !== undefined && i < lines.length - 1) { const x = lines[i]; lines[i] = lines[i + 1]; lines[i + 1] = x; }
+    if (b.dataset.headDel !== undefined && lines.length > 1) lines.splice(i, 1);
+    renderHeadEditor();
+});
 
 /* تصغير الصورة المختارة إلى 320 بكسل كحد أقصى (PNG للشفافية، وJPEG إن بقيت كبيرة) */
 function shrinkLogo(file) {
@@ -11813,6 +11967,7 @@ function shrinkLogo(file) {
 
 document.getElementById("reportTextsCard")?.addEventListener("change", function (event) {
     const t = event.target;
+    if (t.name === "rtHeadLayout" && reportHeadDraft) { reportHeadDraft.layout = t.value; renderHeadPreview(); }
     if (t.name === "rtLogoMode") {
         reportLogoDraft = Object.assign({}, reportLogoDraft, { mode: t.value });
         syncLogoForm();
@@ -11846,7 +12001,7 @@ document.getElementById("saveReportTextsBtn")?.addEventListener("click", functio
 
 /* الافتراضية في النموذج فقط؛ لا تُحفظ إلا بزر الحفظ */
 document.getElementById("resetReportTextsBtn")?.addEventListener("click", function () {
-    renderReportTextsForm(DEFAULT_REPORT_TEXTS);
+    renderReportTextsForm(normalizeReportTexts({}));
     notify("أُعيدت النصوص الافتراضية في النموذج — اضغط «حفظ النصوص» لاعتمادها.", "info");
 });
 
@@ -19143,6 +19298,7 @@ function fbSync(reason) {
     }
 
     renderFirebasePanel("syncing");
+    document.documentElement.classList.add("is-fb-syncing");
 
     fbSyncing = (first && records.length ? Promise.resolve().then(function () {
         /* أول مزامنة على هذا الجهاز: نسخة كاملة قبل أي شيء */
@@ -19356,6 +19512,7 @@ function fbSync(reason) {
         return false;
     }).then(function (ok) {
         fbSyncing = null;
+        document.documentElement.classList.remove("is-fb-syncing");
         renderFirebasePanel();
         if (fbSyncAgain) { fbSyncAgain = false; fbScheduleSync(1000); }
         return ok;
@@ -20223,7 +20380,7 @@ onReady(function () {
     const seen = readUiPref(APP_VERSION_SEEN_KEY, "");
     writeUiPref(APP_VERSION_SEEN_KEY, APP_VERSION);
     if (!seen || seen === APP_VERSION || !currentUser) return;
-    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>تقرير السجل يبدأ ببيان رسمي (استدراك النقص، أو خلوّ السجل من النقص) بنصوص وترويسة وشعار تُعدَّل من «التوقيعات والطباعة» ومرسل إليه لكل سجل، و«النوع الغالب في السجل» لكل سجل جديد، وشاشة سريعة عند إنشاء سجل (مع «تخطي») وأزرار التاريخ اليوم / أمس، و«الأقسام المطبوعة» لاختيار ما يُطبع من تقرير السجل والتقرير العام، وفي التقرير العام: بدل الانتقال والإضافات والطوابع الناقصة حسب السجل. التفاصيل في الإدارة ← حول الموقع.</span>", "info", 12000, true);
+    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>ترويسة التقارير الرسمية: شعار الفرع، وأسطر تُضاف وتُحذف وتُرتّب (الجمهورية العربية السورية، نقابة المحامين، فرع إدلب، مكتب المحاسبة)، وثلاثة أشكال، مع معاينة — من الإدارة ← التوقيعات والطباعة. وحركات خفيفة: ومضة على السجل بعد حفظه، وشريط مدة للإشعارات، وهيكل تحميل هادئ عند الفتح.</span>", "info", 12000, true);
 });
 
 window.exportAuditTable = exportAuditTable;
@@ -20562,3 +20719,8 @@ updateAll = function () {
 if (typeof currentUser !== "undefined" && currentUser) {
     restoreRecordDraft();
 }
+
+/* هيكل التحميل: يُزال بعد أن ينتهي كل ما يُنفَّذ عند الفتح (آخر onReady في الملف) */
+onReady(function () {
+    setTimeout(function () { document.documentElement.classList.remove("app-booting"); }, 0);
+});
