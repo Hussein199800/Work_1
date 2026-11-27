@@ -81,7 +81,7 @@ function isTransportEligible(type) {
 const NUMBER_LOCALE = "ar-SY-u-nu-latn";
 
 /* رقم الإصدار (24/11/2026): يزداد مع كل نشر على main؛ يظهر في «حول الموقع» ونافذة «ما الجديد» */
-const APP_VERSION = "2026.11.27.3";
+const APP_VERSION = "2026.11.27.4";
 const APP_VERSION_SEEN_KEY = "audit_ui_seen_version";
 
 /* =========================================================
@@ -11233,8 +11233,7 @@ function printFinalRecordReport(id, mode) {
 
 const PDF_LIBS = [
     "https://cdn.jsdelivr.net/npm/html2canvas-pro@1.5.8/dist/html2canvas-pro.min.js",
-    "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
-    "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.min.js"
+    "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
 ];
 
 let pdfLibsLoading = null;
@@ -11252,7 +11251,7 @@ function loadScriptOnce(src) {
 }
 
 function loadPdfLibs() {
-    if (window.html2pdf && window.html2canvas) return Promise.resolve();
+    if (window.jspdf && window.html2canvas) return Promise.resolve();
     if (!pdfLibsLoading) {
         pdfLibsLoading = PDF_LIBS.reduce(function (p, src) {
             return p.then(function () { return loadScriptOnce(src); });
@@ -11295,6 +11294,330 @@ function pdfCaptureCSS() {
 
 let pdfBusy = false;
 
+/*
+    ترقيم صفحات PDF يدوياً (27/11/2026): كانت أداة html2pdf تقصّ صورة المستند
+    الطويلة على حدود الصفحة، فتنقسم الجداول (والجدولان المتجاوران) من منتصف
+    الصفوف، وتظهر صفحة فارغة قبل البيان. الآن تُوزَّع عناصر المستند على صفحات
+    A4 حقيقية قبل الالتقاط: كل عنصر يُقاس داخل الصفحة نفسها، فإن لم يتسع
+    انتقل كاملاً إلى صفحة جديدة؛ الجدول الطويل يُقسم بين الصفوف مع تكرار
+    رأسه، والعناوين لا تبقى وحدها أسفل الصفحة، والقسمان المتجاوران يُكدَّسان
+    عمودياً إن لزم تقسيمهما، ولا تُضاف صفحة فارغة أبداً. ثم تُلتقط كل صفحة وحدها.
+*/
+const PDF_PAGE = {
+    /* الهوامش بالملم: أعلى، يمين/يسار، أسفل — كما في @page للطباعة */
+    margin: { top: 10, side: 9, bottom: 12 },
+    portrait: { w: 726, mmW: 192, mmH: 275 },
+    landscape: { w: 1054, mmW: 279, mmH: 188 }
+};
+/* عناصر لا تُقسم أبداً (تنتقل كاملة؛ إن كانت أطول من صفحة كاملة تُصغَّر) */
+const PDF_ATOMIC = "p, li, tr, h1, h2, h3, h4, h5, dl, img, svg, .doc-head, .doc-meta, .doc-due, .doc-record-note, .doc-sign-block, .doc-committee-sign, .recovery-receipt, .doc-kpis";
+/* ما يبقى مع العنصر الذي يليه */
+const PDF_KEEP_NEXT = "h1, h2, h3, h4, h5, .doc-head";
+
+function paginateForPDF(sourceRoot, shelf, pageClass, size) {
+
+    const doc = shelf.ownerDocument;
+    const win = doc.defaultView;
+    const getComputedStyle = function (el) { return win.getComputedStyle(el); };
+    const pageW = size.w;
+    const pageH = Math.floor(size.mmH * size.w / size.mmW);
+    const pages = [];
+    const stacked = new WeakSet();
+    let cur = null;
+
+    const newPage = function () {
+        const page = doc.createElement("div");
+        page.className = pageClass + " pdf-page";
+        page.style.cssText = "background:#fff;width:" + pageW + "px;display:flow-root;";
+        shelf.appendChild(page);
+        cur = { page: page, chain: [], count: 0, lastKeep: null };
+        pages.push(cur);
+    };
+
+    const height = function () { return cur.page.getBoundingClientRect().height; };
+    const fits = function () { return height() <= pageH + 0.5; };
+
+    /* أغلفة العنصر (أسلافه) في الصفحة الحالية: نسخ سطحية تُعاد في كل صفحة */
+    const shellFor = function (ancestors) {
+        let i = 0;
+        while (i < cur.chain.length && i < ancestors.length && cur.chain[i].src === ancestors[i]) i++;
+        cur.chain.length = i;
+        let parent = i ? cur.chain[i - 1].clone : cur.page;
+        for (; i < ancestors.length; i++) {
+            const src = ancestors[i];
+            const clone = src.cloneNode(false);
+            if (clone.removeAttribute) clone.removeAttribute("id");
+            if (stacked.has(src)) { clone.style.display = "block"; clone.classList.add("pdf-stacked"); }
+            parent.appendChild(clone);
+            cur.chain.push({ src: src, clone: clone });
+            parent = clone;
+        }
+        return parent;
+    };
+
+    /* حذف نسخة وأغلفتها التي أصبحت فارغة */
+    const detach = function (clone) {
+        let parent = clone.parentNode;
+        clone.remove();
+        while (parent && parent !== cur.page && !parent.firstElementChild) {
+            const up = parent.parentNode;
+            const at = cur.chain.findIndex(function (c) { return c.clone === parent; });
+            if (at !== -1) cur.chain.length = at;
+            parent.remove();
+            parent = up;
+        }
+    };
+
+    /* صفحة جديدة؛ العنوان المعلّق أسفل الصفحة السابقة ينتقل معها */
+    const breakPage = function () {
+        if (!cur.count) return;
+        const keep = cur.lastKeep;
+        if (keep && cur.count > 1) {
+            detach(keep.clone);
+            cur.count -= 1;
+            newPage();
+            place(keep.src, keep.ancestors);
+        } else {
+            newPage();
+        }
+    };
+
+    const isAtomic = function (el) { return el.matches && el.matches(PDF_ATOMIC); };
+    const shown = function (el) { return getComputedStyle(el).display !== "none"; };
+    const breakValue = function (el, side) {
+        const st = getComputedStyle(el);
+        return st[side === "after" ? "breakAfter" : "breakBefore"] === "page" ||
+            st[side === "after" ? "pageBreakAfter" : "pageBreakBefore"] === "always";
+    };
+
+    const commit = function (src, clone, ancestors) {
+        cur.count += 1;
+        cur.lastKeep = src.matches && src.matches(PDF_KEEP_NEXT) ? { src: src, clone: clone, ancestors: ancestors } : null;
+    };
+
+    /* عنصر أطول من صفحة كاملة ولا يقبل التقسيم: يُصغَّر ليتسع */
+    const placeScaled = function (node, ancestors) {
+        const parent = shellFor(ancestors);
+        const box = doc.createElement("div");
+        const clone = node.cloneNode(true);
+        box.appendChild(clone);
+        parent.appendChild(box);
+        const room = pageH - (height() - box.getBoundingClientRect().height);
+        const k = Math.max(0.3, Math.min(1, room / Math.max(1, clone.getBoundingClientRect().height)));
+        box.style.cssText = "overflow:hidden;height:" + Math.floor(clone.getBoundingClientRect().height * k) + "px";
+        clone.style.transformOrigin = "top right";
+        clone.style.transform = "scale(" + k + ")";
+        clone.style.width = (100 / k) + "%";
+        commit(node, box, ancestors);
+    };
+
+    const placeTable = function (table, ancestors) {
+        const head = table.tHead;
+        const foot = table.tFoot;
+        const rows = [];
+        Array.prototype.forEach.call(table.tBodies, function (body) {
+            Array.prototype.forEach.call(body.rows, function (row) { rows.push(row); });
+        });
+        if (!rows.length && !foot) { placeScaled(table, ancestors); return; }
+
+        let chunk = null, body = null, placedInChunk = 0;
+        const startChunk = function () {
+            const parent = shellFor(ancestors);
+            chunk = table.cloneNode(false);
+            Array.prototype.forEach.call(table.children, function (child) {
+                if (child.tagName === "CAPTION" || child.tagName === "COLGROUP") chunk.appendChild(child.cloneNode(true));
+            });
+            if (head) chunk.appendChild(head.cloneNode(true));
+            body = doc.createElement("tbody");
+            chunk.appendChild(body);
+            parent.appendChild(chunk);
+            placedInChunk = 0;
+        };
+        const restartOnNewPage = function () {
+            detach(chunk);
+            breakPage();
+            startChunk();
+        };
+
+        startChunk();
+        if (!fits()) {
+            restartOnNewPage();
+        }
+        const pageHadContent = cur.count > 0;
+        let restarted = false;
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i].cloneNode(true);
+            body.appendChild(row);
+            if (fits()) { placedInChunk += 1; continue; }
+            row.remove();
+            /* لا يبقى صف أو صفّان وحدهما أسفل الصفحة: يبدأ الجدول في صفحة جديدة */
+            if (!restarted && placedInChunk < 2 && i === placedInChunk && pageHadContent && cur.count > 0) {
+                restarted = true;
+                body.innerHTML = "";
+                restartOnNewPage();
+                i = -1;
+                continue;
+            }
+            commit(table, chunk, ancestors);
+            breakPage();
+            startChunk();
+            body.appendChild(row);
+            placedInChunk = 1;
+            if (!fits()) { /* صف أطول من صفحة: يبقى كما هو */ }
+        }
+        if (foot) {
+            const footClone = foot.cloneNode(true);
+            chunk.appendChild(footClone);
+            if (!fits()) {
+                footClone.remove();
+                /* المجموع لا يبقى وحده: ينتقل معه آخر صف */
+                const last = body.lastElementChild;
+                if (last && placedInChunk > 2) last.remove();
+                commit(table, chunk, ancestors);
+                breakPage();
+                startChunk();
+                if (last && placedInChunk > 2) body.appendChild(last);
+                chunk.appendChild(footClone);
+            }
+        }
+        commit(table, chunk, ancestors);
+    };
+
+    const place = function (node, ancestors) {
+        if (node.nodeType !== 1 || !shown(node)) return;
+        if (breakValue(node, "before")) breakPage();
+
+        const parent = shellFor(ancestors);
+        const clone = node.cloneNode(true);
+        parent.appendChild(clone);
+        if (fits()) {
+            commit(node, clone, ancestors);
+            if (breakValue(node, "after")) breakPage();
+            return;
+        }
+        const tall = clone.getBoundingClientRect().height;
+        const cs = getComputedStyle(clone);
+        /* متجاوران فعلاً: شبكة بأكثر من عمود أو صف مرن (الشبكة بعمود واحد تُقسم كأي قسم) */
+        const sideBySide = !isAtomic(node) && node.children.length > 1 &&
+            ((/grid/.test(cs.display) && cs.gridTemplateColumns.trim().split(/\s+/).length > 1) ||
+             (/flex/.test(cs.display) && !/column/.test(cs.flexDirection)));
+        detach(clone);
+        const wasEmpty = cur.count === 0;
+
+        /* صفحة مستقلة (البيان) أطول قليلاً من الصفحة: تُصغَّر لتبقى صفحة واحدة بلا ذيل وحيد */
+        if (breakValue(node, "after") && tall <= pageH * 1.3) {
+            if (!wasEmpty) breakPage();
+            placeScaled(node, ancestors);
+            breakPage();
+            return;
+        }
+
+        /* العنصر الصغير (أو القسمان المتجاوران إن اتسعا لصفحة كاملة) لا يُقسم: ينتقل كاملاً إلى صفحة جديدة */
+        if (!wasEmpty && (isAtomic(node) || tall <= pageH * 0.45 || (sideBySide && tall <= pageH))) {
+            breakPage();
+            place(node, ancestors);
+            return;
+        }
+        if (node.tagName === "TABLE") {
+            placeTable(node, ancestors);
+        } else if (!isAtomic(node) && node.firstElementChild && node.tagName !== "THEAD" && node.tagName !== "TBODY") {
+            if (sideBySide) stacked.add(node);
+            const inner = ancestors.concat([node]);
+            Array.prototype.forEach.call(node.children, function (child) { place(child, inner); });
+        } else if (!wasEmpty) {
+            breakPage();
+            place(node, ancestors);
+            return;
+        } else {
+            placeScaled(node, ancestors);
+        }
+        if (breakValue(node, "after")) breakPage();
+    };
+
+    newPage();
+    Array.prototype.forEach.call(sourceRoot.children, function (child) {
+        if (child.tagName !== "STYLE") place(child, []);
+    });
+
+    /* لا صفحات فارغة أبداً */
+    return pages.filter(function (p) {
+        if (p.count && p.page.textContent.trim()) return true;
+        p.page.remove();
+        return false;
+    }).map(function (p) { return p.page; });
+}
+
+/* إطار مخفي بعرض سطح المكتب فيه أنماط الصفحة نفسها */
+function makePdfFrame() {
+    return new Promise(function (resolve, reject) {
+        const frame = document.createElement("iframe");
+        frame.setAttribute("aria-hidden", "true");
+        frame.tabIndex = -1;
+        frame.style.cssText = "position:fixed;top:0;left:-30000px;width:1400px;height:1000px;border:0;";
+        document.body.appendChild(frame);
+        const doc = frame.contentDocument;
+        const heads = Array.prototype.map.call(document.querySelectorAll('link[rel="stylesheet"], style'), function (el) {
+            return el.outerHTML;
+        }).join("");
+        doc.open();
+        doc.write('<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><base href="' +
+            escapeHTML(location.href) + '">' + heads + '</head><body style="margin:0;background:#fff"></body></html>');
+        doc.close();
+        const links = Array.prototype.slice.call(doc.querySelectorAll('link[rel="stylesheet"]'));
+        let left = links.length;
+        const done = function () { resolve(frame); };
+        if (!left) { done(); return; }
+        const timer = setTimeout(done, 8000);
+        links.forEach(function (link) {
+            if (link.sheet) { if (--left === 0) { clearTimeout(timer); done(); } return; }
+            link.onload = link.onerror = function () { if (--left === 0) { clearTimeout(timer); done(); } };
+        });
+        frame.onerror = function () { clearTimeout(timer); reject(new Error("تعذر تجهيز صفحة PDF")); };
+    });
+}
+
+/*
+    مصادر الصفحات داخل الإطار: البيان الرسمي (رسالة إلى مجلس النقابة) يُطبع
+    عمودياً دائماً حتى في التقرير المفصل الأفقي، فلا يضيق ولا يمتد إلى صفحة ثانية.
+*/
+function preparePdfSources(doc, bodyHTML, landscape) {
+    const make = function (land) {
+        const size = land ? PDF_PAGE.landscape : PDF_PAGE.portrait;
+        const cls = "pdf-capture print-doc" + (land ? " print-landscape" : "");
+        const src = doc.createElement("div");
+        src.className = cls;
+        src.style.cssText = "background:#fff;width:" + size.w + "px";
+        return { src: src, size: size, cls: cls, landscape: land };
+    };
+    const main = make(landscape);
+    main.src.innerHTML = bodyHTML;
+    main.src.querySelectorAll(".no-print, .report-actions, .doc-excluded").forEach(function (el) { el.remove(); });
+    doc.body.appendChild(main.src);
+    const parts = [];
+    const statement = landscape ? main.src.querySelector(".doc-statement") : null;
+    if (statement && doc.defaultView.getComputedStyle(statement).display !== "none") {
+        const part = make(false);
+        const root = statement.parentNode;
+        const shell = root === main.src ? part.src : part.src.appendChild(root.cloneNode(false));
+        shell.appendChild(statement);
+        doc.body.appendChild(part.src);
+        parts.push(part);
+    }
+    parts.push(main);
+    return parts;
+}
+
+function paginatePdfSources(parts) {
+    const pages = [];
+    parts.forEach(function (part) {
+        paginateForPDF(part.src, part.src.ownerDocument.body, part.cls, part.size).forEach(function (page) {
+            pages.push({ page: page, size: part.size, landscape: part.landscape });
+        });
+        part.src.remove();
+    });
+    return pages;
+}
+
 function downloadReportPDF(bodyHTML, fileTitle, landscape) {
 
     if (pdfBusy) return Promise.resolve(false);
@@ -11302,43 +11625,55 @@ function downloadReportPDF(bodyHTML, fileTitle, landscape) {
 
     showToast("<strong>جارٍ تجهيز ملف PDF…</strong><span>قد يستغرق بضع ثوانٍ للسجل الكبير.</span>", 30000, "info");
 
-    let host = null, style = null, shelf = null;
+    let frame = null, parts = null;
 
     return loadPdfLibs().then(function () {
+        return makePdfFrame();
+    }).then(function (made) {
 
-        /* قواعد الطباعة داخل الحاوية نفسها: أداة الالتقاط تنسخ الحاوية بما فيها */
-        style = document.createElement("style");
+        /* الإطار بعرض سطح المكتب (1400): القياس والالتقاط بتخطيط الطباعة نفسه حتى على الموبايل.
+           (القياس في نافذة الموبايل كان يعطي ارتفاعات أكبر من الملتقطة فتبقى مساحات فارغة) */
+        frame = made;
+        const doc = frame.contentDocument;
+        const style = doc.createElement("style");
         style.textContent = pdfCaptureCSS();
+        doc.head.appendChild(style);
+        parts = preparePdfSources(doc, bodyHTML, landscape);
 
-        /* عرض صفحة A4 الداخلي (هوامش 9 ملم) بالبكسل: 192 ملم عمودي، 279 ملم أفقي */
-        /* الحاوية نفسها بلا إزاحة (المكتبة تنسخها كما هي)، والرف حولها خارج الشاشة */
-        shelf = document.createElement("div");
-        shelf.style.cssText = "position:fixed;top:0;left:-30000px;";
-        host = document.createElement("div");
-        host.className = "pdf-capture print-doc" + (landscape ? " print-landscape" : "");
-        host.style.cssText = "background:#fff;width:" + (landscape ? 1054 : 726) + "px";
-        host.innerHTML = bodyHTML;
-        host.querySelectorAll(".no-print, .report-actions").forEach(function (el) { el.remove(); });
-        host.insertBefore(style, host.firstChild);
-        shelf.appendChild(host);
-        document.body.appendChild(shelf);
-
-        return (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
+        const images = Array.prototype.map.call(doc.querySelectorAll("img"), function (img) {
+            return img.complete ? null : new Promise(function (r) { img.onload = img.onerror = r; });
+        }).filter(Boolean);
+        return Promise.all([doc.fonts && doc.fonts.ready ? doc.fonts.ready : null].concat(images));
 
     }).then(function () {
 
-        return window.html2pdf().set({
-            margin: [10, 9, 12, 9],
-            image: { type: "jpeg", quality: 0.92 },
-            /* عرض نافذة سطح المكتب: تخطيط الطباعة نفسه حتى على شاشة الموبايل */
-            html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", windowWidth: 1400, logging: false },
-            jsPDF: { unit: "mm", format: "a4", orientation: landscape ? "landscape" : "portrait", compress: true },
-            pagebreak: {
-                mode: ["css", "legacy"],
-                before: [".doc-recovery"],
-                avoid: ["tr", ".doc-head", ".doc-section > h3", ".doc-record-note", ".doc-sign", ".doc-summary-row", ".doc-notes li", ".recovery-receipt", ".recovery-body h4"]
-            }
-        }).from(host).outputPdf("blob");
+        const pages = paginatePdfSources(parts);
+        const JsPDF = window.jspdf.jsPDF;
+        const first = pages[0] || { landscape: landscape };
+        const pdf = new JsPDF({ unit: "mm", format: "a4", orientation: first.landscape ? "landscape" : "portrait", compress: true });
+        const m = PDF_PAGE.margin;
+
+        return pages.reduce(function (p, item, index) {
+            const page = item.page;
+            const size = item.size;
+            const pageWmm = item.landscape ? 297 : 210;
+            const pageHmm = item.landscape ? 210 : 297;
+            return p.then(function () {
+                return window.html2canvas(page, { scale: 2, useCORS: true, backgroundColor: "#ffffff", windowWidth: 1400, logging: false });
+            }).then(function (canvas) {
+                if (index) pdf.addPage("a4", item.landscape ? "landscape" : "portrait");
+                const hmm = Math.min(size.mmH, canvas.height * size.mmW / canvas.width);
+                pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", m.side, m.top, size.mmW, hmm, undefined, "FAST");
+                /* رقم الصفحة أسفلها (أرقام لاتينية: خط jsPDF الافتراضي لا يدعم العربية) */
+                if (pages.length > 1) {
+                    pdf.setFontSize(8);
+                    pdf.setTextColor(120);
+                    pdf.text((index + 1) + " / " + pages.length, pageWmm / 2, pageHmm - 5, { align: "center" });
+                }
+            });
+        }, Promise.resolve()).then(function () {
+            return pdf.output("blob");
+        });
 
     }).then(function (blob) {
         /* تنزيل بالاسم نفسه الذي تقترحه نافذة الطباعة (عنوان التقرير) */
@@ -11359,7 +11694,7 @@ function downloadReportPDF(bodyHTML, fileTitle, landscape) {
             "استخدم «حفظ PDF من نافذة الطباعة».</span>", "error", 10000, true);
         return false;
     }).then(function (ok) {
-        if (shelf) shelf.remove();
+        if (frame) frame.remove();
         pdfBusy = false;
         return ok;
     });
@@ -20380,7 +20715,7 @@ onReady(function () {
     const seen = readUiPref(APP_VERSION_SEEN_KEY, "");
     writeUiPref(APP_VERSION_SEEN_KEY, APP_VERSION);
     if (!seen || seen === APP_VERSION || !currentUser) return;
-    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>ترويسة التقارير الرسمية: شعار الفرع، وأسطر تُضاف وتُحذف وتُرتّب (الجمهورية العربية السورية، نقابة المحامين، فرع إدلب، مكتب المحاسبة)، وثلاثة أشكال، مع معاينة — من الإدارة ← التوقيعات والطباعة. وحركات خفيفة: ومضة على السجل بعد حفظه، وشريط مدة للإشعارات، وهيكل تحميل هادئ عند الفتح.</span>", "info", 12000, true);
+    notify("<strong>ما الجديد في الإصدار " + APP_VERSION + "</strong><span>«تنزيل PDF» أعيد بناؤه: لا جداول مقصوصة ولا صفحات فارغة في أي حالة (بنقص أو بلا نقص، مختصر أو مفصل). الجدول الطويل ينقسم بين الصفوف مع تكرار رأسه، والبيان المرفوع إلى النقابة في صفحة عمودية واحدة، وأرقام الصفحات أسفل كل صفحة. وقبله: ترويسة التقارير الرسمية بشعار الفرع وأسطر قابلة للتخصيص.</span>", "info", 12000, true);
 });
 
 window.exportAuditTable = exportAuditTable;
