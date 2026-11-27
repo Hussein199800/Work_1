@@ -9035,3 +9035,310 @@ tr.is-recovered.is-selected td {
     .qs-actions button { flex: 1; }
     .page-title .qs-open-btn span { display: none; }
 }
+
+/* =========================================================
+   حركات خفيفة (Micro-interactions) — 27/11/2026
+   CSS خالص + View Transitions للتنقل فقط. خصائص GPU فقط (transform / opacity)،
+   بتوقيت موحّد. كل شيء يتوقف مع «تقليل الحركة»، ولا شيء منها يلمس التقارير
+   أو الطباعة أو ملف PDF (#printRoot / .pdf-capture / .doc) حتى لا تُصوَّر شفافة.
+   ========================================================= */
+:root {
+    --ease-out-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 150ms;
+    --dur-base: 220ms;
+}
+
+@media screen and (prefers-reduced-motion: no-preference) {
+
+    /* 1) دخول متدرج: بطاقات الإحصاءات، وأول 8 صفوف فقط من جدول السجلات */
+    .section.active-section .dash-kpis > .stat-card {
+        animation: miRise var(--dur-base) var(--ease-out-smooth) both;
+    }
+    .section.active-section .dash-kpis > .stat-card:nth-child(2) { animation-delay: 30ms; }
+    .section.active-section .dash-kpis > .stat-card:nth-child(3) { animation-delay: 60ms; }
+    .section.active-section .dash-kpis > .stat-card:nth-child(4) { animation-delay: 90ms; }
+    .section.active-section .dash-kpis > .stat-card:nth-child(5) { animation-delay: 120ms; }
+    .section.active-section .dash-kpis > .stat-card:nth-child(n+6) { animation-delay: 150ms; }
+
+    #recordsTableBody.rows-enter > tr:nth-child(-n+8) {
+        animation: miRise var(--dur-base) var(--ease-out-smooth) both;
+    }
+    #recordsTableBody.rows-enter > tr:nth-child(2) { animation-delay: 25ms; }
+    #recordsTableBody.rows-enter > tr:nth-child(3) { animation-delay: 50ms; }
+    #recordsTableBody.rows-enter > tr:nth-child(4) { animation-delay: 75ms; }
+    #recordsTableBody.rows-enter > tr:nth-child(5) { animation-delay: 100ms; }
+    #recordsTableBody.rows-enter > tr:nth-child(6) { animation-delay: 125ms; }
+    #recordsTableBody.rows-enter > tr:nth-child(7) { animation-delay: 150ms; }
+    #recordsTableBody.rows-enter > tr:nth-child(8) { animation-delay: 175ms; }
+
+    /* 2) ومضة تأكيد على صف السجل + نبضة رقم السجل (بعد الحفظ أو تغيير الحالة) */
+    tr.row-flash > td { position: relative; }
+    tr.row-flash > td::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: color-mix(in srgb, #2e8b57 22%, transparent);
+        pointer-events: none;
+        animation: miFlash 900ms var(--ease-out-smooth) both;
+    }
+    tr.row-flash .record-tag,
+    .mi-pulse {
+        animation: miPulse 420ms var(--ease-out-smooth) both;
+    }
+
+    /* 3) نوافذ التأكيد: فتح ناعم موحّد (الإغلاق فوري حتى لا يتأخر القرار) */
+    .app-dialog[open] { animation: miPop var(--dur-base) var(--ease-out-smooth) both; }
+    .app-dialog[open]::backdrop { animation: miFade var(--dur-base) linear both; }
+    #recordModal:not(.hidden) .modal-content { animation: miPop var(--dur-base) var(--ease-out-smooth) both; }
+
+    /* 4) استجابة اللمس: انضغاط بلا تغيير في أبعاد الأهداف (transform لا يغيّر التخطيط) */
+    .stat-card, .cr-pin, .date-chip, .admin-tab, .tab-btn, .reveal-toggle, .pref-seg label,
+    .act-btn, .primary-btn, .secondary-btn, .danger-btn, .success-btn, .number-btn, .chip, .choice-chip {
+        transition-property: background-color, border-color, color, box-shadow, opacity, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease-out-smooth);
+    }
+    .stat-card:active, .cr-pin:active, .date-chip:active, .admin-tab:active, .tab-btn:active,
+    .reveal-toggle:active, .pref-seg label:active, .number-btn:active, .chip:active, .choice-chip:active {
+        transform: scale(0.97);
+    }
+
+    /* 6) الإشعار ينزلق بتوقيت موحّد */
+    .app-toast { transition: opacity var(--dur-base) var(--ease-out-smooth), transform var(--dur-base) var(--ease-out-smooth); }
+
+    /* View Transitions بين صفحات القائمة (من script.js عند النقر على التبويبات فقط) */
+    ::view-transition-old(root) { animation: miFadeOut var(--dur-fast) var(--ease-out-smooth) both; }
+    ::view-transition-new(root) { animation: miRise var(--dur-base) var(--ease-out-smooth) both; }
+}
+
+@keyframes miRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes miFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes miFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes miPop { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes miFlash { 0% { opacity: 0; } 18% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes miPulse { 0% { transform: scale(1); } 40% { transform: scale(1.12); } 100% { transform: scale(1); } }
+@keyframes miShimmer { from { transform: translateX(100%); } to { transform: translateX(-100%); } }
+@keyframes miBar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+/* على الجوال تبقى النوافذ لوحاً سفلياً ينزلق للأعلى */
+@media screen and (max-width: 640px) and (prefers-reduced-motion: no-preference) {
+    .app-dialog[open] { animation: sheetUp var(--dur-base) var(--ease-out-smooth) both; }
+}
+
+/* 5) Skeleton هادئ: لحظة فتح البرنامج (قراءة السجلات قبل التشغيل)، ومزامنة Firebase */
+.boot-skeleton { display: none; }
+
+.app-booting #loginPage { visibility: hidden; }
+
+.app-booting .boot-skeleton {
+    position: fixed;
+    inset: 0;
+    z-index: 4000;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 24px;
+    padding: 24px;
+    background: var(--bg, var(--surface));
+    overflow: hidden;
+}
+
+.boot-skeleton .sk-main { display: grid; gap: 16px; align-content: start; }
+.boot-skeleton .sk-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.boot-skeleton .sk-side { border-radius: var(--r-lg); background: var(--panel); opacity: 0.9; }
+
+.sk-block {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--line) 55%, var(--surface));
+}
+
+.sk-block::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, #ffffff 45%, transparent), transparent);
+    transform: translateX(100%);
+}
+
+[data-theme="dark"] .sk-block::after { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent); }
+
+.sk-title { height: 44px; width: 45%; }
+.sk-card { height: 92px; }
+.sk-wide { height: 220px; }
+.sk-line { height: 14px; width: 70%; }
+
+@media screen and (prefers-reduced-motion: no-preference) {
+    .sk-block::after { animation: miShimmer 1.4s ease-in-out infinite; }
+    .is-fb-syncing #fbStatus { position: relative; overflow: hidden; }
+    .is-fb-syncing #fbStatus::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 30%, transparent), transparent);
+        animation: miShimmer 1.2s ease-in-out infinite;
+    }
+}
+
+@media (max-width: 1024px) {
+    .app-booting .boot-skeleton { grid-template-columns: minmax(0, 1fr); }
+    .boot-skeleton .sk-side { display: none; }
+}
+
+@media (max-width: 640px) {
+    .boot-skeleton .sk-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .app-booting .boot-skeleton { padding: 16px; }
+}
+
+/* 6) شريط المدة في الإشعار (يتقلّص خلال مدة ظهوره) */
+.app-toast { overflow: hidden; }
+.toast-progress {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 3px;
+    background: color-mix(in srgb, #ffffff 55%, transparent);
+    transform-origin: right center;
+    transform: scaleX(0);
+    pointer-events: none;
+}
+
+@media screen and (prefers-reduced-motion: no-preference) {
+    .app-toast.show .toast-progress { animation: miBar var(--toast-ms, 4000ms) linear both; }
+}
+
+/* «تقليل الحركة» من النظام: لا حركة جديدة إطلاقاً */
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+    .toast-progress { display: none; }
+}
+
+/* حماية التقارير والطباعة وملف PDF: لا حركة ولا شفافية ابتدائية داخلها */
+#printRoot *, .pdf-capture * { animation: none !important; transition: none !important; }
+@media print {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .boot-skeleton, .toast-progress { display: none !important; }
+}
+
+/* 320px مع تكبير الخط (اكتُشف في اختبار الحركات، وكان قبلها): لا تمرير أفقي */
+.devlog-team { min-width: 0; }
+.devlog-person { min-width: 0; }
+.devlog-person > div { min-width: 0; }
+.devlog-person small a { overflow-wrap: anywhere; word-break: break-word; }
+
+@media (max-width: 640px) {
+    .button-row > .secondary-btn,
+    .button-row > .primary-btn { white-space: normal; max-width: 100%; height: auto; min-height: 44px; }
+}
+@media (max-width: 640px) { .devlog-team { grid-template-columns: minmax(0, 1fr); } .devlog-person b { overflow-wrap: anywhere; } }
+.devlog-stats > div { min-width: 0; }
+.devlog-stats b { overflow-wrap: anywhere; }
+
+/* ================= ترويسة التقارير: أسطر + شعار + ثلاثة أشكال (27/11/2026) ================= */
+.doc-head.doc-head-official,
+.doc-head.doc-head-center {
+    display: block;
+    text-align: center;
+}
+
+.doc-head-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 12px;
+}
+
+.doc-head-center .doc-head-top { flex-direction: column; justify-content: center; gap: 8px; }
+
+.doc-org-lines {
+    display: grid;
+    gap: 2px;
+    justify-items: center;
+    text-align: center;
+    min-width: 0;
+}
+
+.doc-head-official .doc-org-lines { flex: 0 1 auto; padding-inline: 8px; }
+
+.doc-org-lines span {
+    font-size: var(--fs-md);
+    font-weight: 600;
+    color: var(--heading);
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+}
+
+.doc-head-logo { flex: none; display: grid; place-items: center; }
+.doc-head-logo .doc-logo,
+.doc-head-logo svg { width: 82px; height: 82px; object-fit: contain; }
+.doc-head-center .doc-head-logo .doc-logo,
+.doc-head-center .doc-head-logo svg { width: 72px; height: 72px; }
+
+.doc-head-official .doc-title,
+.doc-head-center .doc-title {
+    text-align: center;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+
+.doc-head-official .doc-title h2,
+.doc-head-center .doc-title h2 { font-size: var(--fs-xl); }
+
+/* الشكل السابق مع شعار الفرع */
+.doc-head > .doc-logo-branch { width: 64px; height: 64px; object-fit: contain; }
+
+@media print {
+    #printRoot .doc-head-logo .doc-logo,
+    #printRoot .doc-head-logo svg { width: calc(76px * var(--doc-scale, 1)); height: calc(76px * var(--doc-scale, 1)); }
+    #printRoot .doc-org-lines span { font-size: calc(14px * var(--doc-scale, 1)); }
+}
+
+.pdf-capture .doc-head-logo .doc-logo,
+.pdf-capture .doc-head-logo svg { width: 76px; height: 76px; }
+
+@media (max-width: 640px) {
+    .doc-head-official .doc-head-top { gap: 10px; }
+    .doc-head-logo .doc-logo, .doc-head-logo svg { width: 60px; height: 60px; }
+    .doc-org-lines span { font-size: var(--fs-sm); }
+}
+
+/* محرر الأسطر والمعاينة في «نصوص التقارير والترويسة» */
+.head-setting {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 16px;
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+
+.head-editor { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.head-editor > b { color: var(--heading); }
+.head-editor > b small { font-weight: 400; color: var(--text-2); }
+.head-layout-title { margin-top: 6px; }
+.head-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.head-lines li { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.head-lines input { flex: 1; min-width: 0; }
+.head-line-actions { display: inline-flex; gap: 2px; flex: none; }
+.head-line-actions .icon-btn { min-width: 34px; height: 34px; }
+.head-layouts { flex-wrap: wrap; border-radius: var(--r-md); }
+
+.head-preview-box { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.head-preview-box > small { color: var(--text-2); }
+.head-preview {
+    padding: 14px;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-md);
+    background: #ffffff;
+    color: #1c1c1e;
+    overflow: hidden;
+}
+.head-preview .doc-head { margin-bottom: 0; }
+
+@media (max-width: 1024px) {
+    .head-setting { grid-template-columns: minmax(0, 1fr); }
+}
+.doc-head-top { padding-top: 6px; }

@@ -226,7 +226,8 @@ check("نصوص الترويسة والبيان من الإعدادات، وال
     saveData(REPORT_TEXTS_KEY, normalizeReportTexts({ org: "نقابة اختبار", unit: "", to: "السيد رئيس الفرع المحترم،", greeting: "", auditor: "لجنة التدقيق", shortageTitle: "", closing: "مع التقدير." }));
     reportTexts = normalizeReportTexts(loadData(REPORT_TEXTS_KEY, null));
     const a = buildFinalRecordReport(r, "summary", true);
-    const okA = a.indexOf("<strong>نقابة اختبار</strong>") !== -1 && a.indexOf("فرع إدلب — مكتب المحاسبة</span>") === -1 &&
+    /* 27/11/2026: org/unit المخصّصان يصيران أسطر الترويسة (headLines) إن لم تُحفظ أسطر */
+    const okA = a.indexOf("<span>نقابة اختبار</span>") !== -1 && a.indexOf("فرع إدلب — مكتب المحاسبة</span>") === -1 &&
         a.indexOf("السيد رئيس الفرع المحترم،") !== -1 && a.indexOf("تحية طيبة") === -1 && a.indexOf("نفيدكم بأن لجنة التدقيق") !== -1 &&
         a.indexOf("بيان استدراك النقص") !== -1 /* العنوان الفارغ يعود للافتراضي */ && a.indexOf("مع التقدير.") !== -1 &&
         a.indexOf("السادة مجلس النقابة المركزية") === -1;
@@ -252,11 +253,38 @@ check("الشعار: صورة من الجهاز تظهر في الترويسة،
     reportTexts = normalizeReportTexts(Object.assign({}, reportTexts, { logoMode: "none" }));
     const b = buildFinalRecordReport(r, "summary", true);
     const bad = normalizeReportTexts({ logoMode: "custom", logo: "javascript:alert(1)" });
+    const defBranch = normalizeReportTexts({}).logoMode === "branch";
     reportTexts = normalizeReportTexts(DEFAULT_REPORT_TEXTS);
     const c = buildFinalRecordReport(r, "summary", true);
-    return a.indexOf('class="doc-logo" src="data:image/png') !== -1 && b.indexOf("doc-logo") === -1 && b.indexOf("doc-head no-logo") !== -1 &&
-        bad.logo === "" && bad.logoMode === "default" && c.indexOf("doc-logo") === -1;
+    return a.indexOf('class="doc-logo" src="data:image/png') !== -1 && b.indexOf("doc-logo") === -1 && /class="doc-head[^"]*no-logo/.test(b) &&
+        bad.logo === "" && bad.logoMode === "branch" && defBranch && c.indexOf("doc-logo-branch") !== -1;
 }));
+
+/* 7هـ2) أسطر الترويسة وأشكالها (27/11/2026) */
+check("أسطر الترويسة: الافتراضية 4، وتُضاف وتُحذف، والأشكال الثلاثة", await ev(function () {
+    const d = normalizeReportTexts({});
+    const okDef = d.headLines.join("|") === "الجمهورية العربية السورية|نقابة المحامين|فرع إدلب|مكتب المحاسبة" && d.headLayout === "official";
+    const off = docLetterhead("ت", "س", normalizeReportTexts({ headLines: ["سطر أ", "", "سطر ب"], headLayout: "official" }));
+    const cen = docLetterhead("ت", "س", normalizeReportTexts({ headLines: ["سطر أ"], headLayout: "center" }));
+    const cla = docLetterhead("ت", "س", normalizeReportTexts({ headLines: ["سطر أ", "سطر ب"], headLayout: "classic" }));
+    const many = normalizeReportTexts({ headLines: Array.from({ length: 12 }, function (_, i) { return "س" + i; }) }).headLines.length;
+    return okDef && /doc-head-official/.test(off) && (off.match(/<span>سطر/g) || []).length === 2 &&
+        off.indexOf("سطر أ") < off.indexOf("doc-head-logo") && /doc-head-center/.test(cen) && cen.indexOf("doc-head-logo") < cen.indexOf("سطر أ") &&
+        /<strong>سطر أ<\/strong><span>سطر ب<\/span>/.test(cla) && many === 8;
+}));
+await ev(function () { switchSection("printSettingsSection"); });
+await page.waitForTimeout(300);
+await page.click("#rtAddHeadLine");
+await page.fill("#rtHeadLines li:last-child input", "سطر إضافي");
+await page.click('#rtHeadLines li:first-child [data-head-del]');
+await page.click('label:has(input[name="rtHeadLayout"][value="center"])');
+const prevHead = await ev(function () { return document.getElementById("rtHeadPreview").innerHTML; });
+await page.click("#saveReportTextsBtn");
+await page.waitForTimeout(300);
+const savedHead = await ev(function () { return JSON.parse(localStorage.getItem("audit_report_texts")); });
+check("محرر الأسطر: إضافة وحذف وتغيير الشكل يظهر في المعاينة ويُحفظ", /سطر إضافي/.test(prevHead) && /doc-head-center/.test(prevHead) &&
+    savedHead.headLines[0] === "نقابة المحامين" && savedHead.headLines[savedHead.headLines.length - 1] === "سطر إضافي" && savedHead.headLayout === "center", JSON.stringify(savedHead && savedHead.headLines));
+await ev(function () { saveData(REPORT_TEXTS_KEY, normalizeReportTexts({})); reportTexts = normalizeReportTexts({}); });
 
 /* 7و) النوع الغالب في السجل: الوكالة الجديدة تأخذه، ويُحفظ مع السجل */
 await ev(function () { closeRecordModal(true); switchSection("newRecordSection"); resetRecordForm(); });
